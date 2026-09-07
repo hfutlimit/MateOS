@@ -1,0 +1,40 @@
+/* ============================================================
+   MateOS Design Tokens · 单一事实来源
+   由《MateOS UI Design System》§3 定义（v0.3 起）。
+   三张原型（P3/P4/P5）统一引用本文件，页面内禁止再定义颜色。
+   ============================================================ */
+:root{
+  /* 中性 */
+  --bg:#FFFFFF; --surface:#FAFAF9; --surface-2:#F4F3F1; --hover:#FBFAF9;
+  --border:#E5E3E0; --border-strong:#D3D1C7;
+  /* 文本 */
+  --text:#1C1B19; --text-body:#2C2B29; --text-2:#6B6A66; --text-3:#736F6A;
+  /* 主色（AI）：Agent 相关的一切、主按钮 */
+  --primary:#534AB7; --primary-50:#EEEDFE; --primary-100:#CECBF6;
+  /* 语义色：状态圆点 / 浅底 / 边框 / 深文字（文字色均满足 AA on 浅底） */
+  --free:#1D9E75;      --free-bg:#E1F5EE;   --free-border:#9FE1CB; --free-text:#0F6E56;
+  --busy:#378ADD;      --busy-bg:#E6F1FB;                          --busy-text:#185FA5;
+  --thinking:#7F77DD;
+  --waiting:#EF9F27;   --waiting-bg:#FAEEDA;                       --waiting-text:#854F0B;
+  --waiting-dot:#BA7517; /* 圆点专用深琥珀，白底 ≥3:1 */
+  --error:#E24B4A;     --error-bg:#FCEBEB;  --error-border:#F7C1C1; --error-text:#A32D2D;
+  --offline:#888780;
+  /* 代码 / Agent 输出 */
+  --code-text:#33322F;
+  /* 圆角：控件 6 / 卡片 8 / 容器 12 / 外层 16 */
+  --radius-ctl:6px; --radius-card:8px; --radius-box:12px; --radius-xl:16px;
+  /* 阴影：仅浮层使用 */
+  --shadow-pop:0 8px 24px rgba(0,0,0,.08);
+  --shadow-layer:0 12px 32px rgba(0,0,0,.10);
+  /* 字体 */
+  --font:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  --mono:"JetBrains Mono",Consolas,"Courier New",monospace;
+}
+
+/* ---------- 共享基础样式（无障碍兜底，DS §7）---------- */
+/* 所有可交互元素的焦点环：2px 主色，offset 2px */
+:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+/* 尊重系统"减少动态效果"偏好：呼吸点/打字动画等全部静止 */
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{animation:none!important;transition:none!important}
+}

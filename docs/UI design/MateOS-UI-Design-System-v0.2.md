@@ -1,12 +1,15 @@
-# MateOS UI Design System v0.2
+# MateOS UI Design System v0.3
 
 | 文档信息 | 内容 |
 | --- | --- |
-| 版本 | v0.2（基于 UI Guidelines v0.1 收敛） |
+| 版本 | v0.3（v0.2 评审修订版，文件名保留 v0.2） |
 | 日期 | 2026-09-07 |
-| 上游 | `docs/requirement/MateOS-总体需求文档.md` (PRD v0.1)、MateOS UI Design Guidelines v0.1 |
+| 上游 | `docs/requirement/MateOS-总体需求文档.md` (PRD v0.2)、MateOS UI Design Guidelines v0.1 |
 | 配套原型 | `P3-agent-card.html` / `P4-project-dashboard.html` / `P5-channel-prototype.html` |
+| 设计令牌 | `tokens.css`（**单一事实来源**，三张原型统一引用；本文件 §3 为其文档化子集） |
 | 状态 | 待评审 |
+
+> **v0.3 修订要点**（详见文末「更新记录」）：令牌收敛到 `tokens.css`；字号下限收敛为 10px（限标签/徽标类）；三页共用同一演示数据集；a11y 焦点环与 reduced-motion 已在原型落地；凭据展示与 PRD v0.2 的「Credential 与 Agent 分离」对齐。
 
 ---
 
@@ -42,14 +45,18 @@
 | 中性 | `--bg` | `#FFFFFF` | 主内容区 |
 | | `--surface` | `#FAFAF9` | 侧栏、面板、卡片头 |
 | | `--surface-2` | `#F4F3F1` | hover、次要填充 |
+| | `--hover` | `#FBFAF9` | 消息行 hover |
 | | `--border` | `#E5E3E0` | 默认 0.5px 分割线 |
 | | `--border-strong` | `#D3D1C7` | 输入框、按钮 |
 | 文本 | `--text` | `#1C1B19` | 正文、标题 |
+| | `--text-body` | `#2C2B29` | 消息正文（比标题软一档） |
 | | `--text-2` | `#6B6A66` | 次要文本 |
 | | `--text-3` | `#736F6A` | 时间戳、提示（**v0.1 的 `#9C9B96` 未达 AA，已修正**） |
 | 主色（AI） | `--primary` | `#534AB7` | Agent 相关的一切、主按钮 |
 | | `--primary-50` | `#EEEDFE` | Agent 卡片底、选中态 |
 | | `--primary-100` | `#CECBF6` | Agent 头像描边 |
+
+> 完整令牌以 **`tokens.css` 为单一事实来源**，上表为核心子集。v0.3 新增并在 `tokens.css` 落位：每个语义色配套的 `*-bg` / `*-border` / `*-text` 三件套（如 `--free-bg` `--free-border` `--free-text`）、`--waiting-dot`（白底 ≥3:1 的深琥珀圆点）、`--code-text`、圆角变量 `--radius-ctl/-card/-box/-xl`（对应 §3.5 四档）、浮层阴影 `--shadow-pop` / `--shadow-layer`。页面内**禁止**再定义颜色。
 
 ### 3.2 语义色（Agent 状态）
 
@@ -89,14 +96,17 @@
 | H3 | 14px / 1.5 | 频道名、卡片标题 |
 | Body | 13px / 1.6 | 消息正文、列表 |
 | Caption | 12px / 1.6 | 次级信息 |
-| Micro | 11px / 1.7~1.9 | 时间戳、提示、图例（**下限，不得更小**） |
+| Micro | 11px / 1.7~1.9 | 时间戳、提示、图例（**正文性文字下限**） |
+| Label | 10px / 1~1.5 | 能力标签、徽标、状态 chip、下拉分组标题（**仅限非正文元素**） |
+
+> v0.2 曾定 Micro 11px 为全局下限，与原型的 10px 标签冲突。v0.3 收敛为两档下限：**正文性文字 ≥11px，标签/徽标类装饰性元素 ≥10px**；10px 不用于任何需要连续阅读的文字。
 
 ### 3.5 间距 / 圆角 / 阴影
 
 - 基准 **4px**，梯度 4 / 8 / 12 / 16 / 24 / 32。组件内部用 8 / 12，区块之间用 16 / 24。
-- 圆角：控件 6px、卡片 8px、容器 12px、外层 16px；**Agent 头像用圆形，人类头像用 6px 圆角方**（形状即身份）。
-- 边框统一 `0.5px`，暗色描边仅用于强调。
-- 阴影只在浮层使用（弹层 `0 8px 24px rgba(0,0,0,.08)`），卡片一律靠边框分层。
+- 圆角：控件 6px（`--radius-ctl`）、卡片 8px（`--radius-card`）、容器 12px（`--radius-box`）、外层 16px（`--radius-xl`）；**Agent 头像用圆形，人类头像用 6px 圆角方**（形状即身份）。
+- 边框统一 `0.5px`，暗色描边仅用于强调。**待验证项**：`0.5px` 在高 DPI 屏渲染为 1px 没问题，但在 **Windows 1x DPI** 下部分浏览器会取整或发虚，需真机验证后再定稿（主力用户环境为 win32）。
+- 阴影只在浮层使用（弹层 `--shadow-pop`、深浮层 `--shadow-layer`），卡片一律靠边框分层。
 
 ---
 
@@ -175,10 +185,10 @@
 ## 7. 无障碍
 
 - **对比度**：正文 ≥4.5:1，状态圆点等非文本 UI ≥3:1（见 §3.3，已全部校验）。
-- **键盘**：Mention 下拉支持 ↑↓ 选择 / Enter 确认 / Esc 关闭；审批卡片三个按钮可 Tab 到达。
-- **焦点**：所有可交互元素有 2px 主色 focus ring，offset 2px。
+- **键盘**：Mention 下拉支持 ↑↓ 选择 / Enter 确认 / Esc 关闭；审批卡片三个按钮可 Tab 到达。（**已知缺口**：原型 P5 尚未实现 @ 下拉的键盘导航，属于交付前端前的组件级要求）
+- **焦点**：所有可交互元素有 2px 主色 focus ring，offset 2px。（v0.3 起已通过 `tokens.css` 的 `:focus-visible` 兜底规则在原型落地）
 - **不靠颜色单独传达状态**：状态点必须配文字标签（右栏、Agent Card 均已带）。
-- **动效**：呼吸动画与流式光标包在 `@media (prefers-reduced-motion: no-preference)` 内。
+- **动效**：呼吸动画与流式光标尊重 `prefers-reduced-motion`。（v0.3 起已通过 `tokens.css` 的 reduce 查询在原型落地）
 - **触控目标**：最小 24×24px（桌面端），关键按钮 28px 高。
 
 ---
@@ -215,4 +225,25 @@ Message · Decision · CollaborationRequest · Memory · Approval
 1. 评审并确认 §2 的 6 条冲突裁决。
 2. 补 P6 审批中心、P2 我的 Agents、P7 Memory 文档三个原型的线框。
 3. 出组件切图与状态清单，交付前端。
-4. 如采用设计工具（Figma），把 §3 令牌同步为 Variables，避免二次漂移。
+4. 如采用设计工具（Figma），把 `tokens.css` 同步为 Variables，避免二次漂移。
+
+---
+
+## 11. 更新记录
+
+### v0.3（2026-09-07，评审修订）
+
+三张原型逐行走查后发现的问题及修复，原则：**规范与实现二选一必须收敛，不留互相矛盾**。
+
+1. **令牌单一来源**：新增 `tokens.css`，三页删除各自的 `:root` 重复定义；P5 私有的 `--waiting-50`/`--error-50`/`--radius` 升格为全局 token（`--waiting-bg`/`--error-bg`/`--radius-card` 等），并回写登记到 §3.1；页面内硬编码色（`#FBFAF9`、`#2C2B29`、`#33322F`、`#9FE1CB`、语义色三件套等）全部 token 化。
+2. **字号下限收敛**（§3.4）：v0.2 的「Micro 11px 不得更小」与原型大量 10px 标签冲突，裁决为两档下限——正文 ≥11px、标签/徽标 ≥10px；P5 导航徽标 9px 抬到 10px。
+3. **统一演示数据集**：三页此前各说各话（频道列表、成员数、Agent 数互不一致）。现约定唯一 fixture——Payment 团队 / 支付重构项目：成员 7（人类 Jason/Tom/Lucy/Emma + Agent Backend/QA/Architecture）、频道 5（general/webhook-retry/checkout-api/payment-feature/architecture）、记忆 79（决策 23 · 知识 56 · 待审批 3）、Security Agent 邀请中。P3 可见范围与时间线矛盾（#checkout-api 标「未加入」却在该频道做过 Reject 决策）同步修正。
+4. **a11y 兑现**（§7）：`tokens.css` 内置 `:focus-visible` 焦点环与 `prefers-reduced-motion` 兜底，v0.2 承诺但未落地的两项补齐；@ 下拉键盘导航标记为已知缺口。
+5. **圆角档位回归**：P5 的 composer 输入框 10px→8px（卡片档）、@ 弹层 10px→12px（容器档），全部改用 §3.5 变量。
+6. **对齐 PRD v0.2**：P3 运行配置的「API Key」行改为「凭据：引用组织凭据·独立管理」，落实 Credential 与 Agent 分离；上游引用从 PRD v0.1 升到 v0.2。
+7. **原型细节**：P4「待审批 3」进度条从 100% 改为 3/79（同组件同语义）；P5 Agent 头像不再硬编码"B"，按名称取首字母；驳回记忆只移除目标卡片并生成系统事件、顶栏与待办计数联动；Agent 输出平铺处加注「演示取舍，正式实现按 thread 折叠」；P3 请求数 184 对齐决策分布合计 84。
+8. **待验证**：`0.5px` 边框在 Windows 1x DPI 的渲染表现（§3.5），需真机验证。
+
+### v0.2（2026-09-07）
+
+初版：6 条冲突裁决、令牌体系、6 态状态机、5 形态消息流、MVP 8 页面清单。

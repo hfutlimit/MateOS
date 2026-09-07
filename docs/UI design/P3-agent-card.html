@@ -4,16 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>MateOS · Agent Card 原型 P3</title>
+<link rel="stylesheet" href="tokens.css">
 <style>
-:root{
-  --bg:#FFFFFF; --surface:#FAFAF9; --surface-2:#F4F3F1;
-  --border:#E5E3E0; --border-strong:#D3D1C7;
-  --text:#1C1B19; --text-2:#6B6A66; --text-3:#736F6A;
-  --primary:#534AB7; --primary-50:#EEEDFE; --primary-100:#CECBF6;
-  --free:#1D9E75; --busy:#378ADD; --thinking:#7F77DD; --waiting:#EF9F27; --error:#E24B4A; --offline:#888780;
-  --font:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
-  --mono:"JetBrains Mono",Consolas,"Courier New",monospace;
-}
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:var(--font);font-size:13px;color:var(--text);background:var(--bg);height:100vh;display:flex;flex-direction:column;overflow:hidden;-webkit-font-smoothing:antialiased}
 button{font-family:inherit;font-size:12px;cursor:pointer;background:transparent;border:none;color:inherit}
@@ -29,7 +21,7 @@ button{font-family:inherit;font-size:12px;cursor:pointer;background:transparent;
 .tb-right{display:flex;align-items:center;gap:6px;margin-left:auto}
 .icon-btn{height:28px;padding:0 9px;border:0.5px solid var(--border);border-radius:6px;color:var(--text-2);display:flex;align-items:center;gap:6px;background:var(--bg)}
 .bell{position:relative}
-.bell .dot{position:absolute;top:-4px;right:-4px;min-width:15px;height:15px;border-radius:8px;background:#E24B4A;color:#fff;font-size:10px;display:flex;align-items:center;justify-content:center;padding:0 4px}
+.bell .dot{position:absolute;top:-4px;right:-4px;min-width:15px;height:15px;border-radius:8px;background:var(--error);color:#fff;font-size:10px;display:flex;align-items:center;justify-content:center;padding:0 4px}
 .avatar{width:24px;height:24px;border-radius:50%;background:var(--primary-100);color:var(--primary);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:500}
 
 .shell{flex:1;display:flex;min-height:0}
@@ -52,7 +44,7 @@ button{font-family:inherit;font-size:12px;cursor:pointer;background:transparent;
 .item.active{background:var(--bg);color:var(--text);font-weight:500;box-shadow:inset 0 0 0 0.5px var(--border)}
 .dot{width:7px;height:7px;border-radius:50%;flex:none;display:inline-block}
 .dot.free{background:var(--free)} .dot.busy{background:var(--busy)} .dot.thinking{background:var(--thinking)}
-.dot.waiting{background:#BA7517} .dot.error{background:var(--error)} .dot.offline{background:var(--offline)}
+.dot.waiting{background:var(--waiting-dot)} .dot.error{background:var(--error)} .dot.offline{background:var(--offline)}
 
 .main{flex:1;overflow-y:auto;padding:20px 24px 32px}
 .crumb{font-size:11px;color:var(--text-3);margin-bottom:10px}
@@ -62,10 +54,10 @@ button{font-family:inherit;font-size:12px;cursor:pointer;background:transparent;
 .hero-main{flex:1;min-width:0}
 .hero-nm{font-size:17px;font-weight:500;display:flex;align-items:center;gap:9px;flex-wrap:wrap}
 .pill{font-size:11px;border-radius:5px;padding:1px 8px;border:0.5px solid;display:inline-flex;align-items:center;gap:5px}
-.pill.w{color:#854F0B;border-color:#EF9F27;background:#FAEEDA}
-.pill.g{color:#0F6E56;border-color:#1D9E75;background:#E1F5EE}
-.pill.b{color:#185FA5;border-color:#378ADD;background:#E6F1FB}
-.pill.r{color:#A32D2D;border-color:#E24B4A;background:#FCEBEB}
+.pill.w{color:var(--waiting-text);border-color:var(--waiting);background:var(--waiting-bg)}
+.pill.g{color:var(--free-text);border-color:var(--free);background:var(--free-bg)}
+.pill.b{color:var(--busy-text);border-color:var(--busy);background:var(--busy-bg)}
+.pill.r{color:var(--error-text);border-color:var(--error);background:var(--error-bg)}
 .pill.n{color:var(--text-3);border-color:var(--border-strong);background:var(--surface-2)}
 .hero-sub{font-size:12px;color:var(--text-2);margin-top:6px;display:flex;gap:14px;flex-wrap:wrap}
 .hero-sub b{color:var(--text);font-weight:500}
@@ -220,13 +212,14 @@ button{font-family:inherit;font-size:12px;cursor:pointer;background:transparent;
         </div>
 
         <div class="card">
-          <div class="card-h"><span class="t">可见范围</span><span class="c">1 项目 · 3 频道</span><span class="more">调整</span></div>
+          <div class="card-h"><span class="t">可见范围</span><span class="c">1 项目 · 5 频道</span><span class="more">调整</span></div>
           <div class="card-b" style="padding:6px 14px 10px">
-            <div class="scope"><span class="dot free"></span><span>支付重构（项目）· owner 已授权</span><span class="r">4 频道中可见 3</span></div>
+            <div class="scope"><span class="dot free"></span><span>支付重构（项目）· owner 已授权</span><span class="r">5 频道中可见 4</span></div>
             <div class="scope"><span class="dot free"></span><span>#webhook-retry</span><span class="r">加入后可见</span></div>
             <div class="scope"><span class="dot free"></span><span>#payment-feature</span><span class="r">加入后可见</span></div>
+            <div class="scope"><span class="dot free"></span><span>#checkout-api</span><span class="r">加入后可见</span></div>
             <div class="scope"><span class="dot free"></span><span>#architecture</span><span class="r">已授权读历史</span></div>
-            <div class="scope"><span class="dot offline"></span><span>#checkout-api</span><span class="r">未加入</span></div>
+            <div class="scope"><span class="dot offline"></span><span>#general</span><span class="r">未加入</span></div>
             <div class="note" style="margin-top:8px">默认只能读取加入之后的消息；读取历史需 owner 单独授权。Agent owner 决定可参与的项目，频道 owner 发起邀请后再由 Agent owner 审批。</div>
           </div>
         </div>
@@ -236,7 +229,7 @@ button{font-family:inherit;font-size:12px;cursor:pointer;background:transparent;
         <div class="card">
           <div class="card-h"><span class="t">用量与成本</span><span class="more">本月</span></div>
           <div class="card-b">
-            <div class="costrow"><span>累计请求</span><span class="v">184</span></div>
+            <div class="costrow"><span>累计请求</span><span class="v">84</span></div>
             <div class="costrow"><span>输入 tokens</span><span class="v">412k</span></div>
             <div class="costrow"><span>输出 tokens</span><span class="v">96k</span></div>
             <div class="costrow"><span>平均延迟</span><span class="v">6.4s</span></div>
@@ -252,7 +245,7 @@ button{font-family:inherit;font-size:12px;cursor:pointer;background:transparent;
             <div class="kv"><span class="k">Provider</span><span class="v">Anthropic</span></div>
             <div class="kv"><span class="k">Model</span><span class="v">claude-opus-4</span></div>
             <div class="kv"><span class="k">Runtime</span><span class="v">MateOS 内置（MVP 不执行代码）</span></div>
-            <div class="kv"><span class="k">API Key</span><span class="v">sk-ant-****3f2a（已加密）</span></div>
+            <div class="kv"><span class="k">凭据</span><span class="v">引用组织凭据「Anthropic 工作区」· 独立管理，与 Agent 解耦</span></div>
             <div class="kv"><span class="k">日限额</span><span class="v">$5.00 / 天</span></div>
           </div>
         </div>

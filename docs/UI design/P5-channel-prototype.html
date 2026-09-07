@@ -4,32 +4,8 @@
 <meta charset="UTF-8" data-page-node-id="AvaEA8WqFEAfxInFkC0dk1">
 <meta name="viewport" content="width=device-width, initial-scale=1.0" data-page-node-id="wOWkEjtZi7l7JXadTRjGzs">
 <title>MateOS · Channel 主界面原型 P5</title>
+<link rel="stylesheet" href="tokens.css">
 <style>
-:root{
-  --bg:#FFFFFF;
-  --surface:#FAFAF9;
-  --surface-2:#F4F3F1;
-  --border:#E5E3E0;
-  --border-strong:#D3D1C7;
-  --text:#1C1B19;
-  --text-2:#6B6A66;
-  --text-3:#736F6A;
-  --primary:#534AB7;
-  --primary-50:#EEEDFE;
-  --primary-100:#CECBF6;
-  --free:#1D9E75;
-  --busy:#378ADD;
-  --thinking:#7F77DD;
-  --waiting:#EF9F27;
-  --waiting-50:#FAEEDA;
-  --error:#E24B4A;
-  --error-50:#FCEBEB;
-  --offline:#888780;
-  --radius:8px;
-  --radius-lg:12px;
-  --font:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
-  --mono:"JetBrains Mono",Consolas,"Courier New",monospace;
-}
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:var(--font);font-size:13px;color:var(--text);background:var(--bg);height:100vh;display:flex;flex-direction:column;overflow:hidden;-webkit-font-smoothing:antialiased}
 button{font-family:inherit;font-size:12px;cursor:pointer;background:transparent;border:none;color:inherit}
@@ -50,7 +26,7 @@ button{font-family:inherit;font-size:12px;cursor:pointer;background:transparent;
 .icon-btn{height:28px;padding:0 9px;border:0.5px solid var(--border);border-radius:6px;color:var(--text-2);display:flex;align-items:center;gap:6px;background:var(--bg)}
 .icon-btn:hover{border-color:var(--border-strong);color:var(--text)}
 .bell{position:relative}
-.bell .dot{position:absolute;top:-4px;right:-4px;min-width:15px;height:15px;border-radius:8px;background:#E24B4A;color:#fff;font-size:10px;display:flex;align-items:center;justify-content:center;padding:0 4px}
+.bell .dot{position:absolute;top:-4px;right:-4px;min-width:15px;height:15px;border-radius:8px;background:var(--error);color:#fff;font-size:10px;display:flex;align-items:center;justify-content:center;padding:0 4px}
 .avatar{width:24px;height:24px;border-radius:50%;background:var(--primary-100);color:var(--primary);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:500}
 
 /* ---------- shell ---------- */
@@ -62,7 +38,7 @@ button{font-family:inherit;font-size:12px;cursor:pointer;background:transparent;
 .nav-item:hover{background:var(--surface-2);color:var(--text-2)}
 .nav-item.active{background:var(--primary-50);color:var(--primary)}
 .nav-item svg{width:16px;height:16px}
-.nav-item .nb{position:absolute;top:2px;right:4px;min-width:14px;height:14px;border-radius:7px;background:#E24B4A;color:#fff;font-size:9px;display:flex;align-items:center;justify-content:center;padding:0 3px}
+.nav-item .nb{position:absolute;top:2px;right:4px;min-width:14px;height:14px;border-radius:7px;background:var(--error);color:#fff;font-size:10px;display:flex;align-items:center;justify-content:center;padding:0 3px}
 .nav-spacer{flex:1}
 .nav-item.avatar{width:26px;height:26px;padding:0;border-radius:50%;background:var(--primary-100);color:var(--primary);font-size:11px;font-weight:500}
 
@@ -95,7 +71,7 @@ button{font-family:inherit;font-size:12px;cursor:pointer;background:transparent;
 .ch-actions{margin-left:auto;display:flex;gap:6px}
 .stream{flex:1;overflow-y:auto;padding:14px 0 8px}
 .msg{padding:3px 16px;position:relative}
-.msg:hover{background:#FBFAF9}
+.msg:hover{background:var(--hover)}
 .msg.gap{margin-top:10px}
 .divider{display:flex;align-items:center;gap:10px;padding:8px 16px}
 .divider .line{flex:1;height:0.5px;background:var(--border)}
@@ -109,22 +85,22 @@ button{font-family:inherit;font-size:12px;cursor:pointer;background:transparent;
 .who .time{font-size:11px;color:var(--text-3)}
 .chip{font-size:10px;border-radius:4px;padding:1px 5px;border:0.5px solid var(--border-strong);color:var(--text-3)}
 .chip.agent{border-color:var(--primary-100);color:var(--primary);background:var(--primary-50)}
-.text{font-size:13px;line-height:1.6;color:#2C2B29}
+.text{font-size:13px;line-height:1.6;color:var(--text-body)}
 .text .ment{color:var(--primary);background:var(--primary-50);border-radius:3px;padding:0 3px;font-weight:500}
-pre{font-family:var(--mono);font-size:12px;line-height:1.6;background:var(--surface);border:0.5px solid var(--border);border-radius:6px;padding:9px 11px;margin-top:7px;overflow-x:auto;color:#33322F}
+pre{font-family:var(--mono);font-size:12px;line-height:1.6;background:var(--surface);border:0.5px solid var(--border);border-radius:6px;padding:9px 11px;margin-top:7px;overflow-x:auto;color:var(--code-text)}
 .msg-meta{margin-top:5px;display:flex;gap:10px;font-size:11px;color:var(--text-3)}
 .msg-meta a{color:var(--text-3);text-decoration:none;border-bottom:0.5px dashed var(--border-strong);cursor:pointer}
 
 /* decision card */
-.decision{border:0.5px solid var(--border);border-left:2px solid var(--waiting);border-radius:var(--radius);padding:9px 11px;background:var(--waiting-50);margin-top:2px}
-.decision.accept{border-left-color:var(--free);background:#E1F5EE;border-color:#9FE1CB}
-.decision.reject{border-left-color:#E24B4A;background:#FCEBEB;border-color:#F7C1C1}
+.decision{border:0.5px solid var(--border);border-left:2px solid var(--waiting);border-radius:var(--radius-card);padding:9px 11px;background:var(--waiting-bg);margin-top:2px}
+.decision.accept{border-left-color:var(--free);background:var(--free-bg);border-color:var(--free-border)}
+.decision.reject{border-left-color:var(--error);background:var(--error-bg);border-color:var(--error-border)}
 .dc-head{display:flex;align-items:center;gap:7px;margin-bottom:5px}
 .dc-badge{font-size:10px;font-weight:500;border-radius:4px;padding:1px 6px;border:0.5px solid;letter-spacing:.02em}
-.dc-badge.need{color:#854F0B;border-color:#BA7517;background:#FAEEDA}
-.dc-badge.accept{color:#0F6E56;border-color:#1D9E75;background:#E1F5EE}
-.dc-badge.reject{color:#A32D2D;border-color:#E24B4A;background:#FCEBEB}
-.dc-reason{font-size:13px;line-height:1.6;color:#2C2B29}
+.dc-badge.need{color:var(--waiting-text);border-color:var(--waiting-dot);background:var(--waiting-bg)}
+.dc-badge.accept{color:var(--free-text);border-color:var(--free);background:var(--free-bg)}
+.dc-badge.reject{color:var(--error-text);border-color:var(--error);background:var(--error-bg)}
+.dc-reason{font-size:13px;line-height:1.6;color:var(--text-body)}
 .dc-list{margin-top:6px;display:flex;flex-direction:column;gap:4px}
 .dc-item{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--text-2);background:rgba(255,255,255,.7);border:0.5px solid var(--border);border-radius:5px;padding:4px 8px}
 .dc-item .idx{width:14px;height:14px;border-radius:50%;background:var(--surface-2);font-size:10px;display:flex;align-items:center;justify-content:center;flex:none;color:var(--text-3)}
@@ -137,7 +113,7 @@ pre{font-family:var(--mono);font-size:12px;line-height:1.6;background:var(--surf
 .dc-cell .bar{height:3px;border-radius:2px;background:var(--surface-2);margin-top:5px;overflow:hidden}
 .dc-cell .bar i{display:block;height:100%;background:var(--waiting)}
 .dc-cell .bar i.ok{background:var(--free)}
-.tick{width:12px;height:12px;border-radius:50%;background:var(--free);color:#fff;font-size:9px;display:flex;align-items:center;justify-content:center;flex:none}
+.tick{width:12px;height:12px;border-radius:50%;background:var(--free);color:#fff;font-size:10px;display:flex;align-items:center;justify-content:center;flex:none}
 .tick.no{background:var(--error)}
 .ch-sub{font-size:11px;color:var(--text-3);margin-top:1px}
 .ch-sub b{color:var(--text-2);font-weight:500}
@@ -150,7 +126,7 @@ pre{font-family:var(--mono);font-size:12px;line-height:1.6;background:var(--surf
 /* system + invite + memory */
 .system{font-size:11px;color:var(--text-3);text-align:center;padding:5px 16px;display:flex;align-items:center;justify-content:center;gap:8px}
 .system .btn{height:22px;padding:0 8px;font-size:11px}
-.memcard{border:0.5px solid var(--primary-100);border-radius:var(--radius);background:var(--primary-50);padding:10px 12px;margin-top:2px}
+.memcard{border:0.5px solid var(--primary-100);border-radius:var(--radius-card);background:var(--primary-50);padding:10px 12px;margin-top:2px}
 .memcard.done{background:var(--surface);border-color:var(--border)}
 .mc-top{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--primary);margin-bottom:5px}
 .mc-title{font-size:13px;font-weight:500;margin-bottom:4px}
@@ -171,21 +147,21 @@ pre{font-family:var(--mono);font-size:12px;line-height:1.6;background:var(--surf
 
 /* composer */
 .composer{flex:none;padding:0 16px 14px}
-.comp-box{border:0.5px solid var(--border-strong);border-radius:10px;background:var(--bg);overflow:hidden}
+.comp-box{border:0.5px solid var(--border-strong);border-radius:var(--radius-card);background:var(--bg);overflow:hidden}
 .comp-box:focus-within{border-color:var(--primary)}
 .comp-tools{display:flex;align-items:center;gap:4px;padding:5px 8px;border-bottom:0.5px solid var(--border);background:var(--surface)}
 .comp-tools .btn.sm{border:0.5px solid var(--border)}
 .comp-input textarea{width:100%;border:none;outline:none;resize:none;font-family:inherit;font-size:13px;line-height:1.6;color:var(--text);padding:9px 11px;min-height:42px;background:transparent}
 .comp-foot{display:flex;align-items:center;gap:8px;padding:5px 8px;border-top:0.5px solid var(--border);background:var(--surface)}
 .comp-foot .hint{font-size:11px;color:var(--text-3);margin-left:auto}
-.mention-pop{position:absolute;bottom:100%;left:0;margin-bottom:6px;width:300px;background:var(--bg);border:0.5px solid var(--border-strong);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.08);overflow:hidden;z-index:20}
+.mention-pop{position:absolute;bottom:100%;left:0;margin-bottom:6px;width:300px;background:var(--bg);border:0.5px solid var(--border-strong);border-radius:var(--radius-box);box-shadow:var(--shadow-pop);overflow:hidden;z-index:20}
 .mp-group{padding:5px 0}
 .mp-group-title{font-size:10px;color:var(--text-3);padding:4px 10px}
 .mp-item{display:flex;align-items:center;gap:8px;padding:5px 10px;cursor:pointer}
 .mp-item:hover,.mp-item.sel{background:var(--primary-50)}
 .mp-item .nm{font-size:13px}
 .mp-item .cap{margin-left:auto;font-size:10px;color:var(--text-3)}
-.mp-warn{padding:6px 10px;font-size:11px;color:#854F0B;background:var(--waiting-50);border-top:0.5px solid var(--border)}
+.mp-warn{padding:6px 10px;font-size:11px;color:var(--waiting-text);background:var(--waiting-bg);border-top:0.5px solid var(--border)}
 .mp-hint{padding:6px 10px;font-size:11px;color:var(--text-3);border-top:0.5px solid var(--border);background:var(--surface)}
 
 /* ---------- context panel ---------- */
@@ -206,7 +182,7 @@ pre{font-family:var(--mono);font-size:12px;line-height:1.6;background:var(--surf
 .dot.free{background:var(--free)}
 .dot.busy{background:var(--busy)}
 .dot.thinking{background:var(--thinking);animation:pulse 1.4s infinite}
-.dot.waiting{background:#BA7517}
+.dot.waiting{background:var(--waiting-dot)}
 .dot.error{background:var(--error)}
 .dot.offline{background:var(--offline)}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
@@ -218,16 +194,16 @@ pre{font-family:var(--mono);font-size:12px;line-height:1.6;background:var(--surf
 .mem-doc .m{font-size:11px;color:var(--text-3);margin-top:2px}
 .badge{font-size:10px;border-radius:4px;padding:0 4px;border:0.5px solid}
 .badge.p{color:var(--primary);border-color:var(--primary-100);background:var(--primary-50)}
-.badge.d{color:#854F0B;border-color:#EF9F27;background:var(--waiting-50)}
-.badge.k{color:#0F6E56;border-color:#1D9E75;background:#E1F5EE}
-.todo{border:0.5px solid var(--border);border-radius:var(--radius);background:var(--bg);padding:9px 10px;margin-bottom:8px}
+.badge.d{color:var(--waiting-text);border-color:var(--waiting);background:var(--waiting-bg)}
+.badge.k{color:var(--free-text);border-color:var(--free);background:var(--free-bg)}
+.todo{border:0.5px solid var(--border);border-radius:var(--radius-card);background:var(--bg);padding:9px 10px;margin-bottom:8px}
 .todo .tt{font-size:11px;color:var(--text-3);margin-bottom:3px}
 .todo .tb{font-size:12px;font-weight:500;margin-bottom:7px}
 .legend{padding:8px 10px;border-top:0.5px solid var(--border);font-size:11px;color:var(--text-3);line-height:1.8}
 .legend b{color:var(--text-2);font-weight:500}
 .lg-row{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-2);line-height:1.9}
 .lg-row .dot{display:inline-block}
-.notes{position:absolute;top:52px;right:16px;width:330px;background:var(--bg);border:0.5px solid var(--border-strong);border-radius:var(--radius-lg);box-shadow:0 12px 32px rgba(0,0,0,.10);padding:14px 16px;z-index:50}
+.notes{position:absolute;top:52px;right:16px;width:330px;background:var(--bg);border:0.5px solid var(--border-strong);border-radius:var(--radius-box);box-shadow:var(--shadow-layer);padding:14px 16px;z-index:50}
 .notes h3{font-size:13px;font-weight:500;margin-bottom:8px}
 .notes ol{margin-left:16px;font-size:12px;line-height:1.7;color:var(--text-2)}
 .notes .close{position:absolute;top:8px;right:10px;color:var(--text-3);font-size:14px}
@@ -292,7 +268,7 @@ pre{font-family:var(--mono);font-size:12px;line-height:1.6;background:var(--surf
     </div>
     <div class="sb-project" data-page-node-id="KCb3xEJ5aZQyNbSCRUeWZL">
       <div class="sb-project-name" data-page-node-id="psrm4dDoBzUYe0znOjFJWY">支付重构 <span style="color:var(--text-3);font-weight:400" data-page-node-id="65LhcduN0dDg1OAWW1fHQB">▾</span></div>
-      <div class="sb-project-meta" data-page-node-id="9rjeCkrerFgZ1GFmLpVtVV">进行中 · 6 名成员 · 2 个 Agent</div>
+      <div class="sb-project-meta" data-page-node-id="9rjeCkrerFgZ1GFmLpVtVV">进行中 · 7 名成员 · 3 个 Agent</div>
     </div>
     <div class="sb-section" data-page-node-id="AnsyKTbl6gyUEQ3BEGM7My">
       <div class="sb-section-title" data-page-node-id="IiFYNbndfphqZ7lJdmrB5O">频道 <span style="font-size:13px" data-page-node-id="zwcJKN67IUuUJpnSFA6Olz">＋</span></div>
@@ -361,7 +337,7 @@ pre{font-family:var(--mono);font-size:12px;line-height:1.6;background:var(--surf
 
   <aside class="context" id="context" data-page-node-id="uNEacnwAKJF7IIpcvXqonk">
     <div class="tabs" data-page-node-id="rUfI8ov8wEUZo7CLCwGh7J">
-      <button class="tab active" data-tab="mem" onclick="setTab('mem')" data-page-node-id="rdT4DbKvVgHBjTsSfdKL0h">成员 <span class="n" data-page-node-id="FjmfYC3kO9rk2bPo1Gshut">4</span></button>
+      <button class="tab active" data-tab="mem" onclick="setTab('mem')" data-page-node-id="rdT4DbKvVgHBjTsSfdKL0h">成员 <span class="n" data-page-node-id="FjmfYC3kO9rk2bPo1Gshut">5</span></button>
       <button class="tab" data-tab="doc" onclick="setTab('doc')" data-page-node-id="uD7m3xbeHK5sKZWl9GwDj6">记忆 <span class="n" data-page-node-id="7D7e92F4hSO1cfgIMwrxhN">3</span></button>
       <button class="tab" data-tab="todo" onclick="setTab('todo')" data-page-node-id="AdmYFcI6dK1cM7Hu2Mrlv8">待办 <span class="n" id="todoN" data-page-node-id="yHwLtPgF7vIzUHG6UlpXYB">2</span></button>
     </div>
@@ -427,7 +403,7 @@ pre{font-family:var(--mono);font-size:12px;line-height:1.6;background:var(--surf
 const CHANNELS = {
   'webhook-retry': {
     title:'# webhook-retry',
-    meta:['4 名成员','2 个 Agent','关联记忆 3 条'],
+    meta:['5 名成员','3 个 Agent','关联记忆 3 条'],
     purpose:'确定支付回调的重试策略（退避算法与上限）',
     context:'Payment 项目 · Payment 团队',
     messages:[
@@ -445,10 +421,12 @@ const CHANNELS = {
         analysis:{cap:true,ctx:92,perm:true},
         reason:'上下文充足，给出方案：建议改为指数退避 + 抖动，上限 5 次。',
         actions:[]},
+      // 演示取舍：DS §5.1 要求 Agent 产出默认折叠为 thread（频道内只留一行摘要）；
+      // 此处为完整展示「Agent 输出」形态而平铺，正式实现按 thread 规则折叠。
       {type:'agent',name:'Backend Agent',time:'21:44',model:'claude-opus-4',tokens:'1.8k',latency:'6.2s',
         html:'建议改成分级退避：<br><br>1. 基础间隔 1s，指数增长 1 → 5 → 25 → 125s<br>2. 每次附加 ±20% 抖动，避免重试风暴<br>3. 超过 5 次转死信队列，人工介入<br>4. 仅对 5xx 与 timeout 重试，4xx 直接失败',
         code:'retry:\n  max_attempts: 5\n  base_delay: 1s\n  multiplier: 5\n  jitter: 0.2\n  retryable: [502, 503, 504, timeout]'},
-      {type:'memory',title:'Webhook 重试上限 5 次，间隔 1/5/25/125 秒，仅重试 5xx',
+      {type:'memory',id:'mem-retry',name:'Backend Agent',title:'Webhook 重试上限 5 次，间隔 1/5/25/125 秒，仅重试 5xx',
         body:'# 重试策略约定\n\n- max_attempts: 5\n- base_delay: 1s, multiplier: 5\n- jitter: ±20%\n- 仅对 5xx / timeout 重试，4xx 直接失败',
         tags:[['p','项目记忆'],['d','待批准']],state:'pending'},
       {type:'typing',name:'QA Agent 正在判断是否需要响应…'}
@@ -466,29 +444,49 @@ const CHANNELS = {
         missing:[],actions:['转给人工','邀请其他 Agent']}
     ]
   },
+  'payment-feature': {
+    title:'# payment-feature',
+    meta:['4 名成员','2 个 Agent','关联记忆 2 条'],
+    purpose:'退款能力实现（API 设计与测试用例）',
+    context:'Payment 项目 · Payment 团队',
+    messages:[
+      {type:'divider',text:'今天'},
+      {type:'human',name:'Tom',initials:'T',time:'19:20',text:'退款 API 设计稿更新了，<span class="ment">@Backend Agent</span> <span class="ment">@QA Agent</span> 帮忙对比下方案 A 和 B？'},
+      {type:'decision',name:'Backend Agent',time:'19:21',result:'ACCEPT',
+        analysis:{cap:true,ctx:88,perm:true},
+        reason:'方案 B 与现有账务模型一致，迁移成本低。开始产出对比分析。',
+        actions:[]},
+      {type:'typing',name:'QA Agent 正在判断是否需要响应…'}
+    ]
+  },
+  'architecture': {
+    title:'# architecture',
+    meta:['5 名成员','1 个 Agent','关联记忆 8 条'],
+    purpose:'架构决策讨论与 ADR 沉淀',
+    context:'Payment 项目 · Payment 团队',
+    messages:[
+      {type:'divider',text:'昨天'},
+      {type:'human',name:'Jason',initials:'J',time:'16:02',text:'网关拆分之后，对账链路的一致性按事件溯源来，先沉淀成 ADR。'},
+      {type:'system',text:'Architecture Agent 的记忆写入申请「ADR-002 网关拆分决策」已由 Jason 批准'}
+    ]
+  },
   'general': {
     title:'# general',
-    meta:['6 名成员','0 个 Agent','关联记忆 0 条'],
+    meta:['7 名成员','0 个 Agent','关联记忆 0 条'],
     messages:[
       {type:'divider',text:'昨天'},
       {type:'system',text:'Jason 创建了频道 #general'}
     ]
-  },
-  'refund-flow':{
-    title:'# refund-flow',
-    meta:['2 名成员','0 个 Agent','关联记忆 0 条'],
-    messages:[{type:'empty'}]
   }
 };
 
 const CHAN_META = [
   {id:'general',name:'general',count:0},
-  {id:'checkout-api',name:'checkout-api',count:1},
   {id:'webhook-retry',name:'webhook-retry',count:0},
-  {id:'refund-flow',name:'refund-flow',count:0}
+  {id:'checkout-api',name:'checkout-api',count:1},
+  {id:'payment-feature',name:'payment-feature',count:0},
+  {id:'architecture',name:'architecture',count:0}
 ];
-
-function esc(s){return s;}
 
 function renderMsg(m){
   if(m.type==='divider') return '<div class="divider"><span class="line"></span><span>'+m.text+'</span><span class="line"></span></div>';
@@ -503,7 +501,7 @@ function renderMsg(m){
   }
 
   if(m.type==='agent'){
-    return '<div class="msg'+(m.gap?' gap':'')+'"><div class="row"><div class="av agent">B</div><div class="body">'+
+    return '<div class="msg'+(m.gap?' gap':'')+'"><div class="row"><div class="av agent">'+m.name.charAt(0)+'</div><div class="body">'+
       '<div class="who"><span class="name">'+m.name+'</span><span class="chip agent">AGENT</span><span class="time">'+m.time+'</span></div>'+
       '<div class="text">'+m.html+'</div>'+
       (m.code?'<pre>'+m.code+'</pre>':'')+
@@ -514,7 +512,7 @@ function renderMsg(m){
   if(m.type==='decision'){
     const cls = m.result==='ACCEPT'?'accept':(m.result==='REJECT'?'reject':'');
     const badge = m.result==='ACCEPT'?'ACCEPT':(m.result==='REJECT'?'REJECT':'NEED CONTEXT');
-    return '<div class="msg'+(m.gap?' gap':'')+'"><div class="row"><div class="av agent">B</div><div class="body">'+
+    return '<div class="msg'+(m.gap?' gap':'')+'"><div class="row"><div class="av agent">'+m.name.charAt(0)+'</div><div class="body">'+
       '<div class="who"><span class="name">'+m.name+'</span><span class="chip agent">AGENT</span><span class="time">'+m.time+'</span></div>'+
       '<div class="decision '+cls+'">'+
         '<div class="dc-head"><span class="dc-badge '+(m.result==='ACCEPT'?'accept':(m.result==='REJECT'?'reject':'need'))+'">'+badge+'</span></div>'+
@@ -535,11 +533,11 @@ function renderMsg(m){
 
   if(m.type==='memory'){
     if(m.state==='approved'){
-      return '<div class="msg'+(m.gap?' gap':'')+'"><div class="row"><div class="av agent">B</div><div class="body">'+
+      return '<div class="msg'+(m.gap?' gap':'')+'"><div class="row"><div class="av agent">'+m.name.charAt(0)+'</div><div class="body">'+
         '<div class="memcard done"><div class="mc-top">已写入项目记忆 · Jason 批准</div>'+
         '<div class="mc-title">'+m.title+'</div></div></div></div></div>';
     }
-    return '<div class="msg'+(m.gap?' gap':'')+'"><div class="row"><div class="av agent">B</div><div class="body">'+
+    return '<div class="msg'+(m.gap?' gap':'')+'"><div class="row"><div class="av agent">'+m.name.charAt(0)+'</div><div class="body">'+
       '<div class="memcard" id="mc1"><div class="mc-top">记忆写入申请 · 需人类批准</div>'+
       '<div class="mc-title">'+m.title+'</div>'+
       '<div class="mc-body">'+m.body.replace(/\n/g,'<br>')+'</div>'+
@@ -570,14 +568,18 @@ function render(){
 function switchChan(id){current=id;render();}
 function approveMem(){
   const ch=CHANNELS['webhook-retry'];
-  const m=ch.messages.find(x=>x.type==='memory');
-  if(m){m.state='approved';m.title='重试策略约定';}
+  const m=ch.messages.find(x=>x.type==='memory'&&x.id==='mem-retry');
+  if(m&&m.state==='pending'){m.state='approved';m.title='重试策略约定';}
   const el=document.getElementById('todoN'); if(el) el.textContent='1';
+  const bell=document.getElementById('bellCount'); if(bell) bell.textContent='1';
   render();
 }
 function rejectMem(){
   const ch=CHANNELS['webhook-retry'];
-  ch.messages=ch.messages.filter(x=>!(x.type==='memory'));
+  const i=ch.messages.findIndex(x=>x.type==='memory'&&x.id==='mem-retry'&&x.state==='pending');
+  if(i>-1){ch.messages.splice(i,1,{type:'system',text:'Jason 驳回了记忆写入申请「重试策略约定」'});}
+  const el=document.getElementById('todoN'); if(el) el.textContent='1';
+  const bell=document.getElementById('bellCount'); if(bell) bell.textContent='1';
   render();
 }
 function toggleMention(){const e=document.getElementById('mp');e.style.display=e.style.display==='none'?'block':'none';}
