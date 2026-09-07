@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MateOS · Project Dashboard 原型 P4</title>
+<style>
+:root{
+  --bg:#FFFFFF; --surface:#FAFAF9; --surface-2:#F4F3F1;
+  --border:#E5E3E0; --border-strong:#D3D1C7;
+  --text:#1C1B19; --text-2:#6B6A66; --text-3:#736F6A;
+  --primary:#534AB7; --primary-50:#EEEDFE; --primary-100:#CECBF6;
+  --free:#1D9E75; --busy:#378ADD; --thinking:#7F77DD; --waiting:#EF9F27; --error:#E24B4A; --offline:#888780;
+  --font:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  --mono:"JetBrains Mono",Consolas,"Courier New",monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:var(--font);font-size:13px;color:var(--text);background:var(--bg);height:100vh;display:flex;flex-direction:column;overflow:hidden;-webkit-font-smoothing:antialiased}
+button{font-family:inherit;font-size:12px;cursor:pointer;background:transparent;border:none;color:inherit}
+::-webkit-scrollbar{width:8px}::-webkit-scrollbar-thumb{background:var(--border-strong);border-radius:4px}
+
+.topbar{height:44px;flex:none;display:flex;align-items:center;gap:12px;padding:0 12px;border-bottom:0.5px solid var(--border);background:var(--surface)}
+.logo{display:flex;align-items:center;gap:7px;font-weight:500;font-size:14px}
+.logo .mark{width:20px;height:20px;border-radius:5px;background:var(--primary);display:flex;align-items:center;justify-content:center;color:#fff;font-size:11px}
+.org{margin-left:20px;padding:4px 8px;border:0.5px solid var(--border);border-radius:6px;color:var(--text-2);background:var(--bg)}
+.search{flex:1;max-width:420px;margin-left:auto;position:relative}
+.search input{width:100%;height:28px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);padding:0 10px 0 28px;font-size:12px;outline:none;font-family:inherit}
+.search svg{position:absolute;left:8px;top:7px;opacity:.45}
+.tb-right{display:flex;align-items:center;gap:6px;margin-left:auto}
+.icon-btn{height:28px;padding:0 9px;border:0.5px solid var(--border);border-radius:6px;color:var(--text-2);display:flex;align-items:center;gap:6px;background:var(--bg)}
+.bell{position:relative}
+.bell .dot{position:absolute;top:-4px;right:-4px;min-width:15px;height:15px;border-radius:8px;background:#E24B4A;color:#fff;font-size:10px;display:flex;align-items:center;justify-content:center;padding:0 4px}
+.avatar{width:24px;height:24px;border-radius:50%;background:var(--primary-100);color:var(--primary);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:500}
+
+.shell{flex:1;display:flex;min-height:0}
+.navrail{width:58px;flex:none;border-right:0.5px solid var(--border);background:var(--surface);display:flex;flex-direction:column;align-items:center;padding:8px 0;gap:3px}
+.nav-item{position:relative;width:46px;padding:6px 0 5px;border-radius:8px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;color:var(--text-3);font-size:10px;line-height:1}
+.nav-item:hover{background:var(--surface-2);color:var(--text-2)}
+.nav-item.active{background:var(--primary-50);color:var(--primary)}
+.nav-item svg{width:16px;height:16px}
+.nav-spacer{flex:1}
+.nav-item.avatar{width:26px;height:26px;padding:0;border-radius:50%;background:var(--primary-100);color:var(--primary);font-size:11px;font-weight:500}
+
+.sidebar{width:216px;flex:none;border-right:0.5px solid var(--border);background:var(--surface);display:flex;flex-direction:column;overflow-y:auto}
+.sb-head{padding:12px 12px 8px}
+.sb-label{font-size:11px;color:var(--text-3)}
+.sb-team{font-size:13px;font-weight:500;margin-top:3px;width:100%;padding:3px 0;border-radius:5px;display:flex;align-items:center;justify-content:center;gap:4px}
+.sb-section{padding:10px 8px 4px;border-top:0.5px solid var(--border)}
+.sb-section-title{font-size:11px;color:var(--text-3);padding:0 4px 6px;display:flex;align-items:center;justify-content:space-between}
+.item{display:flex;align-items:center;gap:6px;padding:4px 6px;border-radius:5px;color:var(--text-2);font-size:13px;cursor:pointer;width:100%;text-align:left}
+.item:hover{background:var(--surface-2)}
+.item.active{background:var(--bg);color:var(--text);font-weight:500;box-shadow:inset 0 0 0 0.5px var(--border)}
+.dot{width:7px;height:7px;border-radius:50%;flex:none;display:inline-block}
+.dot.free{background:var(--free)} .dot.busy{background:var(--busy)} .dot.thinking{background:var(--thinking)}
+.dot.waiting{background:#BA7517} .dot.error{background:var(--error)} .dot.offline{background:var(--offline)}
+
+.main{flex:1;overflow-y:auto;padding:20px 24px 32px}
+.crumb{font-size:11px;color:var(--text-3);margin-bottom:8px}
+.proj-head{display:flex;align-items:flex-start;gap:14px;margin-bottom:18px}
+.proj-name{font-size:20px;font-weight:500;letter-spacing:-.01em}
+.status{display:inline-flex;align-items:center;gap:5px;font-size:11px;border:0.5px solid #9FE1CB;background:#E1F5EE;color:#0F6E56;border-radius:5px;padding:1px 7px;margin-left:8px;vertical-align:2px}
+.proj-desc{font-size:12px;color:var(--text-2);margin-top:5px;line-height:1.6;max-width:640px}
+.proj-actions{margin-left:auto;display:flex;gap:6px}
+.btn{height:28px;padding:0 11px;border:0.5px solid var(--border-strong);border-radius:6px;background:var(--bg);color:var(--text);font-size:12px;display:inline-flex;align-items:center;gap:6px}
+.btn.primary{background:var(--primary);border-color:var(--primary);color:#fff}
+.btn.sm{height:24px;padding:0 9px;font-size:11px}
+
+.metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:22px}
+.metric{background:var(--surface);border-radius:8px;padding:12px 14px}
+.metric .k{font-size:12px;color:var(--text-2)}
+.metric .v{font-size:24px;font-weight:500;margin-top:3px;letter-spacing:-.02em}
+.metric .v small{font-size:12px;font-weight:400;color:var(--text-3);margin-left:4px}
+.metric .s{font-size:11px;color:var(--text-3);margin-top:2px}
+
+.cols{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);gap:20px;align-items:start}
+.card{border:0.5px solid var(--border);border-radius:12px;background:var(--bg);overflow:hidden;margin-bottom:16px}
+.card-h{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:0.5px solid var(--border);background:var(--surface)}
+.card-h .t{font-size:13px;font-weight:500}
+.card-h .c{font-size:11px;color:var(--text-3);background:var(--surface-2);border-radius:8px;padding:0 6px}
+.card-h .more{margin-left:auto;font-size:11px;color:var(--text-3)}
+.card-b{padding:6px 8px 10px}
+
+.mem-row{display:flex;align-items:center;gap:9px;padding:7px 8px;border-radius:7px}
+.mem-row:hover{background:var(--surface)}
+.mem-av{width:30px;height:30px;border-radius:7px;flex:none;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:500;background:var(--surface-2);color:var(--text-2)}
+.mem-av.agent{background:var(--primary-50);color:var(--primary);border:0.5px solid var(--primary-100);border-radius:50%}
+.mem-nm{font-size:13px;font-weight:500}
+.mem-sub{font-size:11px;color:var(--text-3);margin-top:1px}
+.mem-right{margin-left:auto;text-align:right;font-size:11px;color:var(--text-3)}
+.caps{display:flex;gap:4px;flex-wrap:wrap;margin-top:4px}
+.cap{font-size:10px;border:0.5px solid var(--border-strong);border-radius:4px;padding:0 4px;color:var(--text-3)}
+
+.chan-row{display:flex;align-items:center;gap:8px;padding:7px 8px;border-radius:7px}
+.chan-row:hover{background:var(--surface)}
+.chan-row .h{color:var(--text-3)}
+.chan-row .n{font-size:13px}
+.chan-row .p{font-size:11px;color:var(--text-3);margin-top:1px}
+.chan-row .r{margin-left:auto;font-size:11px;color:var(--text-3);display:flex;align-items:center;gap:6px}
+.pill{font-size:10px;border-radius:4px;padding:1px 6px;border:0.5px solid}
+.pill.w{color:#854F0B;border-color:#EF9F27;background:#FAEEDA}
+.pill.g{color:#0F6E56;border-color:#1D9E75;background:#E1F5EE}
+.pill.b{color:#185FA5;border-color:#378ADD;background:#E6F1FB}
+.pill.n{color:var(--text-3);border-color:var(--border-strong);background:var(--surface-2)}
+
+.req{border:0.5px solid var(--border);border-radius:8px;padding:10px 12px;margin:8px}
+.req-t{font-size:13px;font-weight:500;display:flex;align-items:center;gap:8px}
+.req-m{font-size:11px;color:var(--text-3);margin-top:4px;line-height:1.7}
+.req-p{display:flex;align-items:center;gap:6px;margin-top:7px}
+.mini{width:20px;height:20px;border-radius:5px;background:var(--surface-2);color:var(--text-2);font-size:10px;display:flex;align-items:center;justify-content:center}
+.mini.a{background:var(--primary-50);color:var(--primary);border-radius:50%;border:0.5px solid var(--primary-100)}
+
+.memstat{display:flex;align-items:center;gap:10px;padding:8px}
+.memstat .n{font-size:18px;font-weight:500;width:34px;text-align:right}
+.memstat .l{font-size:12px}
+.memstat .l i{font-style:normal;display:block;font-size:11px;color:var(--text-3)}
+.bar{height:5px;border-radius:3px;background:var(--surface-2);overflow:hidden;margin-top:5px}
+.bar i{display:block;height:100%}
+.note{font-size:11px;color:var(--text-3);line-height:1.8;padding:0 8px 8px}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="logo"><span class="mark">M</span>MateOS</div>
+  <button class="org">Acme 组织 ▾</button>
+  <div class="search">
+    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5 14 14"/></svg>
+    <input placeholder="搜索项目、成员、记忆…">
+  </div>
+  <div class="tb-right">
+    <button class="icon-btn">我的 Agents</button>
+    <button class="icon-btn bell">通知<span class="dot">3</span></button>
+    <div class="avatar">J</div>
+  </div>
+</div>
+
+<div class="shell">
+  <nav class="navrail">
+    <button class="nav-item"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M2 7 8 2l6 5v7H2z"/></svg>Home</button>
+    <button class="nav-item active"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2" y="2.5" width="5" height="5" rx="1"/><rect x="9" y="2.5" width="5" height="5" rx="1"/><rect x="2" y="9.5" width="5" height="4" rx="1"/><rect x="9" y="9.5" width="5" height="4" rx="1"/></svg>Projects</button>
+    <button class="nav-item"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M2 3.5h12v8H7l-3 2.5v-2.5H2z"/></svg>Channels</button>
+    <button class="nav-item"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="3" y="5.5" width="10" height="8" rx="2"/><path d="M8 5.5V3"/><circle cx="8" cy="2.4" r=".9" fill="currentColor" stroke="none"/><path d="M6.2 9h.01M9.8 9h.01" stroke-width="2"/></svg>Agents</button>
+    <button class="nav-item"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M8 2 14 5l-6 3L2 5z"/><path d="M2 8.5 8 11.5l6-3"/><path d="M2 11.5 8 14.5l6-3"/></svg>Memory</button>
+    <button class="nav-item"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><rect x="2.5" y="2.5" width="11" height="11" rx="2"/><path d="M5.5 8.2l1.8 1.8 3.2-3.6"/></svg>Tasks</button>
+    <div class="nav-spacer"></div>
+    <button class="nav-item"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.8v1.6M8 12.6v1.6M2.6 8h1.6M11.8 8h1.6M4.2 4.2l1.1 1.1M10.7 10.7l1.1 1.1M11.8 4.2l-1.1 1.1M5.3 10.7l-1.1 1.1"/></svg>Settings</button>
+    <div class="nav-item avatar" style="margin-top:4px">J</div>
+  </nav>
+
+  <aside class="sidebar">
+    <div class="sb-head">
+      <div class="sb-label">团队</div>
+      <button class="sb-team">Payment 团队 ▾</button>
+    </div>
+    <div class="sb-section">
+      <div class="sb-section-title">项目 <span>＋</span></div>
+      <button class="item active"><span class="dot free"></span>支付重构</button>
+      <button class="item"><span class="dot free"></span>对账中心</button>
+      <button class="item"><span class="dot offline"></span>商户后台（归档）</button>
+    </div>
+    <div class="sb-section">
+      <div class="sb-section-title">我拥有的 Agent</div>
+      <button class="item"><span class="dot waiting"></span>Backend Agent</button>
+      <button class="item"><span class="dot free"></span>QA Agent</button>
+      <button class="item"><span class="dot error"></span>Architecture Agent</button>
+    </div>
+    <div style="flex:1"></div>
+    <div style="padding:10px;border-top:0.5px solid var(--border);font-size:11px;color:var(--text-3)">MVP 原型 · P4 Project Dashboard</div>
+  </aside>
+
+  <main class="main">
+    <div class="crumb">Payment 团队 / 项目</div>
+
+    <div class="proj-head">
+      <div>
+        <div class="proj-name">支付重构<span class="status"><span class="dot free"></span>Active</span></div>
+        <div class="proj-desc">统一支付网关，收敛 Stripe / 微信支付两条链路，目标 Q4 前完成核心链路迁移。Context 由 4 个频道 + 23 条决策记忆构成。</div>
+      </div>
+      <div class="proj-actions">
+        <button class="btn sm">邀请成员</button>
+        <button class="btn sm">新建频道</button>
+        <button class="btn sm primary">项目设置</button>
+      </div>
+    </div>
+
+    <div class="metrics">
+      <div class="metric"><div class="k">成员</div><div class="v">6<small>人类 4 · Agent 2</small></div><div class="s">本周新增 1 个 Agent</div></div>
+      <div class="metric"><div class="k">频道</div><div class="v">4</div><div class="s">3 个活跃 · 1 个归档</div></div>
+      <div class="metric"><div class="k">记忆</div><div class="v">79<small>条</small></div><div class="s">决策 23 · 知识 56</div></div>
+      <div class="metric"><div class="k">协作请求</div><div class="v">3<small>进行中</small></div><div class="s">1 个等待上下文</div></div>
+    </div>
+
+    <div class="cols">
+      <div>
+        <div class="card">
+          <div class="card-h"><span class="t">团队成员</span><span class="c">6</span><span class="more">管理</span></div>
+          <div class="card-b">
+            <div class="mem-row">
+              <div class="mem-av">J</div>
+              <div><div class="mem-nm">Jason</div><div class="mem-sub">Tech Lead · 拥有 3 个 Agent</div></div>
+              <div class="mem-right">owner</div>
+            </div>
+            <div class="mem-row">
+              <div class="mem-av">T</div>
+              <div><div class="mem-nm">Tom</div><div class="mem-sub">Backend Developer</div></div>
+              <div class="mem-right">owner</div>
+            </div>
+            <div class="mem-row">
+              <div class="mem-av">L</div>
+              <div><div class="mem-nm">Lucy</div><div class="mem-sub">QA</div></div>
+              <div class="mem-right">成员</div>
+            </div>
+            <div class="mem-row">
+              <div class="mem-av agent">B</div>
+              <div>
+                <div class="mem-nm">Backend Agent <span class="dot waiting" style="margin-left:4px"></span></div>
+                <div class="mem-sub">Owner Jason · 正在 #webhook-retry</div>
+                <div class="caps"><span class="cap">coding</span><span class="cap">review</span><span class="cap">architecture</span><span class="cap">claude-opus</span></div>
+              </div>
+              <div class="mem-right">等待上下文</div>
+            </div>
+            <div class="mem-row">
+              <div class="mem-av agent">Q</div>
+              <div>
+                <div class="mem-nm">QA Agent <span class="dot free" style="margin-left:4px"></span></div>
+                <div class="mem-sub">Owner Jason · 空闲 12 分钟</div>
+                <div class="caps"><span class="cap">testing</span><span class="cap">gpt-5</span></div>
+              </div>
+              <div class="mem-right">可用</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-h"><span class="t">频道</span><span class="c">4</span><span class="more">＋ 新建</span></div>
+          <div class="card-b">
+            <div class="chan-row"><span class="h">#</span><div><div class="n">webhook-retry</div><div class="p">确定支付回调的重试策略</div></div><div class="r"><span class="pill w">等待上下文</span>2 Agent</div></div>
+            <div class="chan-row"><span class="h">#</span><div><div class="n">checkout-api</div><div class="p">下单接口与幂等设计</div></div><div class="r"><span class="pill n">无 Agent</span>1 请求</div></div>
+            <div class="chan-row"><span class="h">#</span><div><div class="n">payment-feature</div><div class="p">退款能力实现</div></div><div class="r"><span class="pill b">进行中</span>2 Agent</div></div>
+            <div class="chan-row"><span class="h">#</span><div><div class="n">architecture</div><div class="p">架构决策讨论</div></div><div class="r"><span class="pill g">已沉淀 8 条</span>1 Agent</div></div>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div class="card">
+          <div class="card-h"><span class="t">协作请求</span><span class="c">3</span><span class="more">全部</span></div>
+          <div class="card-b">
+            <div class="req">
+              <div class="req-t">重试策略改造 <span class="pill w">等待上下文</span></div>
+              <div class="req-m">由 Jason 发起 · #webhook-retry · 10 分钟前</div>
+              <div class="req-p"><span class="mini">J</span><span class="mini a">B</span><span style="font-size:11px;color:var(--text-3)">Backend Agent 需要 2 项上下文</span></div>
+            </div>
+            <div class="req">
+              <div class="req-t">退款 API 设计 <span class="pill b">进行中</span></div>
+              <div class="req-m">由 Tom 发起 · #payment-feature · 1 小时前</div>
+              <div class="req-p"><span class="mini">T</span><span class="mini a">B</span><span class="mini a">Q</span><span style="font-size:11px;color:var(--text-3)">2 个 Agent 协作</span></div>
+            </div>
+            <div class="req">
+              <div class="req-t">幂等键方案 <span class="pill n">已拒绝</span></div>
+              <div class="req-m">由 Tom 发起 · #checkout-api · 3 小时前</div>
+              <div class="req-p"><span class="mini a">B</span><span style="font-size:11px;color:var(--text-3)">Backend Agent 超出能力范围，建议人工</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-h"><span class="t">项目记忆</span><span class="c">79</span><span class="more">Memory Center</span></div>
+          <div class="card-b">
+            <div class="memstat"><div class="n" style="color:var(--primary)">23</div><div style="flex:1"><div class="l">决策 Decision<i>ADR 与架构选择</i></div><div class="bar"><i style="width:29%;background:var(--primary)"></i></div></div></div>
+            <div class="memstat"><div class="n" style="color:#0F6E56">56</div><div style="flex:1"><div class="l">知识 Knowledge<i>领域术语与业务规则</i></div><div class="bar"><i style="width:71%;background:#1D9E75"></i></div></div></div>
+            <div class="memstat"><div class="n" style="color:#854F0B">3</div><div style="flex:1"><div class="l">待审批 Pending<i>Agent 申请写入，需人类确认</i></div><div class="bar"><i style="width:100%;background:#EF9F27"></i></div></div></div>
+            <div class="note">写入流程：Agent 申请 → 人类批准 → 进入共享记忆 → 可被 @ 引用</div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-h"><span class="t">执行（AgentBoard）</span><span class="more">V3</span></div>
+          <div class="card-b">
+            <div class="note" style="padding:10px 8px">MVP 阶段 MateOS 只做协作，不展示 Worker / Runtime 细节。V3 打通后此处显示执行进度与「打开执行详情」入口。</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+</body>
+</html>

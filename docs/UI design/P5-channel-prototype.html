@@ -13,7 +13,7 @@
   --border-strong:#D3D1C7;
   --text:#1C1B19;
   --text-2:#6B6A66;
-  --text-3:#9C9B96;
+  --text-3:#736F6A;
   --primary:#534AB7;
   --primary-50:#EEEDFE;
   --primary-100:#CECBF6;
@@ -22,7 +22,9 @@
   --thinking:#7F77DD;
   --waiting:#EF9F27;
   --waiting-50:#FAEEDA;
-  --offline:#B4B2A9;
+  --error:#E24B4A;
+  --error-50:#FCEBEB;
+  --offline:#888780;
   --radius:8px;
   --radius-lg:12px;
   --font:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
@@ -54,6 +56,16 @@ button{font-family:inherit;font-size:12px;cursor:pointer;background:transparent;
 /* ---------- shell ---------- */
 .shell{flex:1;display:flex;min-height:0}
 
+/* ---------- nav rail ---------- */
+.navrail{width:58px;flex:none;border-right:0.5px solid var(--border);background:var(--surface);display:flex;flex-direction:column;align-items:center;padding:8px 0;gap:3px}
+.nav-item{position:relative;width:46px;padding:6px 0 5px;border-radius:8px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;color:var(--text-3);font-size:10px;line-height:1}
+.nav-item:hover{background:var(--surface-2);color:var(--text-2)}
+.nav-item.active{background:var(--primary-50);color:var(--primary)}
+.nav-item svg{width:16px;height:16px}
+.nav-item .nb{position:absolute;top:2px;right:4px;min-width:14px;height:14px;border-radius:7px;background:#E24B4A;color:#fff;font-size:9px;display:flex;align-items:center;justify-content:center;padding:0 3px}
+.nav-spacer{flex:1}
+.nav-item.avatar{width:26px;height:26px;padding:0;border-radius:50%;background:var(--primary-100);color:var(--primary);font-size:11px;font-weight:500}
+
 /* ---------- sidebar ---------- */
 .sidebar{width:216px;flex:none;border-right:0.5px solid var(--border);background:var(--surface);display:flex;flex-direction:column;overflow-y:auto}
 .sb-head{padding:12px 12px 8px}
@@ -76,7 +88,7 @@ button{font-family:inherit;font-size:12px;cursor:pointer;background:transparent;
 
 /* ---------- channel ---------- */
 .channel{flex:1;display:flex;flex-direction:column;min-width:0;background:var(--bg)}
-.ch-head{height:48px;flex:none;display:flex;align-items:center;gap:10px;padding:0 16px;border-bottom:0.5px solid var(--border)}
+.ch-head{flex:none;display:flex;align-items:center;gap:10px;padding:8px 16px;border-bottom:0.5px solid var(--border)}
 .ch-title{font-size:14px;font-weight:500}
 .ch-meta{font-size:12px;color:var(--text-3);display:flex;align-items:center;gap:6px}
 .ch-meta .sep{width:1px;height:10px;background:var(--border-strong)}
@@ -117,6 +129,18 @@ pre{font-family:var(--mono);font-size:12px;line-height:1.6;background:var(--surf
 .dc-item{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--text-2);background:rgba(255,255,255,.7);border:0.5px solid var(--border);border-radius:5px;padding:4px 8px}
 .dc-item .idx{width:14px;height:14px;border-radius:50%;background:var(--surface-2);font-size:10px;display:flex;align-items:center;justify-content:center;flex:none;color:var(--text-3)}
 .dc-actions{margin-top:8px;display:flex;gap:6px}
+.dc-analysis{display:flex;margin-top:8px;border:0.5px solid var(--border);border-radius:6px;overflow:hidden;background:rgba(255,255,255,.62)}
+.dc-cell{flex:1;padding:5px 9px;border-right:0.5px solid var(--border)}
+.dc-cell:last-child{border-right:none}
+.dc-cell .k{font-size:10px;color:var(--text-3)}
+.dc-cell .v{font-size:12px;font-weight:500;margin-top:2px;display:flex;align-items:center;gap:4px}
+.dc-cell .bar{height:3px;border-radius:2px;background:var(--surface-2);margin-top:5px;overflow:hidden}
+.dc-cell .bar i{display:block;height:100%;background:var(--waiting)}
+.dc-cell .bar i.ok{background:var(--free)}
+.tick{width:12px;height:12px;border-radius:50%;background:var(--free);color:#fff;font-size:9px;display:flex;align-items:center;justify-content:center;flex:none}
+.tick.no{background:var(--error)}
+.ch-sub{font-size:11px;color:var(--text-3);margin-top:1px}
+.ch-sub b{color:var(--text-2);font-weight:500}
 .btn{height:26px;padding:0 10px;border:0.5px solid var(--border-strong);border-radius:6px;background:var(--bg);color:var(--text);font-size:12px}
 .btn:hover{border-color:var(--text-3)}
 .btn.primary{background:var(--primary);border-color:var(--primary);color:#fff}
@@ -162,6 +186,7 @@ pre{font-family:var(--mono);font-size:12px;line-height:1.6;background:var(--surf
 .mp-item .nm{font-size:13px}
 .mp-item .cap{margin-left:auto;font-size:10px;color:var(--text-3)}
 .mp-warn{padding:6px 10px;font-size:11px;color:#854F0B;background:var(--waiting-50);border-top:0.5px solid var(--border)}
+.mp-hint{padding:6px 10px;font-size:11px;color:var(--text-3);border-top:0.5px solid var(--border);background:var(--surface)}
 
 /* ---------- context panel ---------- */
 .context{width:264px;flex:none;border-left:0.5px solid var(--border);background:var(--surface);display:flex;flex-direction:column}
@@ -181,7 +206,8 @@ pre{font-family:var(--mono);font-size:12px;line-height:1.6;background:var(--surf
 .dot.free{background:var(--free)}
 .dot.busy{background:var(--busy)}
 .dot.thinking{background:var(--thinking);animation:pulse 1.4s infinite}
-.dot.waiting{background:var(--waiting)}
+.dot.waiting{background:#BA7517}
+.dot.error{background:var(--error)}
 .dot.offline{background:var(--offline)}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
 .cap-row{display:flex;gap:4px;flex-wrap:wrap;padding:0 6px 6px 21px;margin-top:-2px}
@@ -199,6 +225,8 @@ pre{font-family:var(--mono);font-size:12px;line-height:1.6;background:var(--surf
 .todo .tb{font-size:12px;font-weight:500;margin-bottom:7px}
 .legend{padding:8px 10px;border-top:0.5px solid var(--border);font-size:11px;color:var(--text-3);line-height:1.8}
 .legend b{color:var(--text-2);font-weight:500}
+.lg-row{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-2);line-height:1.9}
+.lg-row .dot{display:inline-block}
 .notes{position:absolute;top:52px;right:16px;width:330px;background:var(--bg);border:0.5px solid var(--border-strong);border-radius:var(--radius-lg);box-shadow:0 12px 32px rgba(0,0,0,.10);padding:14px 16px;z-index:50}
 .notes h3{font-size:13px;font-weight:500;margin-bottom:8px}
 .notes ol{margin-left:16px;font-size:12px;line-height:1.7;color:var(--text-2)}
@@ -224,6 +252,39 @@ pre{font-family:var(--mono);font-size:12px;line-height:1.6;background:var(--surf
 </div>
 
 <div class="shell" data-page-node-id="aMqtHlwDIUY3vd4D8VrgxR">
+<nav class="navrail">
+  <button class="nav-item" title="Home">
+    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M2 7 8 2l6 5v7H2z"/></svg>
+    Home
+  </button>
+  <button class="nav-item" title="Projects">
+    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2" y="2.5" width="5" height="5" rx="1"/><rect x="9" y="2.5" width="5" height="5" rx="1"/><rect x="2" y="9.5" width="5" height="4" rx="1"/><rect x="9" y="9.5" width="5" height="4" rx="1"/></svg>
+    Projects
+  </button>
+  <button class="nav-item active" title="Channels">
+    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M2 3.5h12v8H7l-3 2.5v-2.5H2z"/></svg>
+    Channels
+  </button>
+  <button class="nav-item" title="Agents">
+    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="3" y="5.5" width="10" height="8" rx="2"/><path d="M8 5.5V3"/><circle cx="8" cy="2.4" r=".9" fill="currentColor" stroke="none"/><path d="M6.2 9h.01M9.8 9h.01" stroke-width="2"/></svg>
+    Agents
+  </button>
+  <button class="nav-item" title="Memory">
+    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M8 2 14 5l-6 3L2 5z"/><path d="M2 8.5 8 11.5l6-3"/><path d="M2 11.5 8 14.5l6-3"/></svg>
+    Memory
+  </button>
+  <button class="nav-item" title="Tasks">
+    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><rect x="2.5" y="2.5" width="11" height="11" rx="2"/><path d="M5.5 8.2l1.8 1.8 3.2-3.6"/></svg>
+    Tasks
+  </button>
+  <div class="nav-spacer"></div>
+  <button class="nav-item" title="Settings">
+    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.8v1.6M8 12.6v1.6M2.6 8h1.6M11.8 8h1.6M4.2 4.2l1.1 1.1M10.7 10.7l1.1 1.1M11.8 4.2l-1.1 1.1M5.3 10.7l-1.1 1.1"/></svg>
+    Settings
+  </button>
+  <div class="nav-item avatar" style="margin-top:4px">J</div>
+</nav>
+
   <aside class="sidebar" data-page-node-id="SfOYY2zBPoWtWPc7y0um9o">
     <div class="sb-head" data-page-node-id="wCQvwQAcUx9OlnvDhBU1jA">
       <div class="sb-label" data-page-node-id="BaiLb6AQrydzYOT6RbATG3">团队</div>
@@ -244,13 +305,14 @@ pre{font-family:var(--mono);font-size:12px;line-height:1.6;background:var(--surf
       <button class="mem-item" data-page-node-id="qFGXF7sQHXRMvFbhUChGJd"><span class="tag" data-page-node-id="xc2uRBAKPeeKiOLyro8Iko">知识</span>对账领域术语表</button>
     </div>
     <div style="flex:1" data-page-node-id="pApRha7gMZAtEPfasTd0Fb"></div>
-    <div style="padding:10px;border-top:0.5px solid var(--border);font-size:11px;color:var(--text-3)" data-page-node-id="p2jIpWF7D8hMcpwRHx2oK1">MVP 原型 · P5 Channel 主界面</div>
+    <div style="padding:10px;border-top:0.5px solid var(--border);font-size:11px;color:var(--text-3)" data-page-node-id="p2jIpWF7D8hMcpwRHx2oK1">MVP 原型 v2 · P5 Channel 主界面</div>
   </aside>
 
   <main class="channel" data-page-node-id="aNqH0T98wRSxcURqdRUSKE">
     <div class="ch-head" data-page-node-id="CKGesBL6Lyjk6aUIsrHWqD">
       <div data-page-node-id="ySNIawo8qsASJHYGlDoR8B">
         <div class="ch-title" id="chTitle" data-page-node-id="2DXS8hyPAWWbM31Cgs7FZJ"># webhook-retry</div>
+        <div class="ch-sub" id="chSub"></div>
       </div>
       <div class="ch-meta" id="chMeta" data-page-node-id="5qDbLXCdBhUoxJ3NVa0TPn"></div>
       <div class="ch-actions" data-page-node-id="jwFA6GyPwXhtjeHQNuaCGT">
@@ -270,20 +332,23 @@ pre{font-family:var(--mono);font-size:12px;line-height:1.6;background:var(--surf
           <textarea id="ta" placeholder="输入消息…  按 @ 提及成员、能力组或项目记忆"></textarea>
           <div class="mention-pop" id="mp" style="display:none" data-page-node-id="YVNc4UxNnSfLGowGyM7kyk">
             <div class="mp-group" data-page-node-id="koFCRQBEgeWEP0AavLuZwQ">
-              <div class="mp-group-title" data-page-node-id="GrJKKSP4c7RKmBO28nWz09">成员</div>
-              <div class="mp-item sel" data-page-node-id="sl46kOmyqgSf1Egzs9K9lc"><span class="dot free" data-page-node-id="JarxnKsgYwQIJqDLUXryQM"></span><span class="nm" data-page-node-id="ZI0vwoE6FX5Qo1BGrdav8g">Backend Agent</span><span class="cap" data-page-node-id="0gjhZn6AYtfoxcsldsQoND">coding · review</span></div>
-              <div class="mp-item" data-page-node-id="ZfzAYgtdl1qP5Hh4H5EmlD"><span class="dot free" data-page-node-id="R8OeI2BVjL0mTQTI54NZL0"></span><span class="nm" data-page-node-id="HTRzw8EfGR5t4hKZBcAj33">QA Agent</span><span class="cap" data-page-node-id="NwtC2nYUaIo9F63nceGJde">testing</span></div>
-              <div class="mp-item" data-page-node-id="r6nLhbaD3ciZuV6nszHIcg"><span class="nm" style="margin-left:15px" data-page-node-id="3KGs5TSZQeCJNa2Gx63HUw">Jason</span><span class="cap" data-page-node-id="0SKaA1AAthTnn9nM9Hp2MG">human</span></div>
-              <div class="mp-item" data-page-node-id="s6h4hKTf5i0AHz0N7XOlYa"><span class="nm" style="margin-left:15px" data-page-node-id="dyEMGX5YLf8GrPQLNRARms">Tom</span><span class="cap" data-page-node-id="oG0EzvtqzXcEeDhLvdDlSo">human</span></div>
+              <div class="mp-group-title">People</div>
+              <div class="mp-item"><span class="nm" style="margin-left:15px">Jason</span><span class="cap">human · owner</span></div>
+              <div class="mp-item"><span class="nm" style="margin-left:15px">Tom</span><span class="cap">human</span></div>
             </div>
-            <div class="mp-group" style="border-top:0.5px solid var(--border)" data-page-node-id="HATDQI3dQiFcthdCiDWXb1">
-              <div class="mp-group-title" data-page-node-id="3cECyLHzaTKM53yZyUqxCi">能力组</div>
-              <div class="mp-item" data-page-node-id="zX7Box1C0NNNA3WebueS2Y"><span class="nm" data-page-node-id="SFue94qDilJflo5QjlhMHD">@backend-team</span><span class="cap" data-page-node-id="L02DBsJ3GhEWdmATWRtLts">按能力匹配 Agent</span></div>
+            <div class="mp-group" style="border-top:0.5px solid var(--border)">
+              <div class="mp-group-title">Agents</div>
+              <div class="mp-item sel"><span class="dot waiting"></span><span class="nm">Backend Agent</span><span class="cap">coding · review</span></div>
+              <div class="mp-item"><span class="dot free"></span><span class="nm">QA Agent</span><span class="cap">testing</span></div>
+              <div class="mp-item"><span class="dot error"></span><span class="nm">Architecture Agent</span><span class="cap">调用失败</span></div>
             </div>
-            <div class="mp-group" style="border-top:0.5px solid var(--border)" data-page-node-id="HgcD8wbg1DMloqDFykyI22">
-              <div class="mp-item" data-page-node-id="G54y6oGFYXGRByil0Q9D53"><span class="nm" data-page-node-id="r40iDfuf51Ew4Mhb4ClDDT">@all</span><span class="cap" data-page-node-id="EJJw8oA7H0Rcb1lvpBumaz">全体成员</span></div>
-              <div class="mp-warn" data-page-node-id="3CeSilcRDI9CcFO0hOU45N">将触发 2 个 Agent 自行判断是否响应，预计消耗约 3.2k tokens</div>
+            <div class="mp-group" style="border-top:0.5px solid var(--border)">
+              <div class="mp-group-title">能力组 / 全体</div>
+              <div class="mp-item"><span class="nm">@backend</span><span class="cap">按能力匹配 Agent</span></div>
+              <div class="mp-item"><span class="nm">@all</span><span class="cap">全体成员</span></div>
+              <div class="mp-warn">@all 将触发 2 个 Agent 自行判断是否响应，预计消耗约 3.2k tokens</div>
             </div>
+            <div class="mp-hint">输入 # 引用频道，输入 / 引用项目记忆</div>
           </div>
         </div>
         <div class="comp-foot" data-page-node-id="QBl4oNRIEq91ep1XpnpDbF">
@@ -309,6 +374,8 @@ pre{font-family:var(--mono);font-size:12px;line-height:1.6;background:var(--surf
       <div class="cap-row" data-page-node-id="xP41sYXPsIJW2qeEjMaqtB"><span class="cap" data-page-node-id="kEDAinTBqBykTlHtmpU1yH">coding</span><span class="cap" data-page-node-id="CRkxHwk0OFvXW1oVt9DUcJ">review</span><span class="cap" data-page-node-id="1UhRst10Wr1ThMI5vxZLar">architecture</span><span class="cap" data-page-node-id="6SZN5k2ALKAjsXcpWJZWxl">claude-opus</span></div>
       <div class="member" data-page-node-id="uGL2aPcgVF2BIEccHP3qnJ"><span class="dot free" data-page-node-id="3YfLXV3m7gR3YY4EC0tpA3"></span><span class="nm" data-page-node-id="cubPiHvdLMnwW0SuBayR1C">QA Agent</span><span class="st" data-page-node-id="taD0eMWdfZa5fEy1lGJgFc">空闲</span></div>
       <div class="cap-row" data-page-node-id="q8id8A88fK3CI4M3AkwejV"><span class="cap" data-page-node-id="XR5J2ZTQhe5gtO3Aj977CF">testing</span><span class="cap" data-page-node-id="lQnrpK86I5jZhG9K8EDRJ8">gpt-5</span></div>
+      <div class="member"><span class="dot error"></span><span class="nm">Architecture Agent</span><span class="st">调用失败</span></div>
+      <div class="cap-row"><span class="cap">architecture</span><span class="cap">review</span><span class="cap">claude-opus</span></div>
       <div class="pane-title" style="margin-top:8px" data-page-node-id="EPybWm1GaQrfHHpwVhriS0">邀请中</div>
       <div class="member" data-page-node-id="JmHfGxhUQiAUgrCdVkYcUe"><span class="dot offline" data-page-node-id="yqgtyTuB252k3rjAg5cN2E"></span><span class="nm" data-page-node-id="ffBUvqjhWnryO2fsxCHnbm">Security Agent</span><span class="st" data-page-node-id="zwMB0nM4V0R1yc6ia4BqWO">待批准</span></div>
     </div>
@@ -332,25 +399,27 @@ pre{font-family:var(--mono);font-size:12px;line-height:1.6;background:var(--surf
       </div>
     </div>
     <div class="legend" data-page-node-id="tjhahGAhFLmAh9NQ1JMwVn">
-      <b data-page-node-id="wYjjTts2F29FLWT1tw5t2i">状态</b>　空闲 忙碌 思考中 等待上下文 离线<br data-page-node-id="b58TkgfMPdXVbqBFyuSTwi">
-      <span class="dot free" style="display:inline-block" data-page-node-id="ICxxeHkECldZoAj6IbyocE"></span>
-      <span class="dot busy" style="display:inline-block;margin-left:3px" data-page-node-id="eQhsq73dc2ZZqQnbDIoaLn"></span>
-      <span class="dot thinking" style="display:inline-block;margin-left:3px" data-page-node-id="L0gUcpN1GnbFkMKHsRD6uA"></span>
-      <span class="dot waiting" style="display:inline-block;margin-left:3px" data-page-node-id="pSK7ExajEHL1dlBSRBgPXB"></span>
-      <span class="dot offline" style="display:inline-block;margin-left:3px" data-page-node-id="oHSTbyaRHGBoJa3WqV7n5C"></span>
+      <b>Agent 状态（6 态）</b>
+      <div class="lg-row"><span class="dot free"></span>可用 Available</div>
+      <div class="lg-row"><span class="dot thinking"></span>思考中 Thinking</div>
+      <div class="lg-row"><span class="dot busy"></span>工作中 Working</div>
+      <div class="lg-row"><span class="dot waiting"></span>等待上下文 Waiting Context</div>
+      <div class="lg-row"><span class="dot error"></span>错误 Error</div>
+      <div class="lg-row"><span class="dot offline"></span>离线 Offline</div>
     </div>
   </aside>
 </div>
 
 <div class="notes" id="notes" style="display:none" data-page-node-id="6CwhnCDbyn0bOmazvSFrdh">
   <button class="close" onclick="toggleNotes()" data-page-node-id="bE1I2oMy5nspgon6Fy7zSE">×</button>
-  <h3 data-page-node-id="gg8707PZbEhjBr4S0BZFNc">本页承载的 5 个关键设计决策</h3>
+  <h3>本页承载的 6 个关键设计决策</h3>
   <ol data-page-node-id="ENcDBPOcmOuxwXA00BwdPg">
     <li data-page-node-id="VPiXyDJPxbEtNRZXmc0WNA"><b data-page-node-id="mMJIoBxeJB8Jlnmr8uUFwA">四栏常驻</b>：右栏「成员 + 记忆 + 待办」是产品差异化，不能像 Slack 那样折叠掉。</li>
     <li data-page-node-id="vU3MxFgs3R39x7YCrUe6m2"><b data-page-node-id="2YAODyoqnCa1SzOgmCGsnX">消息分 5 形态</b>：人类消息 / Agent 决策卡片 / Agent 输出 / 系统事件 / 记忆申请。MVP 不动手，Agent 的全部价值都在卡片上。</li>
     <li data-page-node-id="pSme3vtlNA65kiOP1wYnQJ"><b data-page-node-id="Qh3V7ptMGhYGJNrI1MYNlQ">Agent 回复走线程</b>：避免多人多 Agent 平铺刷屏。</li>
     <li data-page-node-id="EBAUcRiZgdwDkurzOJirbj"><b data-page-node-id="I7j7NCWEde4vIR1jH9UJqm">状态点贯穿全局</b>：成员列表、@ 下拉、消息头像、右栏共用一套语义色。</li>
-    <li data-page-node-id="CV2YaWcBXLgvdRlYjxEccj"><b data-page-node-id="ZTWWChrPvaVlQ2Nm2AL9ti">@all 带成本预警</b>：防止误触一次烧掉大量 token。</li>
+    <li data-page-node-id="CV2YaWcBXLgvdRlYjxEccj"><b data-page-node-id="ZTWWChrPvaVlQ2Nm2AL9ti">决策依据可视化</b>：能力 / 上下文完整度 / 权限三格，让 Agent 的 Accept / Reject 可解释，而不是黑箱。</li>
+    <li data-page-node-id="newli1"><b>@all 带成本预警</b>：防止误触一次烧掉大量 token；@ 只路由成员与能力组，引用频道改用 #。</li>
   </ol>
 </div>
 
@@ -359,17 +428,21 @@ const CHANNELS = {
   'webhook-retry': {
     title:'# webhook-retry',
     meta:['4 名成员','2 个 Agent','关联记忆 3 条'],
+    purpose:'确定支付回调的重试策略（退避算法与上限）',
+    context:'Payment 项目 · Payment 团队',
     messages:[
       {type:'divider',text:'今天'},
       {type:'human',name:'Jason',initials:'J',time:'21:40',text:'支付回调最近失败率上来了，<span class="ment">@Backend Agent</span> 重试策略要不要改成指数退避？'},
       {type:'human',name:'Tom',initials:'T',time:'21:41',text:'补充一下，现在是固定 3 次、间隔 5 秒。'},
       {type:'decision',name:'Backend Agent',time:'21:41',result:'NEED CONTEXT',
+        analysis:{cap:true,ctx:35,perm:true},
         reason:'可以判断，但缺 2 项上下文：',
         missing:['当前重试次数与间隔配置','近 7 天回调失败率与错误码分布'],
         actions:['补充上下文','转为人工处理']},
       {type:'thread',count:2,preview:'Jason 提供了配置文件片段与监控截图'},
       {type:'human',name:'Jason',initials:'J',time:'21:43',gap:true,text:'配置在这里，失败率近 7 天 4.2%，主要是 502 和 timeout。'},
       {type:'decision',name:'Backend Agent',time:'21:44',result:'ACCEPT',
+        analysis:{cap:true,ctx:92,perm:true},
         reason:'上下文充足，给出方案：建议改为指数退避 + 抖动，上限 5 次。',
         actions:[]},
       {type:'agent',name:'Backend Agent',time:'21:44',model:'claude-opus-4',tokens:'1.8k',latency:'6.2s',
@@ -388,6 +461,7 @@ const CHANNELS = {
       {type:'divider',text:'今天'},
       {type:'human',name:'Tom',initials:'T',time:'19:02',text:'下单接口的幂等键要不要换成客户端生成？'},
       {type:'decision',name:'Backend Agent',time:'19:03',result:'REJECT',
+        analysis:{cap:false,ctx:60,perm:true},
         reason:'超出我的能力范围：幂等键涉及客户端 SDK 改动，我没有前端代码上下文。建议 @frontend 角色或人工处理。',
         missing:[],actions:['转给人工','邀请其他 Agent']}
     ]
@@ -444,6 +518,11 @@ function renderMsg(m){
       '<div class="who"><span class="name">'+m.name+'</span><span class="chip agent">AGENT</span><span class="time">'+m.time+'</span></div>'+
       '<div class="decision '+cls+'">'+
         '<div class="dc-head"><span class="dc-badge '+(m.result==='ACCEPT'?'accept':(m.result==='REJECT'?'reject':'need'))+'">'+badge+'</span></div>'+
+        (m.analysis?'<div class="dc-analysis">'+
+          '<div class="dc-cell"><div class="k">能力匹配</div><div class="v">'+(m.analysis.cap?'<span class="tick">✓</span>符合':'<span class="tick no">×</span>不符合')+'</div></div>'+
+          '<div class="dc-cell"><div class="k">上下文完整度</div><div class="v">'+m.analysis.ctx+'%</div><div class="bar"><i class="'+(m.analysis.ctx>=80?'ok':'')+'" style="width:'+m.analysis.ctx+'%"></i></div></div>'+
+          '<div class="dc-cell"><div class="k">权限检查</div><div class="v">'+(m.analysis.perm?'<span class="tick">✓</span>通过':'<span class="tick no">×</span>拒绝')+'</div></div>'+
+        '</div>':'')+
         '<div class="dc-reason">'+m.reason+'</div>'+
         (m.missing&&m.missing.length?'<div class="dc-list">'+m.missing.map((x,i)=>'<div class="dc-item"><span class="idx">'+(i+1)+'</span>'+x+'</div>').join('')+'</div>':'')+
         (m.actions&&m.actions.length?'<div class="dc-actions">'+m.actions.map((a,i)=>'<button class="btn sm'+(i===0?' primary':'')+'">'+a+'</button>').join('')+'</div>':'')+
@@ -477,6 +556,9 @@ let current='webhook-retry';
 function render(){
   const ch = CHANNELS[current];
   document.getElementById('chTitle').textContent = ch.title;
+  document.getElementById('chSub').innerHTML = ch.purpose
+    ? '<b>Purpose</b> '+ch.purpose+'　·　<b>Context</b> '+ch.context
+    : '';
   document.getElementById('chMeta').innerHTML = ch.meta.map((x,i)=>(i?'<span class="sep"></span>':'')+x).join('');
   document.getElementById('stream').innerHTML = ch.messages.map(renderMsg).join('');
   document.getElementById('chanList').innerHTML = CHAN_META.map(c=>
