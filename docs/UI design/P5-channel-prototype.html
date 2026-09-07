@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<html lang="zh-CN" data-page-node-id="wLThZxlca2egLJwptOKplS">
+<head data-page-node-id="TvzGeaiDVWVJsN5s3rFKNI">
+<meta charset="UTF-8" data-page-node-id="AvaEA8WqFEAfxInFkC0dk1">
+<meta name="viewport" content="width=device-width, initial-scale=1.0" data-page-node-id="wOWkEjtZi7l7JXadTRjGzs">
 <title>MateOS · Channel 主界面原型 P5</title>
 <style>
 :root{
@@ -206,151 +206,151 @@ pre{font-family:var(--mono);font-size:12px;line-height:1.6;background:var(--surf
 .empty{padding:40px 16px;text-align:center;color:var(--text-3);font-size:12px;line-height:1.8}
 </style>
 </head>
-<body>
+<body data-page-node-id="XWSzaa7M74yq9Inf5E6VpL">
 
-<div class="topbar">
-  <div class="logo"><span class="mark">M</span>MateOS</div>
-  <button class="org">Acme 组织 ▾</button>
-  <div class="search">
-    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5 14 14"/></svg>
-    <input placeholder="搜索消息、成员、记忆…">
+<div class="topbar" data-page-node-id="Ojnwlyvo48In5vPySxzvez">
+  <div class="logo" data-page-node-id="uExdGuNWnBCUNhx6Egz6A1"><span class="mark" data-page-node-id="L9yeA4ClrT1xsNaB3Aad5Z">M</span>MateOS</div>
+  <button class="org" data-page-node-id="ZrjXhyy6pMb1UU6qRJNIWF">Acme 组织 ▾</button>
+  <div class="search" data-page-node-id="P675ZkBZpSl0CWZtUn8lDY">
+    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" data-page-node-id="Amokn9LDKTJUYZUwhGpsSl"><circle cx="7" cy="7" r="4.5" data-page-node-id="DrTGiJpQvX43DkY10dFb0r"/><path d="M10.5 10.5 14 14" data-page-node-id="yn0QJ2JdWKxHC0Uag3ZasI"/></svg>
+    <input placeholder="搜索消息、成员、记忆…" data-page-node-id="7LU42APAceP56AotPxvAtr">
   </div>
-  <div class="tb-right">
-    <button class="icon-btn" onclick="toggleNotes()">设计说明</button>
-    <button class="icon-btn">我的 Agents</button>
-    <button class="icon-btn bell">通知<span class="dot" id="bellCount">2</span></button>
-    <div class="avatar">J</div>
+  <div class="tb-right" data-page-node-id="zJ6rw98kBvVvBGEu2Xpey4">
+    <button class="icon-btn" onclick="toggleNotes()" data-page-node-id="s03FnuNbYAhY7za3ZMKDLS">设计说明</button>
+    <button class="icon-btn" data-page-node-id="CgNpJvtpIHQNsev3w7xNsM">我的 Agents</button>
+    <button class="icon-btn bell" data-page-node-id="sm2YiW8DwFIlZUIPjo2eN8">通知<span class="dot" id="bellCount" data-page-node-id="OB2Pjo2Fnx3FNWrj7tG5eQ">2</span></button>
+    <div class="avatar" data-page-node-id="dvd9vkg0mVCW1GCkNIpOEn">J</div>
   </div>
 </div>
 
-<div class="shell">
-  <aside class="sidebar">
-    <div class="sb-head">
-      <div class="sb-label">团队</div>
-      <button class="sb-team">Payment 团队 ▾</button>
+<div class="shell" data-page-node-id="aMqtHlwDIUY3vd4D8VrgxR">
+  <aside class="sidebar" data-page-node-id="SfOYY2zBPoWtWPc7y0um9o">
+    <div class="sb-head" data-page-node-id="wCQvwQAcUx9OlnvDhBU1jA">
+      <div class="sb-label" data-page-node-id="BaiLb6AQrydzYOT6RbATG3">团队</div>
+      <button class="sb-team" data-page-node-id="RYPmgB0EGb1KXcPvFCXYvn">Payment 团队 ▾</button>
     </div>
-    <div class="sb-project">
-      <div class="sb-project-name">支付重构 <span style="color:var(--text-3);font-weight:400">▾</span></div>
-      <div class="sb-project-meta">进行中 · 6 名成员 · 2 个 Agent</div>
+    <div class="sb-project" data-page-node-id="KCb3xEJ5aZQyNbSCRUeWZL">
+      <div class="sb-project-name" data-page-node-id="psrm4dDoBzUYe0znOjFJWY">支付重构 <span style="color:var(--text-3);font-weight:400" data-page-node-id="65LhcduN0dDg1OAWW1fHQB">▾</span></div>
+      <div class="sb-project-meta" data-page-node-id="9rjeCkrerFgZ1GFmLpVtVV">进行中 · 6 名成员 · 2 个 Agent</div>
     </div>
-    <div class="sb-section">
-      <div class="sb-section-title">频道 <span style="font-size:13px">＋</span></div>
-      <div id="chanList"></div>
+    <div class="sb-section" data-page-node-id="AnsyKTbl6gyUEQ3BEGM7My">
+      <div class="sb-section-title" data-page-node-id="IiFYNbndfphqZ7lJdmrB5O">频道 <span style="font-size:13px" data-page-node-id="zwcJKN67IUuUJpnSFA6Olz">＋</span></div>
+      <div id="chanList" data-page-node-id="swwrqwvP5sAAbGfiwisI3Q"></div>
     </div>
-    <div class="sb-section">
-      <div class="sb-section-title">项目记忆 <span style="font-size:13px">＋</span></div>
-      <button class="mem-item"><span class="tag">ADR</span>ADR-001 数据库选型</button>
-      <button class="mem-item"><span class="tag">约定</span>重试策略约定</button>
-      <button class="mem-item"><span class="tag">知识</span>对账领域术语表</button>
+    <div class="sb-section" data-page-node-id="GNFuCMTY5nX4MrILQBF1Ib">
+      <div class="sb-section-title" data-page-node-id="a58d9ECMcqR7XMiLLolhL5">项目记忆 <span style="font-size:13px" data-page-node-id="1sYuCkLQcxLBJ5guqcCJtp">＋</span></div>
+      <button class="mem-item" data-page-node-id="hgOSdXX7dw3Mjjxrxk5Zu8"><span class="tag" data-page-node-id="27kcv3tF1V4qZkn1nLWr6M">ADR</span>ADR-001 数据库选型</button>
+      <button class="mem-item" data-page-node-id="PqnlZNUXYK0WjBYtqDWtYZ"><span class="tag" data-page-node-id="VotnipfPkEEMj7mCkqycYd">约定</span>重试策略约定</button>
+      <button class="mem-item" data-page-node-id="qFGXF7sQHXRMvFbhUChGJd"><span class="tag" data-page-node-id="xc2uRBAKPeeKiOLyro8Iko">知识</span>对账领域术语表</button>
     </div>
-    <div style="flex:1"></div>
-    <div style="padding:10px;border-top:0.5px solid var(--border);font-size:11px;color:var(--text-3)">MVP 原型 · P5 Channel 主界面</div>
+    <div style="flex:1" data-page-node-id="pApRha7gMZAtEPfasTd0Fb"></div>
+    <div style="padding:10px;border-top:0.5px solid var(--border);font-size:11px;color:var(--text-3)" data-page-node-id="p2jIpWF7D8hMcpwRHx2oK1">MVP 原型 · P5 Channel 主界面</div>
   </aside>
 
-  <main class="channel">
-    <div class="ch-head">
-      <div>
-        <div class="ch-title" id="chTitle"># webhook-retry</div>
+  <main class="channel" data-page-node-id="aNqH0T98wRSxcURqdRUSKE">
+    <div class="ch-head" data-page-node-id="CKGesBL6Lyjk6aUIsrHWqD">
+      <div data-page-node-id="ySNIawo8qsASJHYGlDoR8B">
+        <div class="ch-title" id="chTitle" data-page-node-id="2DXS8hyPAWWbM31Cgs7FZJ"># webhook-retry</div>
       </div>
-      <div class="ch-meta" id="chMeta"></div>
-      <div class="ch-actions">
-        <button class="btn sm">邀请成员</button>
-        <button class="btn sm" onclick="toggleContext()">上下文面板</button>
+      <div class="ch-meta" id="chMeta" data-page-node-id="5qDbLXCdBhUoxJ3NVa0TPn"></div>
+      <div class="ch-actions" data-page-node-id="jwFA6GyPwXhtjeHQNuaCGT">
+        <button class="btn sm" data-page-node-id="gDBSs0ZqDv9n6aBbRgXGnS">邀请成员</button>
+        <button class="btn sm" onclick="toggleContext()" data-page-node-id="duj071OcWXK8X6atm0Wrzw">上下文面板</button>
       </div>
     </div>
-    <div class="stream" id="stream"></div>
-    <div class="composer">
-      <div class="comp-box">
-        <div class="comp-tools">
-          <button class="btn sm" onclick="toggleMention()">@ 提及</button>
-          <button class="btn sm">引用记忆</button>
-          <button class="btn sm">附件</button>
+    <div class="stream" id="stream" data-page-node-id="wDdHOg4iG1uzqEYVTy48we"></div>
+    <div class="composer" data-page-node-id="lB1Zl5bUoYImQSGAUyRfsF">
+      <div class="comp-box" data-page-node-id="Q6SP0Y1bOigqrFN8v3G4FD">
+        <div class="comp-tools" data-page-node-id="TBFeyoamyWk81WwWpapcGr">
+          <button class="btn sm" onclick="toggleMention()" data-page-node-id="00YcsNY4e3bRZpLFHLpv7M">@ 提及</button>
+          <button class="btn sm" data-page-node-id="qAiQvNcfSNan7aJb0bIn6U">引用记忆</button>
+          <button class="btn sm" data-page-node-id="E6GaF2gxok3cnig9ZZFwzc">附件</button>
         </div>
-        <div class="comp-input" style="position:relative">
+        <div class="comp-input" style="position:relative" data-page-node-id="JFwPeEmQkziBzP6fMNWU9V">
           <textarea id="ta" placeholder="输入消息…  按 @ 提及成员、能力组或项目记忆"></textarea>
-          <div class="mention-pop" id="mp" style="display:none">
-            <div class="mp-group">
-              <div class="mp-group-title">成员</div>
-              <div class="mp-item sel"><span class="dot free"></span><span class="nm">Backend Agent</span><span class="cap">coding · review</span></div>
-              <div class="mp-item"><span class="dot free"></span><span class="nm">QA Agent</span><span class="cap">testing</span></div>
-              <div class="mp-item"><span class="nm" style="margin-left:15px">Jason</span><span class="cap">human</span></div>
-              <div class="mp-item"><span class="nm" style="margin-left:15px">Tom</span><span class="cap">human</span></div>
+          <div class="mention-pop" id="mp" style="display:none" data-page-node-id="YVNc4UxNnSfLGowGyM7kyk">
+            <div class="mp-group" data-page-node-id="koFCRQBEgeWEP0AavLuZwQ">
+              <div class="mp-group-title" data-page-node-id="GrJKKSP4c7RKmBO28nWz09">成员</div>
+              <div class="mp-item sel" data-page-node-id="sl46kOmyqgSf1Egzs9K9lc"><span class="dot free" data-page-node-id="JarxnKsgYwQIJqDLUXryQM"></span><span class="nm" data-page-node-id="ZI0vwoE6FX5Qo1BGrdav8g">Backend Agent</span><span class="cap" data-page-node-id="0gjhZn6AYtfoxcsldsQoND">coding · review</span></div>
+              <div class="mp-item" data-page-node-id="ZfzAYgtdl1qP5Hh4H5EmlD"><span class="dot free" data-page-node-id="R8OeI2BVjL0mTQTI54NZL0"></span><span class="nm" data-page-node-id="HTRzw8EfGR5t4hKZBcAj33">QA Agent</span><span class="cap" data-page-node-id="NwtC2nYUaIo9F63nceGJde">testing</span></div>
+              <div class="mp-item" data-page-node-id="r6nLhbaD3ciZuV6nszHIcg"><span class="nm" style="margin-left:15px" data-page-node-id="3KGs5TSZQeCJNa2Gx63HUw">Jason</span><span class="cap" data-page-node-id="0SKaA1AAthTnn9nM9Hp2MG">human</span></div>
+              <div class="mp-item" data-page-node-id="s6h4hKTf5i0AHz0N7XOlYa"><span class="nm" style="margin-left:15px" data-page-node-id="dyEMGX5YLf8GrPQLNRARms">Tom</span><span class="cap" data-page-node-id="oG0EzvtqzXcEeDhLvdDlSo">human</span></div>
             </div>
-            <div class="mp-group" style="border-top:0.5px solid var(--border)">
-              <div class="mp-group-title">能力组</div>
-              <div class="mp-item"><span class="nm">@backend-team</span><span class="cap">按能力匹配 Agent</span></div>
+            <div class="mp-group" style="border-top:0.5px solid var(--border)" data-page-node-id="HATDQI3dQiFcthdCiDWXb1">
+              <div class="mp-group-title" data-page-node-id="3cECyLHzaTKM53yZyUqxCi">能力组</div>
+              <div class="mp-item" data-page-node-id="zX7Box1C0NNNA3WebueS2Y"><span class="nm" data-page-node-id="SFue94qDilJflo5QjlhMHD">@backend-team</span><span class="cap" data-page-node-id="L02DBsJ3GhEWdmATWRtLts">按能力匹配 Agent</span></div>
             </div>
-            <div class="mp-group" style="border-top:0.5px solid var(--border)">
-              <div class="mp-item"><span class="nm">@all</span><span class="cap">全体成员</span></div>
-              <div class="mp-warn">将触发 2 个 Agent 自行判断是否响应，预计消耗约 3.2k tokens</div>
+            <div class="mp-group" style="border-top:0.5px solid var(--border)" data-page-node-id="HgcD8wbg1DMloqDFykyI22">
+              <div class="mp-item" data-page-node-id="G54y6oGFYXGRByil0Q9D53"><span class="nm" data-page-node-id="r40iDfuf51Ew4Mhb4ClDDT">@all</span><span class="cap" data-page-node-id="EJJw8oA7H0Rcb1lvpBumaz">全体成员</span></div>
+              <div class="mp-warn" data-page-node-id="3CeSilcRDI9CcFO0hOU45N">将触发 2 个 Agent 自行判断是否响应，预计消耗约 3.2k tokens</div>
             </div>
           </div>
         </div>
-        <div class="comp-foot">
-          <button class="btn sm primary">发送</button>
-          <span class="hint">Enter 发送 · Shift+Enter 换行</span>
+        <div class="comp-foot" data-page-node-id="QBl4oNRIEq91ep1XpnpDbF">
+          <button class="btn sm primary" data-page-node-id="N3DKYEJAAgkt0NDD1T1NMN">发送</button>
+          <span class="hint" data-page-node-id="lbJV2r6D8SXzGIWRmMo7Cp">Enter 发送 · Shift+Enter 换行</span>
         </div>
       </div>
     </div>
   </main>
 
-  <aside class="context" id="context">
-    <div class="tabs">
-      <button class="tab active" data-tab="mem" onclick="setTab('mem')">成员 <span class="n">4</span></button>
-      <button class="tab" data-tab="doc" onclick="setTab('doc')">记忆 <span class="n">3</span></button>
-      <button class="tab" data-tab="todo" onclick="setTab('todo')">待办 <span class="n" id="todoN">2</span></button>
+  <aside class="context" id="context" data-page-node-id="uNEacnwAKJF7IIpcvXqonk">
+    <div class="tabs" data-page-node-id="rUfI8ov8wEUZo7CLCwGh7J">
+      <button class="tab active" data-tab="mem" onclick="setTab('mem')" data-page-node-id="rdT4DbKvVgHBjTsSfdKL0h">成员 <span class="n" data-page-node-id="FjmfYC3kO9rk2bPo1Gshut">4</span></button>
+      <button class="tab" data-tab="doc" onclick="setTab('doc')" data-page-node-id="uD7m3xbeHK5sKZWl9GwDj6">记忆 <span class="n" data-page-node-id="7D7e92F4hSO1cfgIMwrxhN">3</span></button>
+      <button class="tab" data-tab="todo" onclick="setTab('todo')" data-page-node-id="AdmYFcI6dK1cM7Hu2Mrlv8">待办 <span class="n" id="todoN" data-page-node-id="yHwLtPgF7vIzUHG6UlpXYB">2</span></button>
     </div>
-    <div class="pane" id="paneMem">
-      <div class="pane-title">人类成员</div>
-      <div class="member"><span class="dot free"></span><span class="nm">Jason</span><span class="st">owner</span></div>
-      <div class="member"><span class="dot free"></span><span class="nm">Tom</span><span class="st">owner</span></div>
-      <div class="pane-title" style="margin-top:8px">Agent 成员</div>
-      <div class="member"><span class="dot waiting"></span><span class="nm">Backend Agent</span><span class="st">等待上下文</span></div>
-      <div class="cap-row"><span class="cap">coding</span><span class="cap">review</span><span class="cap">architecture</span><span class="cap">claude-opus</span></div>
-      <div class="member"><span class="dot free"></span><span class="nm">QA Agent</span><span class="st">空闲</span></div>
-      <div class="cap-row"><span class="cap">testing</span><span class="cap">gpt-5</span></div>
-      <div class="pane-title" style="margin-top:8px">邀请中</div>
-      <div class="member"><span class="dot offline"></span><span class="nm">Security Agent</span><span class="st">待批准</span></div>
+    <div class="pane" id="paneMem" data-page-node-id="mThf6jn3uuSzknaqpteWQJ">
+      <div class="pane-title" data-page-node-id="4DNZvswco3ISjioHV8thP4">人类成员</div>
+      <div class="member" data-page-node-id="3FCppGLrINWZ5ynVXa2qen"><span class="dot free" data-page-node-id="DoxKnea2WVCs2ANOgeKRRH"></span><span class="nm" data-page-node-id="EF1V9idoiBngfAaHl3bbGf">Jason</span><span class="st" data-page-node-id="d334fsz3Z6KhHYf8j1HunT">owner</span></div>
+      <div class="member" data-page-node-id="D3dxUlAjunCV7YYlGdGXoX"><span class="dot free" data-page-node-id="s8TPAnXnCsUdDEBc2kV8pj"></span><span class="nm" data-page-node-id="FWQNafwUXMiFT2d1KUBoHq">Tom</span><span class="st" data-page-node-id="2wr5j4c5lA9zJ46PM0pzRg">owner</span></div>
+      <div class="pane-title" style="margin-top:8px" data-page-node-id="16wEnW859KKv1WDzsEf4Z7">Agent 成员</div>
+      <div class="member" data-page-node-id="V7BUJqLQ3LGnH3guTfqCez"><span class="dot waiting" data-page-node-id="6jdgetcl97m5SrAbILepOu"></span><span class="nm" data-page-node-id="swuMglbSt5NF8gfIIK7KM8">Backend Agent</span><span class="st" data-page-node-id="QFWLnCLW4ZW9yIo2kEq1sl">等待上下文</span></div>
+      <div class="cap-row" data-page-node-id="xP41sYXPsIJW2qeEjMaqtB"><span class="cap" data-page-node-id="kEDAinTBqBykTlHtmpU1yH">coding</span><span class="cap" data-page-node-id="CRkxHwk0OFvXW1oVt9DUcJ">review</span><span class="cap" data-page-node-id="1UhRst10Wr1ThMI5vxZLar">architecture</span><span class="cap" data-page-node-id="6SZN5k2ALKAjsXcpWJZWxl">claude-opus</span></div>
+      <div class="member" data-page-node-id="uGL2aPcgVF2BIEccHP3qnJ"><span class="dot free" data-page-node-id="3YfLXV3m7gR3YY4EC0tpA3"></span><span class="nm" data-page-node-id="cubPiHvdLMnwW0SuBayR1C">QA Agent</span><span class="st" data-page-node-id="taD0eMWdfZa5fEy1lGJgFc">空闲</span></div>
+      <div class="cap-row" data-page-node-id="q8id8A88fK3CI4M3AkwejV"><span class="cap" data-page-node-id="XR5J2ZTQhe5gtO3Aj977CF">testing</span><span class="cap" data-page-node-id="lQnrpK86I5jZhG9K8EDRJ8">gpt-5</span></div>
+      <div class="pane-title" style="margin-top:8px" data-page-node-id="EPybWm1GaQrfHHpwVhriS0">邀请中</div>
+      <div class="member" data-page-node-id="JmHfGxhUQiAUgrCdVkYcUe"><span class="dot offline" data-page-node-id="yqgtyTuB252k3rjAg5cN2E"></span><span class="nm" data-page-node-id="ffBUvqjhWnryO2fsxCHnbm">Security Agent</span><span class="st" data-page-node-id="zwMB0nM4V0R1yc6ia4BqWO">待批准</span></div>
     </div>
-    <div class="pane" id="paneDoc" style="display:none">
-      <div class="mem-doc"><div class="t"><span class="badge d">决策</span>ADR-001 数据库选型</div><div class="m">Jason 批准 · 3 天前 · v2</div></div>
-      <div class="mem-doc"><div class="t"><span class="badge p">项目</span>重试策略约定</div><div class="m">Backend Agent 申请 · 待批准</div></div>
-      <div class="mem-doc"><div class="t"><span class="badge k">知识</span>对账领域术语表</div><div class="m">Tom 批准 · 6 天前 · v1</div></div>
-      <div class="pane-title" style="margin-top:8px">写入流程</div>
-      <div style="font-size:11px;color:var(--text-3);line-height:1.8;padding:0 2px">Agent 申请 → 人类批准 → 进入共享记忆 → 可被 @ 引用</div>
+    <div class="pane" id="paneDoc" style="display:none" data-page-node-id="NtWmUmVXEqvJa6aB3qCGWS">
+      <div class="mem-doc" data-page-node-id="mON5YWAKAo477o2D6P9g47"><div class="t" data-page-node-id="7kjaKLzzzoaG5X52ATDzoA"><span class="badge d" data-page-node-id="tL6PPsGA2zHUtjotTcFfQh">决策</span>ADR-001 数据库选型</div><div class="m" data-page-node-id="fphzVlhV3AiwbC4FDGFBeX">Jason 批准 · 3 天前 · v2</div></div>
+      <div class="mem-doc" data-page-node-id="tCUGfTk66OQZQepGExpXDU"><div class="t" data-page-node-id="f5IcnYTEY9CC3WtB7qlSsU"><span class="badge p" data-page-node-id="mmolSxs2EDhSslz4Ee1VAy">项目</span>重试策略约定</div><div class="m" data-page-node-id="5Kfh0fzC7xnG5dxcK8Wk0u">Backend Agent 申请 · 待批准</div></div>
+      <div class="mem-doc" data-page-node-id="55GHvtVLkQxHKQRg5TadBZ"><div class="t" data-page-node-id="wU1H8SaDrpELjOwVrPZDqV"><span class="badge k" data-page-node-id="tKLK7umBqZIND1B8tFIzYq">知识</span>对账领域术语表</div><div class="m" data-page-node-id="NCvMbFLF7zAmYoP1rKALD3">Tom 批准 · 6 天前 · v1</div></div>
+      <div class="pane-title" style="margin-top:8px" data-page-node-id="EkE6p3ECSu3bZyQ5sz9OXs">写入流程</div>
+      <div style="font-size:11px;color:var(--text-3);line-height:1.8;padding:0 2px" data-page-node-id="OpYKMVBHNuJjSYL7IohICS">Agent 申请 → 人类批准 → 进入共享记忆 → 可被 @ 引用</div>
     </div>
-    <div class="pane" id="paneTodo" style="display:none">
-      <div class="todo">
-        <div class="tt">Agent 入频道审批</div>
-        <div class="tb">Tom 邀请 Security Agent 加入 #webhook-retry</div>
-        <button class="btn sm primary">批准</button> <button class="btn sm">驳回</button>
+    <div class="pane" id="paneTodo" style="display:none" data-page-node-id="IvZ5Fizy3yuMUtmBYDEsW8">
+      <div class="todo" data-page-node-id="2Q2xLELpLnTigGt2Uu4FLp">
+        <div class="tt" data-page-node-id="XqCfsKbQeusn1ajqFH33gE">Agent 入频道审批</div>
+        <div class="tb" data-page-node-id="7EfTJXlMjmENX6dzWB6vwM">Tom 邀请 Security Agent 加入 #webhook-retry</div>
+        <button class="btn sm primary" data-page-node-id="MSOhiP5ODEpNq8E7YgEVvZ">批准</button> <button class="btn sm" data-page-node-id="OvzJjICG59KBt0tX3i1ANe">驳回</button>
       </div>
-      <div class="todo">
-        <div class="tt">记忆写入审批</div>
-        <div class="tb">Backend Agent 申请写入「重试策略约定」</div>
-        <button class="btn sm primary">批准</button> <button class="btn sm">驳回</button> <button class="btn sm ghost">编辑</button>
+      <div class="todo" data-page-node-id="mSjUN2KJsy2bzvtnZlIbcp">
+        <div class="tt" data-page-node-id="erKf3hqOiVoE2pjbc2PegC">记忆写入审批</div>
+        <div class="tb" data-page-node-id="iPVCOUg6LDefUjaMn5M3Gg">Backend Agent 申请写入「重试策略约定」</div>
+        <button class="btn sm primary" data-page-node-id="7Gedzj0J9pDmOmeDqstDVq">批准</button> <button class="btn sm" data-page-node-id="qD8olnmNuwC4wGhJiJSVnu">驳回</button> <button class="btn sm ghost" data-page-node-id="Qw1eUpJ573CYiuOE90Zgc6">编辑</button>
       </div>
     </div>
-    <div class="legend">
-      <b>状态</b>　空闲 忙碌 思考中 等待上下文 离线<br>
-      <span class="dot free" style="display:inline-block"></span>
-      <span class="dot busy" style="display:inline-block;margin-left:3px"></span>
-      <span class="dot thinking" style="display:inline-block;margin-left:3px"></span>
-      <span class="dot waiting" style="display:inline-block;margin-left:3px"></span>
-      <span class="dot offline" style="display:inline-block;margin-left:3px"></span>
+    <div class="legend" data-page-node-id="tjhahGAhFLmAh9NQ1JMwVn">
+      <b data-page-node-id="wYjjTts2F29FLWT1tw5t2i">状态</b>　空闲 忙碌 思考中 等待上下文 离线<br data-page-node-id="b58TkgfMPdXVbqBFyuSTwi">
+      <span class="dot free" style="display:inline-block" data-page-node-id="ICxxeHkECldZoAj6IbyocE"></span>
+      <span class="dot busy" style="display:inline-block;margin-left:3px" data-page-node-id="eQhsq73dc2ZZqQnbDIoaLn"></span>
+      <span class="dot thinking" style="display:inline-block;margin-left:3px" data-page-node-id="L0gUcpN1GnbFkMKHsRD6uA"></span>
+      <span class="dot waiting" style="display:inline-block;margin-left:3px" data-page-node-id="pSK7ExajEHL1dlBSRBgPXB"></span>
+      <span class="dot offline" style="display:inline-block;margin-left:3px" data-page-node-id="oHSTbyaRHGBoJa3WqV7n5C"></span>
     </div>
   </aside>
 </div>
 
-<div class="notes" id="notes" style="display:none">
-  <button class="close" onclick="toggleNotes()">×</button>
-  <h3>本页承载的 5 个关键设计决策</h3>
-  <ol>
-    <li><b>四栏常驻</b>：右栏「成员 + 记忆 + 待办」是产品差异化，不能像 Slack 那样折叠掉。</li>
-    <li><b>消息分 5 形态</b>：人类消息 / Agent 决策卡片 / Agent 输出 / 系统事件 / 记忆申请。MVP 不动手，Agent 的全部价值都在卡片上。</li>
-    <li><b>Agent 回复走线程</b>：避免多人多 Agent 平铺刷屏。</li>
-    <li><b>状态点贯穿全局</b>：成员列表、@ 下拉、消息头像、右栏共用一套语义色。</li>
-    <li><b>@all 带成本预警</b>：防止误触一次烧掉大量 token。</li>
+<div class="notes" id="notes" style="display:none" data-page-node-id="6CwhnCDbyn0bOmazvSFrdh">
+  <button class="close" onclick="toggleNotes()" data-page-node-id="bE1I2oMy5nspgon6Fy7zSE">×</button>
+  <h3 data-page-node-id="gg8707PZbEhjBr4S0BZFNc">本页承载的 5 个关键设计决策</h3>
+  <ol data-page-node-id="ENcDBPOcmOuxwXA00BwdPg">
+    <li data-page-node-id="VPiXyDJPxbEtNRZXmc0WNA"><b data-page-node-id="mMJIoBxeJB8Jlnmr8uUFwA">四栏常驻</b>：右栏「成员 + 记忆 + 待办」是产品差异化，不能像 Slack 那样折叠掉。</li>
+    <li data-page-node-id="vU3MxFgs3R39x7YCrUe6m2"><b data-page-node-id="2YAODyoqnCa1SzOgmCGsnX">消息分 5 形态</b>：人类消息 / Agent 决策卡片 / Agent 输出 / 系统事件 / 记忆申请。MVP 不动手，Agent 的全部价值都在卡片上。</li>
+    <li data-page-node-id="pSme3vtlNA65kiOP1wYnQJ"><b data-page-node-id="Qh3V7ptMGhYGJNrI1MYNlQ">Agent 回复走线程</b>：避免多人多 Agent 平铺刷屏。</li>
+    <li data-page-node-id="EBAUcRiZgdwDkurzOJirbj"><b data-page-node-id="I7j7NCWEde4vIR1jH9UJqm">状态点贯穿全局</b>：成员列表、@ 下拉、消息头像、右栏共用一套语义色。</li>
+    <li data-page-node-id="CV2YaWcBXLgvdRlYjxEccj"><b data-page-node-id="ZTWWChrPvaVlQ2Nm2AL9ti">@all 带成本预警</b>：防止误触一次烧掉大量 token。</li>
   </ol>
 </div>
 
