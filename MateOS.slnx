@@ -1,0 +1,6 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/MateOS.Api/MateOS.Api.csproj" />
+    <Project Path="src/MateOS.Core/MateOS.Core.csproj" />
+  </Folder>
+</Solution>
