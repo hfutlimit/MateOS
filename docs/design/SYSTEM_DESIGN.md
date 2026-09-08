@@ -1,14 +1,22 @@
-# MateOS 系统架构设计（SYSTEM_DESIGN v0.2）
+# MateOS 系统架构设计（SYSTEM_DESIGN v0.3）
 
 | 文档信息 | 内容 |
 | --- | --- |
-| 上游文档 | docs/requirement/MateOS-总体需求文档.md（PRD v0.3） |
+| 上游文档 | docs/requirement/MateOS-总体需求文档.md（PRD v0.4） |
 | 文档状态 | Draft |
-| 版本 | v0.2 |
+| 版本 | v0.3 |
 | 日期 | 2026-09-08 |
-| 前提 | **MateOS 为独立自洽系统**：协作、决策、Agent 运行时与执行能力均为自身组件；同时通过 §8 / §10 协议保留与 AgentBoard / Jira 等外部系统的可选协作扩展点（默认关闭） |
+| 前提 | **MateOS 为独立自洽系统**：Agent Execution 域自研（永久不切到任何外部执行后端）；Work Management 是独立域（Built-in + Jira Provider 抽象，与 Execution 完全解耦） |
 
-> **v0.1 → v0.2 变更摘要**：Agent 状态枚举扩展为 6 态（新增 ERROR 触发与恢复，与 PRD / UI DS 收敛）；§8 协议汇总新增「MateOS ↔ AgentBoard 协作协议」v1；新增 §10 外部集成扩展点（执行后端切换 + 项目管理工具切换）；Mention 流水线新增 Resolver 结果回写事件。
+> **v0.2 → v0.3 变更摘要**（架构评审后推倒重来）：
+> 1. **删除 AgentBoard execution backend**：Architecture diagram、Project schema、Runtime dispatch path 全清
+> 2. **新增 Agent Execution domain（§6）**：`agent_executions` / `execution_attempts` / `execution_events` / `execution_artifacts`；BullMQ 不再是 source of truth
+> 3. **新增 Work Management 域（§9）**：`WorkItem` / `WorkItemBinding` / Provider 抽象（Built-in + Jira）；Project 不再存 `integration_backend` / `issue_tracker`
+> 4. **新增 CollaborationRequest 一等实体（§4.2）**：Trigger → CollaborationRequest → Decision → Execution
+> 5. **Permission effect `REQUEST` → `REQUIRE_APPROVAL`**：与 CollaborationRequest / HTTP Request 概念分离
+> 6. **Agent lifecycle / activity 拆分**：lifecycle=ACTIVE/PAUSED/DISABLED，activity=OFFLINE/.../ERROR
+> 7. **删除 `can_execute` / `can_review` 字段**：Capability（能不能）+ Permission（允不允许）单一事实源
+> 8. **消息流改 projection**：`messages.content_type` 5 形态保留，DECISION/MEMORY_REQUEST 形态只引 `entity_ref`
 
 ---
 
@@ -24,15 +32,16 @@
                 │ HTTPS /api/v1        │ WSS /ws
 ┌───────────────▼─────────────────────▼───────────────┐
 │  Application 层（NestJS Modular Monolith）           │
-│  auth │ org/team/project │ channel/message │ mention│
-│  memory │ permission │ agent-registry │ runtime     │
+│  auth │ org/team/project │ channel │ mention │ memory│
+│  collaboration │ permission │ agent-registry       │
+│  execution │ work-management │ runtime              │
 └───────┬──────────────┬───────────────┬──────────────┘
         │               │               │
 ┌───────▼──────┐ ┌──────▼───────┐ ┌─────▼─────────────┐
 │ Orchestrator │ │ Memory       │ │ Agent Runtime     │
 │ Worker       │ │ Worker       │ │ Gateway + Sandbox │
-│ (Resolver/   │ │ (索引/检索/   │ │ (Connector 协议、  │
-│  Decision)   │ │  门禁)       │ │  容器沙箱)         │
+│ (Trigger →   │ │ (索引/检索/   │ │ (Connector +      │
+│  Req → Dec)  │ │  门禁)       │ │  Execution Domain)│
 └───────┬──────┘ └──────┬───────┘ └─────┬────────────┘
         └───────────────┼───────────────┘
                         │
@@ -42,407 +51,648 @@
       └────────────────────────────────────┘
 ```
 
-### 1.2 演进策略：模块化单体优先
+### 1.2 三大独立 lifecycle 域
 
-**MVP 不做微服务**。单体（NestJS 多模块）+ 独立 Worker 进程，按模块边界组织代码；触发以下任一条件再拆分：
+| 域 | 入口 | 终点 | 事实源 |
+| --- | --- | --- | --- |
+| **Collaboration** | Trigger（MENTION / WORK_ITEM / API / AUTOMATION） | Execution | `collaboration_requests` + `decision_records` |
+| **Work Management** | WorkItem CRUD | DONE / CLOSED | `work_items`（Built-in）或 Jira（Provider） |
+| **Agent Execution** | CollaborationRequest.decision=ACCEPT | Artifact 落库 | `agent_executions` / `attempts` / `events` / `artifacts` |
 
-- WebSocket 并发连接 > 5k → ws-gateway 独立部署
-- Memory 索引/检索成为 CPU 热点 → memory-worker 独立扩容
-- 团队 > 8 人且模块所有权清晰 → 按 §3 边界拆服务
+**互不绑定**：WorkItem 可无 Execution（人类编辑），Execution 可无 WorkItem（`@backend 看下代码`），Memory 引用可选填 WorkItem 关联。
 
-理由：MVP 的瓶颈是交付速度和模型迭代，不是流量；单体 + 明确模块边界可以在不推翻架构的前提下平滑拆分。
+### 1.3 演进策略
+
+MVP 不做微服务。单体 + 独立 Worker 进程；触发以下任一条件再拆分：
+- WS 并发 > 5k
+- Memory 索引/检索成 CPU 热点
+- 模块所有权清晰且团队 > 8 人
 
 ---
 
 ## 2. 技术选型
 
-| 领域 | 选型 | 理由 | 备选 |
-| --- | --- | --- | --- |
-| 前端 | **Next.js + TypeScript + antd 6** | 团队现有技术栈（Next16+antd6 经验），SSR 需求低但生态完整 | React SPA + Vite |
-| 前端状态 | **Zustand + TanStack Query** | 轻量；Query 管服务端状态与 WS 缓存同步 | Redux Toolkit |
-| 后端框架 | **NestJS (Node 22 LTS, TypeScript)** | 与前端同语言，DTO/协议类型可共享 monorepo 包；模块化天然匹配单体演进；Guard/Interceptor 匹配 Permission Model | FastAPI（Python）、Go chi（网关性能更强但开发效率低） |
-| ORM | **Prisma** | Schema 即文档、迁移工具链成熟 | Drizzle（更轻，可作替代） |
-| 主数据库 | **PostgreSQL 16** | 关系模型 + JSONB + 全文检索 + **pgvector** 一个库覆盖四类需求；MVP 少一个组件少一份运维 | MySQL+独立向量库 |
-| 向量检索 | **pgvector**（ANN, cosine） | Memory 检索 MVP 体量（<1M chunks）足够；避免早期引入 Qdrant/Milvus | Qdrant（>10M 或需混合检索重排序时迁移） |
-| 缓存/实时 | **Redis 7** | presence、pub/sub、限流、锁、timeline 缓存、任务队列（BullMQ）一站搞定 | KeyDB |
-| 任务队列 | **BullMQ**（基于 Redis） | 单体内异步任务（Resolver、Decision 超时、Memory 索引）够用；带重试/延迟/限流 | RabbitMQ（跨系统多消费者时再引入） |
-| 对象存储 | **S3 兼容（MinIO 自托管 / 云 S3）** | 附件、导出文件；预签名 URL 直传 | — |
-| LLM 接入 | **Provider Adapter（OpenAI-compatible 统一网关）** | Credential 分离（PRD §4.3）；一行配置切换 OpenAI/Anthropic/Gemini | LiteLLM 代理 |
-| 沙箱执行 | **Docker 容器隔离**（V3 启用） | Code Execution Non-Goal 直到 V3，但架构预留：gVisor/Firecracker 可后插 | — |
-| 部署 | **Docker Compose（MVP）→ K8s** | MVP 单机/单云主机起步 | — |
-| 可观测 | **OpenTelemetry + Prometheus + Grafana + Loki** | 标准 OTel 埋点，后端/WS/Worker 统一 trace | — |
-| CI/CD | **GitHub Actions** | — | — |
+| 领域 | 选型 | 理由 |
+| --- | --- | --- |
+| 前端 | Next.js + TypeScript + antd 6 | 团队栈；TanStack Query 管 WS 缓存 |
+| 后端 | NestJS (Node 22 LTS) | 模块化匹配 Permission + Domain 分层 |
+| ORM | Prisma | Schema 即文档 |
+| DB | PostgreSQL 16 + pgvector | 关系 + JSONB + 全文 + 向量一库 |
+| 缓存/队列 | Redis 7 + BullMQ | presence / pub/sub / 限流 / 异步任务 |
+| 对象存储 | S3 / MinIO | 附件 + Execution Artifact |
+| LLM | Provider Adapter（OpenAI-compatible） | Credential 分离 |
+| 沙箱 | Docker（V3） | V1 不执行代码，架构预留 |
+| 部署 | Docker Compose → K8s | |
+| 可观测 | OTel + Prometheus + Grafana + Loki | |
 
 ---
 
 ## 3. 服务拆分
 
-MVP 部署形态 = **1 个单体 + 3 个 Worker + 1 前端**，同一 monorepo（pnpm workspace / Turborepo）：
-
 ```
 apps/
-  web/            # Next.js 前端
-  api/            # NestJS 单体（含 ws 模块）
+  web/              # Next.js 前端
+  api/              # NestJS 单体（含 ws 模块）
 packages/
-  contracts/      # DTO/事件/协议类型 + zod schema（前后端共享）
-  config/         # eslint/tsconfig 等
-services/         # 从 api 拆出的独立进程（同一镜像不同启动参数）
-  orchestrator/   # Mention Resolver、Decision 状态机、@all 仲裁
-  memory/         # Memory 索引(embedding)、检索、审批流超时
-  runtime/        # Agent Runtime Gateway（见 §6）
+  contracts/        # DTO + zod schema（含 WorkItem / Execution）
+  config/           # eslint/tsconfig
+services/
+  orchestrator/     # Trigger → CollaborationRequest → Decision
+  memory/           # Memory 索引/检索/审批
+  work-management/  # WorkItem 域 + Provider 适配（Built-in + Jira）
+  runtime/          # Agent Runtime Gateway + Execution Domain
 ```
 
-### 3.1 模块职责边界
+### 3.1 模块职责
 
 | 模块 | 职责 | 不负责 |
 | --- | --- | --- |
-| auth/iam | 注册登录、JWT、org/team/project 成员管理 | Channel 级权限（归 permission） |
-| channel | Channel CRUD、成员邀请、消息读写、已读、seq 分配 | Mention 解析（归 orchestrator） |
-| mention | Mention 存储、@all 群发 | 候选排序与路由（归 orchestrator） |
-| orchestrator | Mention Resolver 流水线、Decision 状态机、Delegate 路由、超时重路由 | 执行任务（默认归 MateOS Runtime；可选切 AgentBoard，§10.1） |
-| memory | 四类 Memory 的 CRUD、人审门禁、Source 溯源、embedding 索引与检索 | 消息存储 |
-| permission | 权限矩阵存储与判定（sync API，供所有模块调用） | 权限的 UI 配置 |
-| agent-registry | Agent CRUD、Credential 绑定、状态聚合（presence，6 态） | Agent 任务执行 |
-| runtime | Connector 协议接入、任务下发、心跳保活、沙箱生命周期 | 业务决策 |
-| task | 任务/子任务模型（V1 最小实现，V2 全量） | 代码执行（归 runtime sandbox） |
-| integration | 外部集成（§10）：AgentBoard / Jira 适配器，状态/评论双向同步 | 外部系统内部逻辑 |
+| auth/iam | 注册 / JWT / Org / Team / Project / Member | Channel scope 权限（归 permission） |
+| channel | Channel CRUD / 消息读写 / seq 分配 / 投影 | Trigger 解析（归 orchestrator） |
+| mention | Mention 提取 + 投递触发 | Resolver（归 orchestrator） |
+| **collaboration** | Trigger → CollaborationRequest / Decision / 超时重路由 | Execution（归 runtime） |
+| orchestrator | Resolver（lifecycle ∩ activity 过滤）/ Decision 状态机 | |
+| memory | Memory CRUD / Source 溯源 / 人审门禁 / 索引 | 消息存储 |
+| permission | 7 键 + 3 态（ALLOW/DENY/REQUIRE_APPROVAL）+ 三层覆盖 | UI 配置 |
+| agent-registry | Agent CRUD / Credential 绑定 / lifecycle+activity | Execution（归 runtime） |
+| **runtime** | Connector 协议 / Execution / Attempt / Event / Artifact / 心跳 | 业务决策（归 orchestrator） |
+| **work-management** | WorkItem 域 / Built-in + Provider 抽象 | Project 本身 |
+| task | （v0.4 起废弃）| |
 
 ---
 
-## 4. 核心流程设计
+## 4. 核心流程
 
-### 4.1 Mention Resolver 流水线（异步化）
+### 4.1 Trigger → CollaborationRequest → Decision
 
 ```
-用户发送 @backend 请审查支付 API
-  ↓ api/channel 模块：消息落库（同步），生成 mention 行（status=RESOLVING）
-  ↓ 入 BullMQ 队列 mention.resolve
-  ↓ orchestrator Worker：
-    ① 硬过滤：channel 成员资格 + permission（read/write）
-    ② 候选排序：capability 匹配度（规则分） + 当前负载（status!=WORKING 加分）
-       + 近期相关性（该 agent 在本 project 近 30 天被 accept 的比例）
-    ③ 产出 Top-N，mention 行更新为 RESOLVED(targets=[...], scores=[...])
-  ↓ 逐个向候选成员投递 decision 请求（WS 实时 + 队列兜底）
-  ↓ WS 事件 mention.resolved 回推前端高亮 + 命中分数气泡
-```
+Trigger Source
+  ├─ MENTION（消息流 @）
+  ├─ WORK_ITEM（WorkItem 状态变化 / 分配）
+  ├─ API（外部调用）
+  └─ AUTOMATION（cron / 规则）
 
-要点：
-- **消息发送永远同步成功**（Mention 解析失败不影响消息送达）
-- **解析结果必须回推前端**（v0.2 起）：事件 `mention.resolved` 含 `targets[]` 与 `scores[]`，UI 展示命中的 Agent 与分数，禁止黑箱
-- **6 态上线**（v0.2 起）：Resolver 排除 `OFFLINE` / `ERROR` / `WORKING` 候选
+↓ Orchestrator 统一接收
+
+CollaborationRequest
+  ├─ id
+  ├─ trigger_type / trigger_ref
+  ├─ from: { channel_id?, actor }
+  ├─ request_kind: "MESSAGE_RESPONSE" | "WORK_ITEM_EXECUTION" | "API_CALL" | "AUTOMATION_RUN"
+  ├─ target_agent_id?    # 显式指定时无 Resolver
+  ├─ required_capabilities: ["coding", "review"]
+  ├─ context_refs: { channel_id?, message_seq?, memory_refs: [...], work_item_id? }
+  ├─ status: PENDING | ACCEPTED | REJECTED | NEED_CONTEXT | EXECUTING | COMPLETED | FAILED
+  ├─ deadline_s
+  └─ idempotency_key
+
+↓ Resolver（如未指定 target_agent_id）
+  ① 硬过滤：lifecycle=ACTIVE ∩ activity ∈ {AVAILABLE, THINKING} ∩ permission 允许
+  ② Capability ranking：capability_match + load + accept_rate_30d
+  ③ 产出 Top-N 候选
+
+↓ 派发到 Agent（Runtime 路径或 Built-in WorkItem 执行）
+  ① 写 decision_records
+  ② WS 推 CollaborationRequest.resolved
+  ③ 决策 Accept → 创建 Execution（E7）| Reject / Need Context → 落 decision + 通知发起人
+```
 
 ### 4.2 Decision 状态机
 
 ```
-                    ┌──────────────────────────────┐
- mention.resolved ──► PENDING ─┬─► ACCEPTED ──► 创建 Task（V2 起进入 runtime 执行）
-                               ├─► REJECTED（必须带 reason）
-                               ├─► NEED_CONTEXT（列出 needs[]，阻塞等待补充）
-                               └─► DELEGATED（V2；delegate_to 必须是合法成员，形成委托链）
- 超时策略：PENDING 超 60s 未响应 → 取下一个候选重新投递；全部超时 → mention.status=UNRESOLVED，
- 通知发起人
+CollaborationRequest.status
+  PENDING ─┬─► ACCEPTED ──► 触发 Execution（E7，绑定 work_item_ref?）
+           ├─► REJECTED（reason 必填）
+           ├─► NEED_CONTEXT（needs[] 必填，阻塞等待补充）
+           └─► EXECUTING（Execution 已创建）
+                ├─► COMPLETED
+                └─► FAILED
 ```
 
-所有 Decision 落 `decision_records` 表（谁、对什么请求、什么决策、依据），这是审计与后续"Agent 表现评分"的数据底座。Decision 必带 `analysis{capability, context_score, permission}` 三项（与 UI 决策卡片三格对齐）。
+`decision_records` 表（事实源）——所有 Decision 必带 `analysis{capability, context_score, permission}`，UI 决策卡片从 decision_records 投影生成（**不复制**）。
 
-### 4.3 Memory 写入门禁（v0.3 起进 MVP）
+PENDING 超时（默认 60s）→ 取下一个候选；全部超时 → CollaborationRequest.status=UNRESOLVED + 通知发起人。
+
+### 4.3 Memory 写入门禁
 
 ```
-Agent 产生 memory proposal（type/content/source 引用 channel_message id）
-  ↓ permission 检查：write memory = request → 创建 memory_items(status=PROPOSED)
-  ↓ WS 推送给 project 内有 approve 权限的 Human
-  ↓ Human Approve → status=APPROVED，入队 memory.index → 切块 + embedding 写 memory_chunks
-    Human Reject → status=REJECTED（保留记录，供 Agent 学习"什么不该提议"）
+Agent proposal（type / content / source 引用）
+  ↓ permission check：write_memory → REQUIRE_APPROVAL
+  ↓ 写 memory_proposals（status=PROPOSED）
+  ↓ WS 推送给 project 内有 approve_memory 权限的人类
+  ↓ Approve → 写 memory_items（status=APPROVED）→ 入库 + 索引
+  ↓ Reject → memory_proposals.status=REJECTED
 ```
 
-Source 溯源（PRD FR-7 硬性要求）：`memory_items.source_type` / `source_channel_id` / `source_message_seq` 三件套缺一不可；UI 记忆卡必须展示该行。
+Source 三件套（`source_type` / `source_channel_id` / `source_message_seq`）强约束。
 
-检索（V2）：`hybrid = pgvector ANN(top_k=50) + PG 全文(BM25 近似) → 按 project_id/type 过滤 → 轻量 rerank`；Personal Memory 只对 owner 生效，在检索层做成员级过滤。
+### 4.4 Work Management 抽象
+
+```
+WorkManagementProvider interface
+  ├─ getCapabilities() → ProviderCapabilities
+  ├─ listWorkItems(query) → WorkItemPage
+  ├─ getWorkItem(ref) → WorkItem
+  ├─ createWorkItem(input) → WorkItem
+  ├─ updateWorkItem(ref, changes) → WorkItem
+  ├─ addComment(ref, comment) → WorkComment
+  └─ getStatusMapping() → CanonicalStatusCategory[]
+
+BuiltInProvider（MVP）
+  └─ work_items / work_item_projections 直接读写 PG
+
+JiraProvider（V1+ E9）
+  └─ Jira REST + Webhook → 维护 work_item_projections 缓存
+```
+
+业务层永远只依赖 `WorkManagementProvider` 接口；`if (provider === 'jira') ...` 永不允许出现。
 
 ---
 
 ## 5. 数据模型（PostgreSQL）
 
-### 5.1 表清单与关键字段
+### 5.1 实体表清单
 
-| 表 | 关键字段 | 说明 |
+| 表 | 说明 | 引入版本 |
 | --- | --- | --- |
-| users | id, email, password_hash, display_name | — |
-| credentials | id, user_id, provider, secret_encrypted, meta | **加密存储（AES-256-GCM，KMS/信封加密）**，永不回显明文 |
-| teams | id, org_id, name | — |
-| projects | id, team_id, name, repo_url, integration_backend('mateos'\|'agentboard'), issue_tracker('none'\|'agentboard'\|'jira') | 知识边界 + 外部集成开关（§10） |
-| channels | id, project_id, name, last_seq | 通信边界 |
-| agents | id, owner_user_id, credential_id, name, role, capabilities(jsonb), can_execute, can_review, status | 状态枚举 v0.2 改 6 态（OFFLINE/AVAILABLE/THINKING/WORKING/WAITING_CONTEXT/ERROR）；为缓存值，真源在 Redis presence |
-| channel_members | channel_id, member_type(HUMAN\|AGENT), member_id, joined_at | 多态成员；唯一索引(channel_id, member_type, member_id) |
-| messages | id, channel_id, seq, sender_type, sender_id, content, content_type, client_msg_id, created_at, deleted_at | **seq 为 channel 内单调递增**（用 channel 计数器表 + 事务分配），前端按 last_seq 断线续传；client_msg_id 唯一索引幂等去重；**按月分区** |
-| mentions | id, message_id, mention_type(USER\|AGENT\|GROUP\|ALL), raw_text, status(RESOLVING\|RESOLVED\|UNRESOLVED), targets(jsonb), scores(jsonb) | v0.2 新增 scores 字段（Resolver 命中分数），前端 WS 推送展示 |
-| decision_records | id, mention_id, agent_id, decision(ACCEPT\|REJECT\|NEED_CONTEXT\|DELEGATE), reason, needs(jsonb), analysis(jsonb), delegate_to, expires_at, decided_at | Decision 状态机真源；analysis 必带三件套（capability/context_score/permission） |
-| memory_items | id, project_id, owner_user_id(nullable), type(PERSONAL\|PROJECT\|DECISION\|KNOWLEDGE), content, status(PROPOSED\|APPROVED\|REJECTED), source_type, source_channel_id, source_message_seq, approved_by, created_at | **v0.2 起：source 三件套强约束（not null 至少 channel_id + message_seq）**；MVP 范围内 |
-| memory_chunks | id, memory_id, chunk_text, embedding vector(1536), tsv | pgvector HNSW 索引(embedding)；tsv 为全文列 |
-| permissions | id, scope_type(PROJECT\|CHANNEL), scope_id, subject_type, subject_id, perm_key, effect | 权限矩阵（§7 Permission Model） |
-| tasks | id, project_id, title, status, created_from(decision_record_id), assignee_type, assignee_id | V1 最小：Accept 后可建任务占位；V2 接 runtime 执行 |
-| external_links | id, entity_type('task'\|'memory'\|'request'), entity_id, external_system, external_id, external_url, synced_at | §10 外部集成双向同步表；V1+ 启用 |
-| attachments | id, message_id, s3_key, size, mime | — |
-| audit_logs | id, actor_type, actor_id, action, target, detail(jsonb), created_at | append-only |
+| users | 用户 | E1 |
+| organizations | 组织 | E1 |
+| organization_members | 组织成员 | **E1 v0.4 新增** |
+| teams | 团队 | E1 |
+| team_members | 团队成员 | E1 |
+| projects | 项目（**无** integration_backend / issue_tracker） | E1 |
+| project_members | 项目成员 | E1 |
+| credentials | 凭据池（加密） | E2 |
+| agents | Agent（**无** can_execute/can_review；lifecycle+activity） | E2 |
+| agent_project_membership | Agent 在项目内的可见范围 | E2 |
+| agent_tokens | Runtime token | E2 |
+| channels | 频道 | E3 |
+| channel_members | 频道成员 | E3 |
+| channel_seq_counters | seq 分配 | E3 |
+| messages | 消息（projection，5 形态引 entity_ref） | E3 |
+| attachments | 附件 | E3 |
+| read_cursors | 已读位点 | E3 |
+| triggers | 触发器原始记录 | E4 |
+| collaboration_requests | 协作请求一等实体 | **E4 v0.4 新增** |
+| decision_records | 决策事实源 | E4 |
+| memory_proposals | Memory 申请（审批前） | **E5 v0.4 新增** |
+| memory_items | Memory 库 | E5 |
+| memory_chunks | Memory 索引 | E5 |
+| memory_review_actions | 审批审计 | E5 |
+| permissions | 权限矩阵 | E6 |
+| agent_executions | Agent 执行记录 | **E7 v0.4 新增** |
+| execution_attempts | 重试/重连的 attempt | E7 |
+| execution_events | 流式事件 | E7 |
+| execution_artifacts | 产物（diff / file / log） | E7 |
+| work_items | Built-in WorkItem | **E8 v0.4 新增** |
+| work_item_projections | Jira 等外部 Provider 的本地缓存 | E8 |
+| work_item_bindings | Project × WorkItemProvider 关联 | E8 |
+| work_comments | WorkItem 评论 | E8 |
+| work_relations | WorkItem 关系（blocks / relates_to） | E8 |
+| work_management_connections | Provider 连接信息（OAuth token 等） | E8 |
+| work_sync_audit | Provider 同步审计 | E8 |
+| audit_logs | 全量审计 | E10 |
+| notifications | 通知 | E10 |
+| llm_calls | LLM 调用统计 | E7 |
 
-### 5.2 关键设计决策
+### 5.2 关键表结构
 
-- **Member 多态**：HUMAN/AGENT 统一为 `(member_type, member_id)` 二元组，避免双表 join 泛滥；在 packages/contracts 里封装 `MemberRef` 类型。
-- **消息不可变**：编辑走 `message_edits` 版本表（V2），删除为软删；一切下游（Memory source、mention）通过 message id 引用，永不悬空。
-- **seq 分配**：`channel_seq_counters(channel_id, next_seq)` 行级锁 + 事务，保证 channel 内严格有序，这是 WS `resume(last_seq)` 的基础。
-- **检索过滤前置**：memory_chunks 必须带 project_id（冗余自 memory_items），向量检索时先按 project_id 过滤再 ANN，避免跨项目泄漏。
-- **Capability canonical key**：DB 存 `capabilities jsonb` 用英文 snake_case canonical key（`coding` / `review`）；显示名由前端 i18n 渲染，避免 PRD / SYSTEM_DESIGN / UI 三处词汇漂移。
+```sql
+-- projects（v0.4 简化：移除 integration_backend / issue_tracker）
+CREATE TABLE projects (
+  id          UUID PRIMARY KEY,
+  team_id     UUID NOT NULL REFERENCES teams(id),
+  name        TEXT NOT NULL,
+  description TEXT,
+  repo_url    TEXT,
+  created_at  TIMESTAMPTZ DEFAULT now()
+);
+
+-- agents（v0.4 简化）
+CREATE TABLE agents (
+  id              UUID PRIMARY KEY,
+  owner_user_id   UUID NOT NULL REFERENCES users(id),
+  credential_id   UUID NOT NULL REFERENCES credentials(id),
+  name            TEXT NOT NULL,
+  role            TEXT NOT NULL,
+  capabilities    JSONB NOT NULL DEFAULT '[]',     -- canonical key
+  -- 无 can_execute / can_review
+  lifecycle       TEXT NOT NULL DEFAULT 'ACTIVE'
+                  CHECK (lifecycle IN ('ACTIVE','PAUSED','DISABLED')),
+  activity        TEXT NOT NULL DEFAULT 'OFFLINE'
+                  CHECK (activity IN ('OFFLINE','AVAILABLE','THINKING','WORKING','WAITING_CONTEXT','ERROR')),
+  activity_reason TEXT,
+  daily_limit_usd NUMERIC(10,2) DEFAULT 5.00,
+  monthly_budget_usd NUMERIC(10,2) DEFAULT 50.00,
+  created_at      TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX idx_agents_lifecycle_activity ON agents(lifecycle, activity);
+
+-- collaboration_requests（v0.4 新增一等实体）
+CREATE TABLE collaboration_requests (
+  id                    UUID PRIMARY KEY,
+  trigger_type          TEXT NOT NULL CHECK (trigger_type IN ('MENTION','WORK_ITEM','API','AUTOMATION')),
+  trigger_ref           JSONB,                          -- {channel_id, message_seq, work_item_id, ...}
+  request_kind          TEXT NOT NULL,                  -- 'MESSAGE_RESPONSE' | 'WORK_ITEM_EXECUTION' | 'API_CALL' | 'AUTOMATION_RUN'
+  from_actor_type       TEXT NOT NULL,
+  from_actor_id         UUID NOT NULL,
+  target_agent_id       UUID,                            -- 显式指定时填
+  required_capabilities JSONB NOT NULL DEFAULT '[]',
+  context_refs          JSONB NOT NULL DEFAULT '{}',    -- {channel_id, message_seq, memory_refs, work_item_id}
+  status                TEXT NOT NULL DEFAULT 'PENDING'
+                        CHECK (status IN ('PENDING','ACCEPTED','REJECTED','NEED_CONTEXT','EXECUTING','COMPLETED','FAILED','UNRESOLVED')),
+  target_execution_id   UUID,                            -- 接受后回填
+  deadline_s            INT NOT NULL DEFAULT 600,
+  idempotency_key       TEXT UNIQUE,
+  created_at            TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX idx_collab_status_time ON collaboration_requests(status, created_at DESC);
+CREATE INDEX idx_collab_target_agent ON collaboration_requests(target_agent_id, created_at DESC) WHERE target_agent_id IS NOT NULL;
+
+-- agent_executions（v0.4 新增）
+CREATE TABLE agent_executions (
+  id                  UUID PRIMARY KEY,
+  collaboration_request_id UUID REFERENCES collaboration_requests(id),
+  work_item_ref       JSONB,                            -- {provider_key, work_item_id, external_ref} optional
+  agent_id            UUID NOT NULL REFERENCES agents(id),
+  status              TEXT NOT NULL DEFAULT 'PENDING'
+                      CHECK (status IN ('PENDING','RUNNING','SUCCEEDED','FAILED','CANCELLED','TIMEOUT')),
+  input               JSONB NOT NULL,                   -- request input snapshot
+  context_refs        JSONB NOT NULL DEFAULT '{}',
+  attempt_count       INT NOT NULL DEFAULT 0,
+  started_at          TIMESTAMPTZ,
+  completed_at        TIMESTAMPTZ,
+  failure_code        TEXT,
+  failure_message     TEXT,
+  created_at          TIMESTAMPTZ DEFAULT now(),
+  updated_at          TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX idx_executions_agent ON agent_executions(agent_id, created_at DESC);
+CREATE INDEX idx_executions_status ON agent_executions(status, created_at DESC);
+
+-- execution_attempts
+CREATE TABLE execution_attempts (
+  id              UUID PRIMARY KEY,
+  execution_id    UUID NOT NULL REFERENCES agent_executions(id) ON DELETE CASCADE,
+  attempt_no      INT NOT NULL,
+  runtime_session_id TEXT,
+  status          TEXT NOT NULL,
+  started_at      TIMESTAMPTZ,
+  completed_at    TIMESTAMPTZ,
+  error           TEXT,
+  UNIQUE (execution_id, attempt_no)
+);
+
+-- execution_events
+CREATE TABLE execution_events (
+  id              BIGSERIAL PRIMARY KEY,
+  execution_id    UUID NOT NULL REFERENCES agent_executions(id) ON DELETE CASCADE,
+  attempt_id      UUID REFERENCES execution_attempts(id),
+  event_type      TEXT NOT NULL,                       -- 'STDOUT' | 'PROGRESS' | 'TOOL_CALL' | 'LLM_TICK' | 'ARTIFACT' | 'ERROR'
+  payload         JSONB NOT NULL,
+  trace_id        TEXT,
+  created_at      TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX idx_events_execution_time ON execution_events(execution_id, created_at);
+
+-- execution_artifacts
+CREATE TABLE execution_artifacts (
+  id            UUID PRIMARY KEY,
+  execution_id  UUID NOT NULL REFERENCES agent_executions(id) ON DELETE CASCADE,
+  kind          TEXT NOT NULL,                         -- 'FILE' | 'DIFF' | 'LOG' | 'SCREENSHOT'
+  name          TEXT NOT NULL,
+  s3_key        TEXT NOT NULL,
+  size          BIGINT,
+  mime          TEXT,
+  created_at    TIMESTAMPTZ DEFAULT now()
+);
+
+-- work_items（Built-in Provider）
+CREATE TABLE work_items (
+  id                  UUID PRIMARY KEY,
+  project_id          UUID NOT NULL REFERENCES projects(id),
+  type                TEXT NOT NULL CHECK (type IN ('TASK','STORY','BUG','EPIC')),
+  title               TEXT NOT NULL,
+  description         TEXT,
+  status              TEXT NOT NULL DEFAULT 'OPEN'
+                      CHECK (status IN ('OPEN','IN_PROGRESS','IN_REVIEW','DONE','CLOSED')),
+  canonical_status_category TEXT NOT NULL DEFAULT 'TODO'
+                      CHECK (canonical_status_category IN ('TODO','IN_PROGRESS','DONE')),
+  assignee_type       TEXT CHECK (assignee_type IN ('HUMAN','AGENT')),
+  assignee_id         UUID,
+  due_at              TIMESTAMPTZ,
+  created_by_type     TEXT NOT NULL,
+  created_by_id       UUID NOT NULL,
+  created_at          TIMESTAMPTZ DEFAULT now(),
+  updated_at          TIMESTAMPTZ DEFAULT now()
+);
+
+-- work_item_projections（Jira 等 Provider 的本地缓存）
+CREATE TABLE work_item_projections (
+  id                  UUID PRIMARY KEY,
+  project_id          UUID NOT NULL REFERENCES projects(id),
+  provider_key        TEXT NOT NULL,                    -- 'jira'
+  external_ref        TEXT NOT NULL,                    -- 'PROJ-123'
+  external_url        TEXT,
+  type                TEXT NOT NULL,
+  title               TEXT NOT NULL,
+  status              TEXT NOT NULL,
+  canonical_status_category TEXT NOT NULL,
+  provider_status     TEXT,                             -- 原始 status 字面值
+  assignee_type       TEXT,
+  assignee_id         UUID,
+  due_at              TIMESTAMPTZ,
+  raw_payload         JSONB NOT NULL,                   -- 原始 provider DTO
+  last_sync_at        TIMESTAMPTZ,
+  last_sync_status    TEXT,                             -- 'OK' | 'FAILED' | 'CONFLICT'
+  created_at          TIMESTAMPTZ DEFAULT now(),
+  updated_at          TIMESTAMPTZ DEFAULT now(),
+  UNIQUE (provider_key, external_ref)
+);
+
+-- work_item_bindings（Project × Provider 关联；v0.4 替代 projects.issue_tracker）
+CREATE TABLE work_item_bindings (
+  id              UUID PRIMARY KEY,
+  project_id      UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  provider_key    TEXT NOT NULL,                        -- 'builtin' | 'jira'
+  connection_id   UUID,                                 -- Provider 连接（V1+ 启用）
+  external_project_ref TEXT,                            -- Jira project key（如 'PROJ'）
+  settings        JSONB,                                -- status mapping 等
+  is_active       BOOLEAN NOT NULL DEFAULT true,
+  created_at      TIMESTAMPTZ DEFAULT now(),
+  updated_at      TIMESTAMPTZ DEFAULT now(),
+  UNIQUE (project_id, provider_key)
+);
+
+-- work_management_connections（Provider OAuth / API key）
+CREATE TABLE work_management_connections (
+  id              UUID PRIMARY KEY,
+  provider_key    TEXT NOT NULL,                        -- 'jira'
+  project_id      UUID NOT NULL REFERENCES projects(id),
+  user_id         UUID NOT NULL REFERENCES users(id),
+  access_token_encrypted  BYTEA NOT NULL,
+  refresh_token_encrypted BYTEA,
+  expires_at      TIMESTAMPTZ,
+  meta            JSONB,
+  created_at      TIMESTAMPTZ DEFAULT now()
+);
+
+-- permissions（v0.4 effect 改三态）
+CREATE TABLE permissions (
+  id           UUID PRIMARY KEY,
+  scope_type   TEXT NOT NULL CHECK (scope_type IN ('PROJECT','CHANNEL')),
+  scope_id     UUID NOT NULL,
+  subject_type TEXT NOT NULL CHECK (subject_type IN ('USER','AGENT')),
+  subject_id   UUID NOT NULL,
+  perm_key     TEXT NOT NULL CHECK (perm_key IN (
+                'read_message','write_message','write_memory',
+                'execute_code','create_pr','approve_memory','manage_channel')),
+  effect       TEXT NOT NULL CHECK (effect IN ('ALLOW','DENY','REQUIRE_APPROVAL')),
+  created_at   TIMESTAMPTZ DEFAULT now(),
+  UNIQUE (scope_type, scope_id, subject_type, subject_id, perm_key)
+);
+```
+
+### 5.3 关键设计决策
+
+- **Project = 协作/知识/工作边界**，不挂 Provider 字段；Provider 通过 `work_item_bindings` 关联
+- **WorkItem 与 Execution 完全独立**——`work_item_ref` 在 `agent_executions` 中是 optional JSONB
+- **Trigger 多种来源**统一汇聚到 `collaboration_requests`，Mention 不再直接路由到 Agent
+- **消息流是 projection**——`messages.content_type` 5 形态保留，DECISION 形态只引 `decision_ref`（不复制 decision_records 字段）
+- **Memory Source 强约束**——`source_type` + `source_channel_id` + `source_message_seq` 三件套，CHANNEL_MESSAGE 时必填
+- **Permission effect 三态**——ALLOW / DENY / REQUIRE_APPROVAL；后两者语义清晰，不与 CollaborationRequest 概念冲突
+- **Agent lifecycle 与 activity 独立**——lifecycle 控制"能不能上线"，activity 控制"在线时在做什么"
+- **Capability 与 Permission 单一事实源**——Agent 表无 `can_execute` / `can_review`；权限统一由 `permissions` 表覆盖
 
 ---
 
-## 6. Agent Runtime 与 Connector 协议
+## 6. Agent Runtime & Execution Domain
 
-MateOS 自研 Agent 运行时，采用 **出站连接（Agent 主动连入）** 模式：
+### 6.1 出站连接
 
 ```
-外部/本地 Agent 进程（Coding-Agent、Review-Agent…）
-        │  WSS 出站连接 + JWT(agent token)
-        ▼
+Agent 进程（Coding-Agent、Review-Agent...）
+   │  WSS 出站 + JWT(agent_token)
+   ▼
 Agent Runtime Gateway（services/runtime）
-  ├─ 注册/心跳：agent 上报 status(OFFLINE/AVAILABLE/THINKING/WORKING/WAITING_CONTEXT/ERROR)
-  ├─ 任务下发：Gateway → agent 的 dispatch 消息（见协议）
-  ├─ 流式回传：agent 执行进度/结果/产物（diff、文件、日志）经 Gateway 广播到 Channel
-  └─ 保活判定：心跳 >90s 丢失 → presence=OFFLINE
+  ├─ 注册/心跳：上报 lifecycle + activity
+  ├─ 任务下发：dispatch (携带 collaboration_request_ref)
+  └─ 流式回传：progress / result / error → execution_events
 ```
 
-### 6.1 ERROR 态触发与恢复（v0.2 新增）
+### 6.2 Lifecycle × Activity 状态机
 
-| 触发条件 | 进入 ERROR | 恢复条件 |
-| --- | --- | --- |
-| Provider HTTP 5xx 连续 3 次 | 立即 | 下次心跳自动 → AVAILABLE |
-| Provider 401/403（密钥失效） | 立即 | owner 更新 credential 并 `agent.activate` |
-| 日/周限额触顶 | 立即 | owner 调整限额 |
-| Sandbox 启动失败 | 立即 | Runtime 自动重试 2 次，仍失败 → 通知 owner |
+| 维度 | 进入 | 退出 | UI |
+| --- | --- | --- | --- |
+| lifecycle=ACTIVE | owner 启用 | owner 暂停 / 系统禁用 | 正常状态点 |
+| lifecycle=PAUSED | owner 暂停 | owner 启用 | 灰点 + 「已暂停」徽标 |
+| lifecycle=DISABLED | 系统禁用 | 申诉后恢复 | 红点 + 「已禁用」徽标 |
+| activity=OFFLINE | 心跳 > 90s 丢失 | 心跳恢复 | 灰点 |
+| activity=AVAILABLE | 心跳 + idle | 收到 CollaborationRequest | 绿点 |
+| activity=THINKING | 已接收 collaboration_request | 产出 decision | 紫点 + 呼吸 |
+| activity=WORKING | decision=ACCEPT → 创建 execution | execution 完成 | 蓝点 + 光标 |
+| activity=WAITING_CONTEXT | decision=NEED_CONTEXT | 人类补齐 | 琥珀点 + 计数 |
+| activity=ERROR | Provider 失败 / 限额 | owner 处理 | 红点 + fix_hint |
 
-ERROR 态时：Agent 不出现在 Resolver 候选；Channel 列表/Avatar 仍可见但红点；Owner 收到通知与 `fix_hint`（如「检查 Anthropic API Key」）。
+**Resolver 过滤**：`lifecycle=ACTIVE ∩ activity ∈ {AVAILABLE, THINKING}`（OFFLINE/ERROR/WORKING/WAITING_CONTEXT 排除）
 
-### 6.2 Connector 协议（JSON envelope over WebSocket）
+### 6.3 Execution Domain（v0.4 新增）
+
+```
+CollaborationRequest (ACCEPTED)
+   │
+   ▼
+agent_executions
+   ├─ status: PENDING → RUNNING → SUCCEEDED / FAILED / CANCELLED / TIMEOUT
+   ├─ input: request input snapshot
+   ├─ context_refs: {channel_id, message_seq, memory_refs, work_item_ref?}
+   ├─ attempt_count: 0
+   │
+   └─ execution_attempts (1..N)
+        ├─ runtime_session_id
+        ├─ status: RUNNING → COMPLETED / FAILED
+        └─ execution_events
+              ├─ event_type: STDOUT / PROGRESS / TOOL_CALL / LLM_TICK / ARTIFACT / ERROR
+              └─ payload: { content, meta, trace_id }
+   └─ execution_artifacts
+         └─ s3_key + metadata
+
+retry / reconnect / crash recovery / timeout / cancel / streaming / artifact 全部基于 Execution 模型
+```
+
+**关键原则**：BullMQ job 绝不能成为 Agent Execution 的事实源。BullMQ 只做 transport / scheduler（把任务推到 Runtime），`agent_executions` + `execution_attempts` + `execution_events` 才是事实源。
+
+### 6.4 ERROR 触发（lifecycle 维度）
+
+| 触发 | 行为 |
+| --- | --- |
+| Provider 5xx 连续 3 次 | activity=ERROR |
+| Provider 401/403 | activity=ERROR + reason=auth_failed |
+| 日/周限额触顶 | activity=ERROR + reason=rate_limit |
+| Sandbox 启动失败（V3） | activity=ERROR |
+
+ERROR 状态下 Agent **不进入 Resolver 候选**（lifecycle 仍是 ACTIVE，只是 activity 异常）。
+
+### 6.5 Connector 协议（v1）
 
 ```jsonc
 // 通用 envelope
-{ "v": 1, "type": "hello|heartbeat|status|dispatch|progress|result|error",
-  "id": "uuid", "ts": 0, "payload": { } }
+{ "v": 1, "type": "hello|heartbeat|status|dispatch|progress|result|error", "id": "uuid", "ts": 0, "payload": {} }
 
-// dispatch（任务下发）
+// dispatch
 { "type": "dispatch", "payload": {
-    "task_id": "…", "channel_id": "…",
-    "context": {                       // Project 知识边界注入
-      "memory_refs": ["mem:…"],        // 检索命中的 memory id（含 source）
-      "recent_messages": ["msg:…"],    // channel 上下文窗口
-      "permissions": { "can_execute": true, "can_review": false }
-    },
-    "deadline_s": 600, "idempotency_key": "…" } }
+    "execution_id": "...",                          // ← 新增（v0.4）
+    "collaboration_request_id": "...",              // ← 新增
+    "work_item_ref": {...}?,                        // ← optional
+    "context": { "memory_refs": [...], "recent_messages": [...], "permissions": {...} },
+    "deadline_s": 600, "idempotency_key": "..."
+}}
 
-// decision（Agent 对 mention 的回应，同 §4.2 状态机）
+// result
 { "type": "result", "payload": {
-    "task_id": "…", "decision": "ACCEPT|REJECT|NEED_CONTEXT|DELEGATE",
-    "reason": "…", "needs": ["api spec", "db design"],
+    "execution_id": "...",
+    "decision": "ACCEPT|REJECT|NEED_CONTEXT|DELEGATE",
+    "reason": "...", "needs": [...],
     "analysis": { "capability": true, "context_score": 88, "permission": true },
-    "delegate_to": "agent:…" } }
-
-// status（Agent 上报状态，6 态）
-{ "type": "status", "payload": {
-    "status": "OFFLINE|AVAILABLE|THINKING|WORKING|WAITING_CONTEXT|ERROR",
-    "reason": "rate_limit_exceeded",     // ERROR 时携带
-    "since": 1736380800 } }
+    "output": { "markdown": "...", "code": "...", "tokens_in": 0, "tokens_out": 0, "latency_ms": 0 }
+}}
 ```
 
-设计原则：
-
-- **Agent 无入站端口**：所有连接由 Agent 侧发起，天然穿透 NAT/防火墙，本地 Agent 与云端 Agent 统一接入。
-- **上下文注入走引用**：Gateway 按 dispatch 中的 memory_refs/messages 拉取内容注入 prompt，Agent 侧不做 DB 直连——Project 知识边界由服务端强制。
-- **沙箱隔离**（V3）：can_execute=true 的任务在一次性 Docker 容器执行，资源限额（CPU/内存/网络/时长），产物只经 S3 回传。
+设计原则：Agent 无入站端口（NAT 穿透）；上下文注入走引用；Project 知识边界由服务端强制。
 
 ---
 
 ## 7. Permission Model 实现
 
-- 权限键：`read_message / write_message / write_memory / execute_code / create_pr / approve_memory / manage_channel`
-- 判定为**同步纯函数**：`check(subject: MemberRef, perm: PermKey, scope: ScopeRef) → ALLOW | REQUEST | DENY`，NestJS Guard + 模块内直接调用，不跨网络。
-- 存储三层覆盖：**默认矩阵（代码内置）→ Project 覆盖 → Channel 覆盖**，合并顺序 Channel > Project > 默认。
-- 缓存：合并结果按 `(scope, subject)` 维度缓存 Redis（TTL 5min + 事件失效），变更时发 `perm.changed` pub/sub 精确失效。
+- 7 个权限键
+- 3 态：`check(subject, perm, scope) → ALLOW | DENY | REQUIRE_APPROVAL`
+- 三层覆盖：默认矩阵 → Project 覆盖 → Channel 覆盖
+- Redis 缓存 + `perm.changed` pub/sub 失效
+
+### 7.1 默认矩阵
+
+| 权限 | Human owner | Human member | Agent (lifecycle=ACTIVE) |
+| --- | --- | --- | --- |
+| read_message | ALLOW | ALLOW | ALLOW |
+| write_message | ALLOW | ALLOW | ALLOW |
+| write_memory | REQUIRE_APPROVAL | REQUIRE_APPROVAL | REQUIRE_APPROVAL |
+| execute_code | DENY | DENY | DENY |
+| create_pr | REQUIRE_APPROVAL | DENY | DENY |
+| approve_memory | ALLOW | DENY | DENY |
+| manage_channel | ALLOW | DENY | DENY |
 
 ---
 
 ## 8. 协议汇总
 
-| 边界 | 协议 | 说明 |
-| --- | --- | --- |
-| Client ↔ API | HTTPS REST `/api/v1`（JWT Bearer） | CRUD 与查询；分页 cursor-based |
-| Client ↔ Gateway | **WSS + JSON event envelope** | 事件：`message.created / message.seq_sync / mention.resolved / decision.proposed / agent.status_changed / memory.proposed / presence.updated`；连接级 `resume(last_seq)` |
-| 内部异步 | **BullMQ（Redis）** | mention.resolve / memory.index / decision.timeout 等队列；死信队列 + 告警 |
-| 内部广播 | **Redis Pub/Sub** | WS 多实例 fanout、权限失效事件 |
-| Agent ↔ Runtime | **WSS Connector 协议**（§6） | 对外开放、版本化（v1），第三方 Agent 可按协议接入 |
-| LLM 调用 | OpenAI-compatible HTTP | Provider Adapter 统一，流式 SSE 转发 |
-| 对象存储 | S3 API（预签名 URL 直传/下载） | 服务端只发票据不代理大流量 |
-| **MateOS ↔ AgentBoard**（§10.1，v0.2 新增） | **CollaborationRequest over WSS** | `collab.request / collab.status / collab.result`；v1 envelope，版本化 |
-| **MateOS ↔ Jira**（§10.2，v0.2 新增） | **REST + Webhook** | OAuth 2.0（3LO）授权，Issue / Comment / Status 双向同步；webhook 入队 BullMQ |
-
-WS envelope 规范：所有事件含 `{v, type, id, ts, payload}`；客户端 ACK 按 channel 维度推进 `last_seq`；服务端事件幂等（事件 id 去重窗口 5min）。
-
-### 8.1 MateOS ↔ AgentBoard 协作协议（v1）
-
-```jsonc
-// MateOS → AgentBoard
-{ "type": "collab.request", "payload": {
-    "request_id": "collab-…",
-    "from": { "channel_id": "…", "actor": "agent:backend" },
-    "task": { "title": "…", "description": "…", "context_refs": ["mem:…", "msg:…"] },
-    "sla": { "deadline_s": 3600 } } }
-
-// AgentBoard → MateOS
-{ "type": "collab.status", "payload": {
-    "request_id": "collab-…",
-    "status": "accepted|in_progress|completed|failed",
-    "external_ref": { "issue_id": "ab-1234", "url": "https://…" } } }
-
-{ "type": "collab.result", "payload": {
-    "request_id": "collab-…",
-    "summary": "…",
-    "artifacts": [ { "type": "pr", "url": "https://…" } ] } }
-```
-
----
-
-## 9. 缓存设计（Redis）
-
-| 用途 | Key 模式 | 类型 | TTL | 失效策略 |
-| --- | --- | --- | --- | --- |
-| Agent presence | `presence:{agent_id}` | Hash(status, since, node, last_heartbeat) | 90s（心跳续期） | 心跳过期自动失效 |
-| Agent 状态广播 | `pubsub:presence` | Pub/Sub | — | 变更即发，WS 层推前端 |
-| Channel 近期消息 | `timeline:{channel_id}` | ZSet(message_id, seq) | 10min | 新消息 ZADD；LRU 淘汰 |
-| 未读计数 | `unread:{member_id}:{channel_id}` | String(INCR) | 24h | 已读事件 DEL + 异步落库 |
-| 权限矩阵 | `perm:{scope_type}:{scope_id}:{subject_type}:{subject_id}` | Hash | 5min | `perm.changed` 事件精确失效 |
-| Mention 排序特征 | `mfeat:{project_id}:{agent_id}` | Hash(accept_rate, load) | 1h | decision 落库后增量更新 |
-| Mention 解析结果 | `mention:{mention_id}` | Hash(targets, scores, resolved_at) | 10min | resolver 落库后写入 |
-| 限流 | `rl:{principal}:{route}` | Sorted Set 滑窗 | 窗口期 | — |
-| 分布式锁 | `lock:{resource}` | SET NX PX | ≤30s | Memory 审批、seq 相关临界区 |
-| Session/刷新令牌 | `rt:{user_id}:{jti}` | String | 30d | 登出/吊销 DEL |
-| Memory 热点上下文 | `mctx:{project_id}:{agent_id}` | String(JSON) | 15min | memory_items APPROVED 事件失效 |
-| 外部集成 token | `ext:{system}:{user_id}` | String(access/refresh) | 按 provider | refresh 事件续期 |
-
-原则：**Redis 只放可重建数据**（presence、计数、缓存、锁），持久真源一律在 PG；缓存 miss 的重建路径必须存在且幂等。
-
----
-
-## 10. 外部集成扩展点（v0.2 新增）
-
-> 原则：所有外部集成**默认关闭**，由 Project 级配置开关启用（`projects.integration_backend` / `projects.issue_tracker`）。MVP 不实现真实同步逻辑，只预留数据模型与适配器骨架。
-
-### 10.1 执行后端：MateOS Runtime ↔ AgentBoard
-
-| 维度 | MateOS Runtime（默认） | AgentBoard（V1+ 启用） |
-| --- | --- | --- |
-| 决策 Accept 后 | MateOS Runtime Gateway 直接 dispatch | 推送 `collab.request` 到 AgentBoard |
-| 任务编排 | Runtime Worker（BullMQ） | AgentBoard 内部 Task / Worker |
-| 产物（PR / diff） | 留 V3+ 沙箱执行 | AgentBoard 回写 `collab.result` |
-| 协议 | 自有 Connector 协议（§6） | §8.1 collab.* envelope |
-
-实现要点：
-- `projects.integration_backend` 字段（`'mateos'` 默认 / `'agentboard'` V1+）
-- API 层在 Decision Accept 后根据项目设置选择 dispatch 路径
-- AgentBoard 回写的事件落 `external_links` 表
-- Channel 消息流同时兼容两种来源的产出
-
-### 10.2 项目管理工具切换：None / AgentBoard / Jira
-
-| 集成项 | None（默认） | AgentBoard Issue | Jira Issue |
-| --- | --- | --- | --- |
-| 协作请求视图 | MateOS 内部 | 同步到 AgentBoard Issue | 同步到 Jira Issue |
-| 评论 / 决策回写 | MateOS 内部 | 写入 Issue 评论 | 写入 Issue 评论 |
-| 状态同步 | 单向（MateOS → 视图） | 双向 | 双向 |
-
-实现要点：
-- `projects.issue_tracker` 字段（`'none'` 默认 / `'agentboard'` / `'jira'` V1+）
-- Jira：OAuth 2.0（3LO）授权，`/rest/api/3/issue` 双向同步；webhook 入队 BullMQ
-- AgentBoard：复用 §8.1 collab.* 协议，扩展 `issue.sync` 消息类型
-- 双向同步去重：消息指纹（content_hash）落 `external_links` 表
-
-### 10.3 集成模块架构
-
-```
-services/integration/        # 从 api 拆出的独立进程（V1+ 启用）
-  ├─ agentboard/             # AgentBoard 适配器
-  │   ├─ collab_client.ts    # 发送 collab.request
-  │   └─ collab_receiver.ts  # 处理 collab.status / collab.result
-  ├─ jira/                   # Jira 适配器
-  │   ├─ oauth.ts            # 3LO 授权与 token 刷新
-  │   ├─ issue_sync.ts       # Issue CRUD
-  │   └─ webhook.ts          # webhook 入队
-  └─ common/                 # 通用：external_links 落库、去重、重试
-```
-
----
-
-## 11. 数据库与存储设计
-
-### PostgreSQL
-
-- **版本/拓扑**：PG16 单实例（云 RDS 或自建+流复制），MVP 不上分库分表；预留逻辑库 `mateos`。
-- **分区**：`messages` 按月声明式分区（`PARTITION BY RANGE(created_at)`），默认建未来 3 个月分区，pg_cron 自动预建。
-- **索引要点**：`messages(channel_id, seq)` 唯一；`messages(channel_id, created_at desc)` 时间线；`memory_chunks` HNSW(vector_cosine_ops)；`mentions(message_id)`；`decision_records(mention_id)`。
-- **全文检索**：消息与 memory 的 tsvector 列 + GIN 索引，中文用 `zhparser`/`pg_jieba` 扩展（部署镜像内置）。
-- **备份**：每日全量快照 + WAL 连续归档（PITR）；恢复演练纳入季度例行。
-- **保留策略**：消息永久（软删）；`audit_logs` 2 年；REJECTED 的 memory_items 保留 1 年（供 Agent 学习）。
-
-### 对象存储（S3/MinIO）
-
-- 桶规划：`mateos-attachments`（附件）、`mateos-artifacts`（V3 执行产物）、`mateos-backups`（逻辑导出）。
-- 上传走预签名 URL 直传，服务端校验 mime/大小（≤50MB）；下载预签名 15min。
-
-### Redis
-
-- 独立实例，`maxmemory-policy=volatile-lru`（仅缓存键参与淘汰，锁/计数键不过期淘汰）。
-- AOF everysec 持久化（锁与计数可承受秒级丢失）。
-
----
-
-## 12. 非功能设计
-
-| 维度 | 方案 |
+| 边界 | 协议 |
 | --- | --- |
-| 可用性 | MVP：单可用区，RDS 多可用区部署，API ≥2 副本 + Nginx/LB；目标 99.5% |
-| 扩展性 | WS 网关无状态化（presence 走 Redis，跨节点 fanout 走 pub/sub）→ 水平加节点 |
-| 安全 | JWT 双令牌；Credential AES-256-GCM 信封加密；Agent token 独立签名域；全部写操作审计；速率限制（登录 5/min，消息 60/min） |
-| 成本 | LLM 调用按 credential 归属 user 计量（llm_calls 表：tokens/耗时/成本），按用户/项目报表 |
-| 可观测 | OTel trace 贯穿 API→Worker→Runtime；每条消息带 trace_id；Grafana 面板：WS 连接数、Resolver P95、Decision 超时率、Memory 审批积压 |
+| Client ↔ API | REST `/api/v1` + JWT |
+| Client ↔ Gateway | WSS + JSON envelope |
+| 内部异步 | BullMQ |
+| 内部广播 | Redis Pub/Sub |
+| Agent ↔ Runtime | WSS Connector 协议 v1（含 execution_id / collaboration_request_id） |
+| Work Provider ↔ Built-in | 直读 PG |
+| Work Provider ↔ Jira | REST + Webhook（V1+ E9） |
+| LLM 调用 | OpenAI-compatible HTTP |
+| 对象存储 | S3 API |
 
 ---
 
-## 13. 实施顺序（对齐 PRD MVP）
+## 9. Work Management 域
 
-| 阶段 | 交付 | 对应 PRD |
+### 9.1 Provider 抽象
+
+```ts
+interface WorkManagementProvider {
+  key: 'builtin' | 'jira' | 'linear' | 'github_issues';   // future
+  getCapabilities(): ProviderCapabilities;
+  listWorkItems(query: WorkItemQuery): Promise<WorkItemPage>;
+  getWorkItem(ref: WorkItemRef): Promise<WorkItem>;
+  createWorkItem(input: WorkItemInput): Promise<WorkItem>;
+  updateWorkItem(ref: WorkItemRef, changes: WorkItemChanges): Promise<WorkItem>;
+  addComment(ref: WorkItemRef, comment: WorkCommentInput): Promise<WorkComment>;
+  getStatusMapping(): CanonicalStatusMapping[];        // provider status → canonical category
+  getSelfMetadata(): Promise<ProviderMetadata>;         // 用于 UI 渲染动态配置
+}
+```
+
+**业务层**：`workManagementProviderRegistry.get(binding.provider_key)` 拿到实例后调用，**永不分 provider 类型**。
+
+### 9.2 Built-in Provider
+
+- Source of truth = `work_items` 表
+- 默认实现，V1 内置
+- WorkItem lifecycle：OPEN → IN_PROGRESS → IN_REVIEW → DONE → CLOSED
+- Project 默认绑定 builtin，无需配置
+
+### 9.3 Jira Provider（V1+ E9）
+
+- Source of truth = Jira Cloud
+- MateOS 维护 `work_item_projections` 本地缓存
+- 通过 webhook 接收 Jira 状态变化
+- 双绑去重：payload_hash 防重复同步
+- 冲突：CONFLICT + 通知 owner 仲裁
+
+### 9.4 Provider 切换语义
+
+**Change Provider**（仅影响新 WorkItem） + **Migrate Existing WorkItems**（独立 Wizard）：
+- 切换 provider_key 立即生效
+- 历史 WorkItem 迁移走向导，可选导出 CSV / 单向同步到新 Provider
+- V1 简化为仅 Change Provider；Migrate 留 V2
+
+### 9.5 状态映射（Status Mapping）
+
+```
+Jira:        "To Do"      "In Progress"  "In Review"  "Done"  "Closed"
+             ↓             ↓              ↓            ↓       ↓
+Canonical:   TODO          IN_PROGRESS    IN_PROGRESS  DONE    DONE
+
+Linear:      "Backlog"     "In Progress"  "In Review"  "Done"  "Cancelled"
+             ↓             ↓              ↓            ↓       ↓
+Canonical:   TODO          IN_PROGRESS    IN_PROGRESS  DONE    CLOSED
+```
+
+provider status 字面值保留（不丢失信息），canonical category 用于跨 Provider 聚合与统计。
+
+---
+
+## 10. 缓存设计（Redis）
+
+| 用途 | Key | TTL |
 | --- | --- | --- |
-| M1 基座 | monorepo 脚手架、auth/JWT、org/team/project/channel CRUD、PG+Redis 部署 | MVP: User/Team/Project/Channel |
-| M2 通信 | 消息收发（seq/幂等/分区表）、WS 网关与 resume、附件直传 | MVP: Chat |
-| M3 成员与 Agent | Agent CRUD、Credential 加密、presence（6 态）、channel 邀请 | MVP: Agent/成员 |
-| M4 Mention | mention 存储、Resolver Worker、Decision 状态机（Accept/Reject/Need Context，Delegate 留枚举）、权限 Guard、Resolver WS 回写 | MVP: Mention/Decision/Permission |
-| M5 Memory | memory_items CRUD（Source 三件套强约束）、人审门禁、P6 审批中心、embedding 索引 | MVP: Shared Memory |
-| M6 打磨 | @all 仲裁、通知、审计、监控面板、压测（1k WS 并发） | MVP 收尾 |
-| V1+ 起 | 项目集成（§10.1/§10.2）、Delegate 路由、Runtime 沙箱执行 | PRD V1+/V2 |
+| Agent presence | `presence:{agent_id}` | 90s |
+| Channel 近期消息 | `timeline:{channel_id}` | 10min |
+| 未读计数 | `unread:{member_id}:{channel_id}` | 24h |
+| 权限矩阵 | `perm:{scope}:{subject}` | 5min |
+| Mention 排序特征 | `mfeat:{project}:{agent_id}` | 1h |
+| Mention 解析结果 | `mention:{id}` | 10min |
+| WorkItem 缓存 | `workitem:{provider}:{ref}` | 5min |
+| Provider token | `wmc:{provider}:{user_id}` | refresh |
 
 ---
 
-## 14. 开放问题
+## 11. 实施顺序（M1-M6 + V1+）
 
-- [ ] 中文分词扩展选型（zhparser vs pg_jieba）需在 M2 前用真实语料对比
-- [ ] Agent token 的签发/吊销生命周期（设备绑定 vs 长期密钥）
-- [ ] WS 消息压缩阈值（permessage-deflate 开销 vs 收益）
-- [ ] embedding 模型与维度（1536 起，换模型需重建索引，预留 version 字段）
-- [ ] Decision 超时 60s 的默认值需用真实使用数据校准
-- [ ] AgentBoard collab.* 协议（§8.1）的幂等键与外部 Issue 双绑策略
-- [ ] Jira webhook 事件过滤与去重（避免循环回写）
+| 阶段 | 交付 | 对应 Epic |
+| --- | --- | --- |
+| M1 | monorepo + auth + Org/Team/Project/Member | E1 |
+| M2 | Channel + Message + seq + WS 网关 | E3 |
+| M3 | Agent + Credential + lifecycle/activity | E2 + E7 部分（Connector） |
+| M4 | Trigger + CollaborationRequest + Resolver + Decision | E4 |
+| M5 | Memory + 人审门禁 + 索引 | E5 |
+| M6 | WorkItem + Built-in Provider + Work 页面 | E8 |
+| M7 | Permission + Approval + 三态 | E6 |
+| M8 | Agent Execution domain（attempts/events/artifacts） | E7 |
+| M9 | Observability + 监控 + 压测 | E10 |
+| V1+ | Jira Provider 适配器 | E9 |
 
 ---
 
-## 15. 更新记录
+## 12. 更新记录
 
 | 版本 | 日期 | 变更 |
 | --- | --- | --- |
-| v0.1 | 2026-09-07 | 初稿：独立系统架构（NestJS 单体 + 3 Worker）；技术选型、模块拆分、Mention Resolver/Decision/Memory 流程、PG+pgvector 数据模型、Redis 缓存矩阵、Connector 开放协议、实施顺序 |
-| v0.2 | 2026-09-08 | 原型评审修订：Agent 状态 6 态（新增 ERROR 触发/恢复与状态枚举）；Mention 流水线新增 Resolver 结果回写 + 6 态过滤；决策记录 analysis 必填三件套对齐 UI 三格；Memory 进 MVP（Source 三件套强约束、Source Channel/Seq 索引）；§8 新增 MateOS↔AgentBoard / Jira 协议；§10 新增外部集成扩展点（执行后端切换 + 项目管理切换），含 integration 模块骨架；新增 ExternalIntegration 实体 + 集成表 |
+| v0.1 | 2026-09-07 | 初稿：独立系统 + 3 Worker + Connector + 实施顺序 |
+| v0.2 | 2026-09-08 | 原型评审修订：6 态 + 错误码 + Source 约束 + 集成扩展点 + ERROR 触发恢复 |
+| v0.3 | 2026-09-08 | 架构评审推倒：删除 AgentBoard execution / 新增 Agent Execution domain（agent_executions + attempts + events + artifacts）/ 新增 Work Management 域（Provider 抽象 + Built-in + bindings + projections）/ CollaborationRequest 一等实体 / Permission effect 改 REQUIRE_APPROVAL / Agent lifecycle+activity 拆分 / 删除 can_execute/can_review / 移除 projects.integration_backend 与 issue_tracker / Trigger 多源汇聚 / Project 不再挂 Provider 字段 |
