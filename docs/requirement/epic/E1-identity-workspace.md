@@ -50,14 +50,17 @@ CREATE TABLE users (
   created_at      TIMESTAMPTZ DEFAULT now()
 );
 
+-- v0.4.2 改：删除 organizations.owner_id（双事实源）
+-- 真正权限事实源：organization_members.role = 'owner'
+-- 如果想记录创建人，加 created_by 字段（信息性，不影响权限）
 CREATE TABLE organizations (
   id          UUID PRIMARY KEY,
   name        TEXT NOT NULL,
-  owner_id    UUID NOT NULL REFERENCES users(id),  -- 创建者，可被多 owner 替换
+  created_by  UUID REFERENCES users(id),  -- v0.4.2 改：仅信息性，不参与权限判定
   created_at  TIMESTAMPTZ DEFAULT now()
 );
 
--- v0.4 新增：Org 成员独立角色（不再依赖 team owner 推）
+-- v0.4 新增 / v0.4.2 改：Org 成员是 owner 角色的**唯一事实源**
 CREATE TABLE organization_members (
   organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
   user_id         UUID NOT NULL REFERENCES users(id),
@@ -65,6 +68,7 @@ CREATE TABLE organization_members (
   joined_at       TIMESTAMPTZ DEFAULT now(),
   PRIMARY KEY (organization_id, user_id)
 );
+-- v0.4.2 改：至少 1 个 owner 约束（DB 层 invariant，可延迟到 V2）
 
 CREATE TABLE teams (
   id          UUID PRIMARY KEY,
@@ -102,12 +106,13 @@ CREATE TABLE project_members (
 );
 ```
 
-### 3.1 v0.4 不变量
+### 3.1 v0.4.2 不变量
 
-- Org owner 独立于 Team owner（不再要求 Org owner 必须是某 Team owner）
-- Project owner 独立于 Team owner（Project 是协作边界，不是 Team 附属）
+- **v0.4.2 改** Org owner 唯一事实源：`organization_members.role='owner'`，**不再**依赖 `organizations.owner_id`
+- Org owner / Team owner / Project owner 互相独立（不蕴含）
 - 删除 Project 级联清理 `channels`（E3）/ `memory_items`（E5）/ `work_items`（E8）/ `agent_project_membership`（E2）
-- Email 唯一，软删不复活（V1 不做软删）
+- Email 唯一，软删不复活
+- **v0.4.2 新增** Org 至少 1 个 owner（DB trigger / deferrable constraint，V1 简化应用层校验）
 
 ## 4. API
 

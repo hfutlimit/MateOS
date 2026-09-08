@@ -4,71 +4,50 @@
 | --- | --- |
 | Epic ID | E9 |
 | 标题 | Work Management Integrations |
-| 阶段 | V1+（PRD v0.4 §10.2 / SD v0.3 §9.3 Jira Provider） |
-| 上游 | E8（WorkItem 域 + Provider 抽象）/ PRD v0.4 / SD v0.3 |
+| 阶段 | V1+（PRD v0.4 §10.2 / SD v0.3.2 §9.5 Jira Provider） |
+| 上游 | E8（v0.4.2 WorkItem 域 + Provider 抽象 + Org 级 Connection） |
 | 下游 | 无（E9 是叶子） |
-| 状态 | Draft（V1+ 阶段详细化） |
+| 状态 | Draft（V1+ 阶段详细化 + v0.4.2 同步） |
 
 ## 1. 背景与动机
 
-v0.3 的 E9 错误地把"执行后端切换"和"项目管理切换"绑在一起，**永久不切**到任何外部执行后端（PRD v0.4 §8 Non Goals）。v0.4 拆成两个独立 epic：
-
-- **E8 Work Management Core**（v0.4 新增 MVP）：WorkItem 域 + Built-in Provider
-- **E9 Work Management Integrations**（V1+）：**只**做 WorkItem 的 Provider 适配，第一个实现是 **Jira**
-
-未来扩展：Linear / GitHub Issues / Azure Boards / YouTrack / Asana —— 都是同样的 Provider 适配器模式。
+v0.4.2 E8 修订后，E9 同步收紧：
+- `JiraProvider` 接口实现要带 `binding` 参数（不是全局）
+- Connection 已是 Org/Owner 级，E9 不再绑 Project
+- 删除旧的 `work_item_projections` 残留描述
+- 删除 `JiraProvider.getSelfMetadata()` 静态状态模板
+- 新增 webhook 注册 + 定期 refresh（官方 API）
 
 ## 2. 范围
 
-### 2.1 In Scope（V1+）
+### 2.1 In Scope
 
-- `JiraProvider`（实现 E8 `WorkManagementProvider` 接口）
+- `JiraProvider` 实现（v0.4.2：所有方法都接 `binding` 参数）
 - OAuth 3LO 流程
+- Connection 与 Project binding 分离（Connection 在 Org 级；binding 引用 connection）
 - MateOS WorkItem ↔ Jira Issue 双向同步
 - 评论 / 状态变更双向同步
-- Status mapping 配置 UI
-- Webhook 接收 + 反向同步
+- **v0.4.2 改** Jira status mapping 动态拉（`listStatuses(binding)` 调 Atlassian `GET /rest/api/3/project/{key}/statuses`）
+- Webhook 注册 + 定期 refresh（官方 `PUT /rest/api/3/webhook/refresh`）
 - Sync 失败重试 + 冲突检测
-- Provider 自描述（`getSelfMetadata`）用于 P4 / P11 动态表单渲染
+- Provider 自描述（`getSelfMetadata`）用于 P4 / P11 动态表单渲染——**只返回 capability 描述，不返回 status mapping**
 
 ### 2.2 Out of Scope
 
-- Linear / GitHub Issues / Azure Boards（V2+ 单独 epic）
-- Execution backend 切换（**永久 Non Goal**）
-- 自托管 Jira（Data Center）（V2+）
+- Linear / GitHub Issues / Azure Boards（V2+）
 - 自定义字段映射（V2+）
+- 自托管 Jira（Data Center）（V2+）
 
 ## 3. 数据模型
 
 E8 已有：
-- `work_items`（带 `provider_key` / `external_ref` / `external_url`）
-- `work_item_projections`（统一客户端缓存）
-- `work_item_bindings`（Project × Provider）
-- `work_management_connections`（Provider 凭据）
+- `work_items`（v0.4.2 简化单表）
+- `work_item_bindings`（Project × Provider + connection_id）
+- `work_management_connections`（v0.4.2 Org/Owner 级，含 webhook 字段）
 
-E9 新增：
+E9 复用 E8 表，无需新增。
 
-```sql
--- sync_audit（E8 在 M6 已建，E9 复用）
-CREATE TABLE sync_audit (
-  id              BIGSERIAL PRIMARY KEY,
-  project_id      UUID NOT NULL,
-  provider_key    TEXT NOT NULL,                 -- 'jira'
-  direction       TEXT NOT NULL CHECK (direction IN ('OUT','IN')),
-  entity_type     TEXT NOT NULL,                 -- 'WORK_ITEM' | 'WORK_COMMENT'
-  entity_id       UUID NOT NULL,
-  action          TEXT NOT NULL,                 -- 'create' | 'update' | 'comment' | 'status_change'
-  external_id     TEXT,
-  status          TEXT NOT NULL,                 -- 'OK' | 'FAILED' | 'CONFLICT'
-  error_message   TEXT,
-  payload_hash    TEXT,                          -- v0.4 新增：防重复同步
-  created_at      TIMESTAMPTZ DEFAULT now()
-);
-CREATE INDEX idx_sync_audit_project_time ON sync_audit(project_id, created_at DESC);
-CREATE INDEX idx_sync_audit_entity ON sync_audit(entity_type, entity_id);
-```
-
-## 4. JiraProvider 实现
+## 4. JiraProvider 实现（v0.4.2 改）
 
 ```ts
 class JiraProvider implements WorkManagementProvider {
@@ -84,6 +63,7 @@ class JiraProvider implements WorkManagementProvider {
   }
 
   getSelfMetadata(): ProviderMetadata {
+    // v0.4.2 改：只返回 capability，不返回静态 status 模板
     return {
       key: 'jira',
       display_name: 'Jira',
@@ -91,39 +71,120 @@ class JiraProvider implements WorkManagementProvider {
       required_fields: [
         { key: 'site', label: 'Jira Site URL', type: 'url' },
         { key: 'project_key', label: 'Project Key', type: 'string' }
-      ],
-      // 状态映射：UI 动态生成
-      status_mapping_template: [
-        { canonical: 'TODO', jira_values: ['To Do', 'Open', 'Backlog'] },
-        { canonical: 'IN_PROGRESS', jira_values: ['In Progress', 'In Review'] },
-        { canonical: 'DONE', jira_values: ['Done', 'Closed', 'Resolved'] }
       ]
     };
   }
 
-  async listWorkItems(query: WorkItemQuery): Promise<WorkItemPage> {
-    // JQL: project = 'PROJ' AND status != Done
+  // v0.4.2 改：所有方法都接 binding（E8 已经定好）
+  async listStatuses(binding: WorkItemBinding): Promise<ProviderStatus[]> {
+    // GET /rest/api/3/project/{key}/statuses
+    //   → 返回该 project + Issue Type 实际可用的 status
+    //   → Atlassian 官方：状态按 project + Issue Type 变
+    return await this.api(binding).listStatuses(binding.external_project_ref);
   }
 
-  async createWorkItem(input: WorkItemInput): Promise<WorkItem> {
-    // POST /rest/api/3/issue
-    // 写 work_items(provider_key='jira', external_ref=issue.key)
+  async listWorkItems(query: WorkItemQuery, binding: WorkItemBinding): Promise<WorkItemPage> {
+    return await this.api(binding).listIssues({
+      jql: `project = "${binding.external_project_ref}" AND ${queryToJql(query)}`
+    });
   }
 
-  // ... 其他方法
+  async createWorkItem(input: WorkItemInput, binding: WorkItemBinding): Promise<WorkItem> {
+    const issue = await this.api(binding).createIssue({
+      fields: {
+        project: { key: binding.external_project_ref },
+        summary: input.title,
+        description: input.description,
+        issuetype: { name: input.type || 'Task' }
+      }
+    });
+    return this.toWorkItem(issue, binding);
+  }
+
+  async updateWorkItem(ref: WorkItemRef, changes: WorkItemChanges, binding: WorkItemBinding): Promise<WorkItem> {
+    // 必须用 ref.externalRef，不用 binding（按 E8 路由规则）
+    await this.api(binding).editIssue(ref.externalRef, changes);
+    // 写 work_items.provider_status / provider_updated_at
+  }
+
+  async addComment(ref, comment, binding): Promise<WorkComment> { /* ... */ }
+  async listComments(ref, binding): Promise<WorkComment[]> { /* ... */ }
+
+  async getStatusMapping(binding: WorkItemBinding): Promise<CanonicalStatusMapping[]> {
+    // v0.4.2 改：动态返回（来自 binding.settings.status_mapping，用户配置）
+    return binding.settings.status_mapping;
+  }
 }
 ```
 
-## 5. API
+### 4.1 Provider routing invariant（v0.4.2 与 E8 同步）
 
-| Method | Path | 描述 | 权限 |
-| --- | --- | --- | --- |
-| POST | `/projects/:id/work-management/jira/connect` | 启动 OAuth 3LO | project owner |
-| GET | `/work-management/jira/callback` | OAuth 回调 | 公开（带 state） |
-| POST | `/projects/:id/work-management/jira/disconnect` | 断开 | project owner |
-| PATCH | `/projects/:id/work-management/bindings` | 切到 Jira | project owner |
-| POST | `/sync/jira/webhook` | Jira webhook 入口 | 公开（带签名校验） |
-| POST | `/sync/retry` | 重试失败的同步 | system |
+```ts
+class ProviderRouter {
+  forCreate(project: Project): WorkManagementProvider {
+    const binding = workItemBindings.getActive(project.id);
+    if (!binding) throw new NoActiveProvider();
+    return providerRegistry.get(binding.provider_key);
+  }
+
+  forExisting(workItem: WorkItem): WorkManagementProvider {
+    // 永远用 workItem.provider_key，不看 active binding
+    return providerRegistry.get(workItem.provider_key);
+  }
+}
+```
+
+## 5. Webhook 生命周期（v0.4.2 新增）
+
+### 5.1 注册
+
+```
+OAuth 3LO 完成后：
+  POST {jira_base}/rest/api/3/webhook
+  {
+    url: "https://api.mateos.com/sync/jira/webhook",
+    webhooks: [{
+      events: ["jira:issue_created","jira:issue_updated","jira:issue_deleted","comment_created","comment_updated"],
+      jqlFilter: "project = 'PROJ'",
+      fieldIdsFilter: ["status","assignee","summary","description"]
+    }]
+  }
+  → response.webhooks[0].id = wh-12345
+  → 写 work_management_connections.webhook_id = 'wh-12345'
+  → 写 work_management_connections.webhook_expires_at = now() + 30 days
+```
+
+### 5.2 定期 refresh（关键：Jira Cloud webhook 30 天过期）
+
+```
+Atlassian 官方：PUT /rest/api/3/webhook/refresh
+  Headers: { "X-Atlassian-Webhook-Identifier": "wh-12345" }
+  Body: { "webhookIds": [wh-12345] }
+  → 续期成功 → 写 work_management_connections.webhook_last_refreshed_at = now()
+```
+
+```
+Scheduler（V1+ E9 落地）：
+  每日 0:00 UTC 扫所有 connection
+    if webhook_expires_at < now() + 7 days:
+      PUT /webhook/refresh
+      → success: webhook_expires_at = now() + 30 days
+      → failed: 写 alert + 通知 owner
+```
+
+### 5.3 Inbound 接收
+
+```
+POST /sync/jira/webhook
+  Headers: { X-Hub-Signature, X-Atlassian-Webhook-Identifier }
+  → 校验 webhook_id == work_management_connections.webhook_id
+  → 校验 HMAC signature（OAuth 2.0 app webhook 也支持）
+  → 入 BullMQ sync.jira.inbound
+  → Worker 拉 Issue 最新状态
+  → 比对 payload_hash → 相同跳过（防循环）
+  → 写 work_items 更新（用 workItem.provider_key 路由）+ sync_audit
+  → WS 推 work_item.updated
+```
 
 ## 6. 关键流程
 
@@ -132,34 +193,41 @@ class JiraProvider implements WorkManagementProvider {
 ```
 1. POST /projects/:id/work-management/jira/connect
    → 重定向到 Atlassian authorize URL
-   → state = sign(project_id + user_id + nonce)
+   → state = sign(org_id + user_id + nonce)
 2. 用户授权 → 回调 /work-management/jira/callback
    → 校验 state
    → 拿 access_token + refresh_token
-   → 加密存 work_management_connections
-3. 触发 getSelfMetadata → 写 binding.settings
+   → 加密存 work_management_connections（org_id 级别，不绑 project）
+3. 用户在 P11 Project Settings 选择哪个 connection 绑到当前 project
+4. POST /projects/:id/work-management/bindings { connection_id, external_project_ref: 'PROJ' }
+   → 创建 work_item_bindings
+   → 触发 getSelfMetadata + listStatuses
+   → 写 binding.settings
+5. 注册 webhook（§5.1）
 ```
 
-### 6.2 WorkItem 双向同步
+### 6.2 双向同步
 
 **MateOS → Jira**：
 ```
 MateOS createWorkItem:
-  1. POST Jira /rest/api/3/issue { fields: { project, summary, description, issuetype } }
+  1. POST Jira /rest/api/3/issue
   2. 写 work_items (provider_key='jira', external_ref='PROJ-123')
-  3. 写 work_item_projections
+  3. 写 work_item_projections（v0.4.2 删了）—— 实际只更新 work_items 字段
   4. 写 sync_audit(direction=OUT, status=OK, payload_hash=sha256(content))
 ```
 
 **Jira → MateOS（webhook）**：
 ```
 POST /sync/jira/webhook
-  1. 校验 X-Hub-Signature（HMAC）
-  2. 入 BullMQ sync.jira.inbound
-  3. Worker 拉 Issue 最新状态
-  4. 比对 payload_hash → 相同跳过（防循环）
-  5. 写 work_items 更新 + sync_audit(direction=IN, status=OK)
-  6. WS 推 work_item.updated
+  → 校验 signature + webhook_id
+  → 入 BullMQ
+  → Worker 拉 Issue 最新状态
+  → 比对 payload_hash → 相同跳过
+  → 通过 ProviderRouter.forExisting(workItem) 找 Provider
+  → 写 work_items 更新
+  → sync_audit(direction=IN, status=OK)
+  → WS 推 work_item.updated
 ```
 
 ### 6.3 冲突检测
@@ -171,37 +239,33 @@ POST /sync/jira/webhook
   - 标 sync_audit.status=CONFLICT + 通知 project owner
 ```
 
-### 6.4 失败重试
+## 7. API
 
-```
-sync_audit.status=FAILED
-  → 指数退避 1min / 5min / 30min / 2h / 12h
-  → 5 次后告警
-  → owner 可手动 POST /sync/retry
-```
-
-## 7. UI
-
-- **P4 Project Dashboard**：Work Management 卡片（v0.4 改）—— 选 Jira 时展开 Site / Project Key / Status Mapping
-- **P11 Project Settings - Work Management**：
-  - Provider 单选
-  - Jira 动态字段（site / project_key / status mapping 表）
-  - Connection 状态（已连接 / token 过期 / 断开）
-  - 最近 10 次 sync 记录（带重试按钮）
+| Method | Path | 描述 | 权限 |
+| --- | --- | --- | --- |
+| POST | `/orgs/:id/work-management/connections` | 创建 Provider Connection（v0.4.2 改：org 级） | org owner |
+| GET | `/orgs/:id/work-management/connections` | 列出 | org member |
+| DELETE | `/orgs/:id/work-management/connections/:cid` | 断开 | org owner |
+| GET | `/work-management/jira/callback` | OAuth 回调 | 公开（带 state） |
+| POST | `/projects/:id/work-management/bindings` | 创建 binding（引用 connection_id） | project owner |
+| GET / PATCH | `/projects/:id/work-management/bindings` | 切换 Provider | project owner |
+| POST | `/sync/jira/webhook` | Jira webhook 入口 | 公开（带 signature） |
+| POST | `/sync/retry` | 重试失败的同步 | system |
 
 ## 8. 验收标准
 
 ### 8.1 功能
 
-- **F1** OAuth 3LO 全流程跑通，token 加密存储
-- **F2** token 任何 GET 不返回明文
-- **F3** MateOS WorkItem → Jira Issue 创建成功（含 deep link）
-- **F4** Jira Issue 状态变更 → webhook → MateOS WorkItem 更新
-- **F5** 评论双向同步
-- **F6** **v0.4 新增** payload_hash 去重（防循环同步）
-- **F7** 冲突检测：标 CONFLICT + 通知
-- **F8** Change Provider 不影响历史 WorkItem（E8 F5 复用）
-- **F9** 失败重试：指数退避
+- **F1** OAuth 3LO 全流程跑通
+- **F2** **v0.4.2 改** Connection 属于 Org/Owner，不绑 Project
+- **F3** 一个 Org 多个 Jira Connection（不同 site / 不同 user）
+- **F4** **v0.4.2 改** `JiraProvider` 所有方法都接 `binding` 参数
+- **F5** **v0.4.2 改** `listStatuses(binding)` 动态拉（不依赖静态模板）
+- **F6** **v0.4.2 改** Webhook 注册 + 定期 refresh（防 30 天过期）
+- **F7** payload_hash 去重（防循环同步）
+- **F8** 冲突检测：标 CONFLICT + 通知
+- **F9** Change Provider 不影响历史 WorkItem
+- **F10** 失败重试：指数退避
 
 ### 8.2 E2E
 
@@ -209,37 +273,36 @@ sync_audit.status=FAILED
 - `e2e/E9-002-jira-workitem-create`
 - `e2e/E9-003-jira-webhook-inbound`
 - `e2e/E9-004-jira-comment-bidir`
-- `e2e/E9-005-payload-hash-dedup`（v0.4 新）
+- `e2e/E9-005-payload-hash-dedup`
 - `e2e/E9-006-conflict-detection`
 - `e2e/E9-007-change-provider-no-migration`
 - `e2e/E9-008-retry-after-failure`
-
-### 8.3 非功能
-
-- OAuth callback P95 < 2s
-- 同步失败重试：指数退避
-- 1000 project × 每日 10 次同步 = 10k/日，BullMQ 无积压
+- `e2e/E9-009-connection-org-scope`（v0.4.2 新）—— Connection 跨 Project 复用
+- `e2e/E9-010-webhook-refresh`（v0.4.2 新）—— 模拟 webhook 过期，scheduled refresh
+- `e2e/E9-011-liststatuses-dynamic`（v0.4.2 新）—— status mapping 从 Jira 拉，非静态
 
 ## 9. 与其他 Epic 的关系
 
 - **被依赖**：无（E9 是叶子）
-- **依赖**：E8（Provider 抽象 + WorkItem 域 + binding 关联）
-- **冲突裁决**：执行路径不切 Jira（Jira 仅 WorkItem Provider）；Jira webhook 只同步 WorkItem / Comment，不触达 Agent / Execution
+- **依赖**：E8（v0.4.2 Provider 抽象 + WorkItem + Org 级 Connection）
+- **冲突裁决**：Jira webhook 只同步 WorkItem/Comment，不触达 Agent / Execution
 
 ## 10. 风险与开放问题
 
-- **R1**：Jira OAuth refresh token 自动刷新
+- **R1**：OAuth refresh token 自动刷新
 - **R2**：webhook 重放保护（signature + timestamp window）
-- **R3**：OAuth 撤销（用户从 Atlassian 取消授权）— webhook 兜底
+- **R3**：OAuth 撤销（用户从 Atlassian 取消授权）—— webhook 失败时 fallback
 - **R4**：自托管 Jira（Data Center）vs Cloud API 差异——V1+ 仅 Cloud
 
 ## 11. 实施顺序（V1+，独立里程碑）
 
-1. JiraProvider 实现（继承 E8 接口）
-2. OAuth 3LO + token 加密
-3. MateOS WorkItem → Jira Issue 单向创建
-4. Jira webhook inbound + 反向同步
-5. 评论双向同步 + 冲突检测
-6. payload_hash 去重
-7. P11 Work Management Settings UI
-8. E2E 套件
+1. **v0.4.2 改** Connection 实体从 Project 改为 Org/Owner
+2. **v0.4.2 改** `JiraProvider` 实现接 `binding` 参数
+3. **v0.4.2 改** `listStatuses(binding)` 动态拉
+4. OAuth 3LO + token 加密
+5. **v0.4.2 新增** webhook 注册 + 定期 refresh scheduler
+6. MateOS WorkItem → Jira Issue 单向创建
+7. Jira webhook inbound + 反向同步
+8. 评论双向同步 + 冲突检测
+9. P11 Work Management Settings UI（v0.4.2 改：选 Connection 而非建 Project 内 connection）
+10. E2E 套件

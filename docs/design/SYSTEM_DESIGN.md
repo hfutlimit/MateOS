@@ -30,6 +30,20 @@
 > 17. **DB UNIQUE 强制 active binding 唯一**：`work_item_bindings(project_id) WHERE is_active=true`
 > 18. **Provider 路由规则冻结**：CREATE 用 `activeBinding.provider_key`；UPDATE 用 `work_item.provider_key`
 > 19. **Jira Status Mapping 动态**：`listStatuses(binding)` 而非 Provider 级静态模板
+>
+> **v0.3.1 → v0.3.2 并发与幂等收口**（架构评审后）：
+> 20. **Capacity 原子化**：旧方案 `agents.max_concurrency + agents.active_slots` 是 DB + Redis 双事实源，存在 SELECT → accept → INSERT 的 race。**新方案**：仅 `max_concurrency` 落 DB（durable config），`active_slots` 归 Redis Lua atomic semaphore；`agent-capacity:{agent_id}` hash，tryAcquireSlot / releaseSlot 一次 EVAL 完成
+> 21. **Slot 提前 reservation**：Resolver 选 Agent → 立即 tryAcquireSlot → 成功才 dispatch；不等到 ACCEPT 后再 acquire（语义"我可以但 Runtime 拒绝"很奇怪）
+> 22. **`agents.active_slots` 字段删除**：E2 删字段，状态归 Redis
+> 23. **resume 协议反向**（E7 改）：旧 `execution.resume` 是 Agent 推 last_event_seq、Runtime 补发——但 event 是 Agent 产，Runtime 补发是错的。新协议 `execution.resume_request`（Agent 问）→ `execution.resume_ack`（Runtime 答 `last_persisted_seq`）→ Agent 从 43 续发
+> 24. **Terminal CAS 幂等**（E7 改）：`UPDATE agent_executions SET status=? WHERE id=? AND status IN ('PENDING','RUNNING')`；affected_rows=0 表示 stale/duplicate → 忽略；envelope `id` 落 `terminal_envelope_id` 字段用于去重
+> 25. **`execution_events.attempt_id` NOT NULL**：旧允许 NULL 时 UNIQUE(attempt_id, ...) 因 PostgreSQL 多 NULL 行为不触发，重复事件漏去重
+> 26. **`execution_artifacts.attempt_id` NOT NULL**：同 25
+> 27. **Permission Guard 拆**（E6 改）：旧 Guard 收到 `REQUIRE_APPROVAL` 静默放行让业务层"忘记"审批。**新 Guard 只决 ALLOW/DENY**，`REQUIRE_APPROVAL` 视为 403；业务层显式 `policy.evaluate()` 走 E5 / E4 门禁
+> 28. **Work Management Connection 解耦**（E8 + E9 改）：`work_management_connections` 从 `(project_id, user_id)` 改为 `(org_id, owner_user_id)`，一个 Org 可有多个 Jira Connection；`work_item_bindings.connection_id` 引用
+> 29. **`JiraProvider.getSelfMetadata()` 删除静态 status 模板**：只返回 capability 描述；status mapping 通过 `listStatuses(binding)` 动态拉
+> 30. **Webhook 注册 + 定期 refresh**（E9 新增）：Jira Cloud 动态 webhook 30 天过期；scheduler 在 webhook_expires_at < now+7d 时调官方 `PUT /rest/api/3/webhook/refresh`
+> 31. **删除"Busy → 自动 NEED_CONTEXT"行为**（UI DS v0.6）：v0.4.2 修复 Resolver 后 Busy Agent 直接被跳过，不再产生"我很忙"伪造决策
 
 ---
 
@@ -191,6 +205,64 @@ CollaborationRequest 不再镜像 Execution 状态——三条 lifecycle 真正�
 `decision_records` 表（事实源）——所有 Decision 必带 `analysis{capability, context_score, permission}`，UI 决策卡片从 decision_records 投影生成（**不复制**）。
 
 PENDING 超时（默认 60s）→ 取下一个候选；全部超时 → CollaborationRequest.status=UNRESOLVED + 通知发起人。
+
+### 4.2.1 Agent Capacity 原子化（v0.3.2 收口）
+
+**旧方案问题**：
+
+```
+agents.max_concurrency = 1
+agents.active_slots = 0   (DB 字段)
+
+T0:  Request A → Resolver 读 active_slots=0 < 1 → 选 Agent B
+T1:  Request B → Resolver 读 active_slots=0 < 1 → 选 Agent B
+T2:  两次 dispatch → 两次 ACCEPT → 两次 active_slots++ → 实际值=2
+```
+
+**双事实源 + 不可序列化**。同时 SELECT 看到的是过期快照。
+
+**新方案**：单一事实源（Redis Lua atomic semaphore）
+
+```
+Redis key: agent-capacity:{agent_id}
+  used        当前已 reservation 的 slot 数
+  max         来自 agents.max_concurrency（启动时写入）
+  leases      hash: lease_id → collaboration_request_id
+```
+
+```
+EVAL tryAcquireSlot(agent_id, lease_id, collab_id, ttl)
+  1. if leases[lease_id] exists → 重复 reservation，idempotency 返回成功
+  2. if used >= max → return {0, used}            # 失败
+  3. used++, leases[lease_id] = collab_id
+  4. EXPIRE
+  5. return {1, used+1}
+
+EVAL releaseSlot(agent_id, lease_id)
+  1. if not leases[lease_id] → return 0
+  2. HDEL leases[lease_id]
+  3. used = max(0, used - 1)
+  4. return 1
+```
+
+**单一事实源**：
+- `max_concurrency`：DB 字段（durable config）
+- `active_slots`：Redis 字段（Runtime scheduling state）
+- DB + Redis **没有**双写
+
+**Slot 提前 reservation**：
+
+```
+Resolver 选 Agent → 立即 tryAcquireSlot → 成功才 dispatch
+  ↓
+Agent ACCEPT
+  ↓
+E4 调 E7 API 创建 execution（slot lease 仍由 E4 持有，引用 collaboration_requests.slot_lease_id）
+  ↓
+E7 推 execution.result SUCCEEDED / FAILED → E4 释放 slot
+  ↓
+或：Agent REJECT / NEED_CONTEXT / timeout / 管理员 cancel → E4 释放 slot
+```
 
 ### 4.3 Memory 写入门禁
 

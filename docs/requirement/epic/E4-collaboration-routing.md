@@ -5,41 +5,67 @@
 | Epic ID | E4 |
 | 标题 | Collaboration & Routing |
 | 阶段 | MVP（M4） |
-| 上游 | PRD v0.4 §5 FR-4 / FR-5 / SYSTEM_DESIGN v0.3 §4.1 / §4.2 / §5.2 collaboration_requests / UI DS v0.5 §5.1 |
+| 上游 | PRD v0.4 / SYSTEM_DESIGN v0.3.2 / v0.3.1 协议收口 / v0.3.2 capacity 原子化 |
 | 下游 | E3（消息载体 + Trigger 提取）、E7（Accept → 创建 Execution）、E10（audit） |
-| 状态 | Draft（v0.4.1 协议边界收口） |
+| 状态 | Draft（v0.4.2 capacity 原子化） |
 
 ## 1. 背景与动机
 
-v0.4 引入 CollaborationRequest 一等实体。**v0.4.1 关键收口**：
+v0.4.1 完成了 E4/E7 协议边界收口。**v0.4.2 关键收口**：
 
-1. **E4 / E7 协议彻底拆开**——`collaboration.decision`（E4）与 `execution.dispatch` / `execution.event` / `execution.result`（E7）属于不同 message type，不能混淆
-2. **CollaborationRequest status 不再镜像 Execution status**——三条 lifecycle 真正独立
-3. **Resolver 调度用 lifecycle + active_slots（max_concurrency）**——不再用 activity（activity 仅做 UI derived）
+1. **Resolver 选 Agent 后立即 reservation slot**（不是 ACCEPT 后才 acquire）—— 消除并发 race
+2. **Slot 计数改为 Redis Lua 原子**（不是 DB + Redis 双事实源）—— agents 表删 `active_slots` 字段
+3. **E2 不再持有 Resolver 规则**——E2 只提供 `lifecycle` + `max_concurrency`；调度细节归 E4 维护
 
 ## 2. 范围
 
 ### 2.1 In Scope
 
 - 4 种 Trigger：MENTION / WORK_ITEM / API / AUTOMATION
-- **v0.4.1** CollaborationRequest status 收敛为 `PENDING | ACCEPTED | REJECTED | NEED_CONTEXT | UNRESOLVED | CANCELLED`
-- Mention Resolver（lifecycle=ACTIVE + active_slots < max_concurrency）
+- CollaborationRequest status 收敛为 `PENDING | ACCEPTED | REJECTED | NEED_CONTEXT | UNRESOLVED | CANCELLED`
+- Mention Resolver（lifecycle=ACTIVE + slot reservation 成功）
 - Capability ranking
-- Decision 状态机（**不再**含 EXECUTING/COMPLETED/FAILED）
-- Analysis 三件套（capability / context_score / permission）
+- Decision 状态机
+- Analysis 三件套
 - 超时重路由（60s 默认）
 - @all 投递
-- **v0.4.1 协议边界**：E4 拥有 `collaboration.decision`（agent → orchestrator），E7 拥有 `execution.*`（agent → runtime）
+- 协议边界：`collaboration.*`（E4）vs `execution.*`（E7）
+- **v0.4.2** Redis Lua atomic slot reservation
+- **v0.4.2** Resolver 选 Agent → tryAcquireSlot → send collaboration_request；REJECT/NEED_CONTEXT/timeout → release
 
 ### 2.2 Out of Scope
 
 - Delegate 实际路由（V2）
-- @all 仲裁阈值动态调整（M6 之后）
+- @all 仲裁阈值动态调整
 
 ## 3. 数据模型
 
 ```sql
--- triggers
+-- agents 表（v0.4.2 改：删 active_slots，保留 max_concurrency）
+CREATE TABLE agents (
+  id              UUID PRIMARY KEY,
+  owner_user_id   UUID NOT NULL REFERENCES users(id),
+  credential_id   UUID NOT NULL REFERENCES credentials(id),
+  name            TEXT NOT NULL,
+  role            TEXT NOT NULL,
+  capabilities    JSONB NOT NULL DEFAULT '[]',
+  lifecycle       TEXT NOT NULL DEFAULT 'ACTIVE'
+                  CHECK (lifecycle IN ('ACTIVE','PAUSED','DISABLED')),
+  activity        TEXT NOT NULL DEFAULT 'OFFLINE'
+                  CHECK (activity IN ('OFFLINE','AVAILABLE','THINKING','WORKING','WAITING_CONTEXT','ERROR')),
+  activity_reason TEXT,
+  -- v0.4.2 改：只存 max_concurrency 配置；active_slots 不再是 DB 字段
+  -- 原因：active_slots 是 Runtime scheduling state，不是 durable config；用 Redis atomic
+  max_concurrency INT NOT NULL DEFAULT 1,
+  daily_limit_usd NUMERIC(10,2) DEFAULT 5.00,
+  monthly_budget_usd NUMERIC(10,2) DEFAULT 50.00,
+  created_at      TIMESTAMPTZ DEFAULT now()
+);
+-- activity 字段说明：v0.4.2 起仅做 UI derived（E2 仍推 activity 是因为 UI 需要显示；
+-- 调度依据改为 Redis semaphore 持有的 active slot 数）
+
+-- 删：agents.active_slots 字段
+
 CREATE TABLE triggers (
   id              UUID PRIMARY KEY,
   trigger_type    TEXT NOT NULL CHECK (trigger_type IN ('MENTION','WORK_ITEM','API','AUTOMATION')),
@@ -49,7 +75,6 @@ CREATE TABLE triggers (
   captured_at     TIMESTAMPTZ DEFAULT now()
 );
 
--- collaboration_requests（v0.4.1 状态收敛：去掉 EXECUTING/COMPLETED/FAILED）
 CREATE TABLE collaboration_requests (
   id                      UUID PRIMARY KEY,
   trigger_id              UUID NOT NULL REFERENCES triggers(id),
@@ -62,25 +87,17 @@ CREATE TABLE collaboration_requests (
   target_agent_id         UUID REFERENCES agents(id),
   required_capabilities   JSONB NOT NULL DEFAULT '[]',
   context_refs            JSONB NOT NULL DEFAULT '{}',
-  -- v0.4.1 收敛：只到 Decision 结果；Execution 状态由 E7 维护
   status                  TEXT NOT NULL DEFAULT 'PENDING'
-                          CHECK (status IN (
-                            'PENDING',         -- Resolver 未决
-                            'ACCEPTED',        -- Agent 决策接受（E4 视角）
-                            'REJECTED',        -- Agent 决策拒绝
-                            'NEED_CONTEXT',    -- Agent 等人类补齐
-                            'UNRESOLVED',      -- 全部候选超时
-                            'CANCELLED'        -- 发起人 / 管理员取消
-                          )),
-  -- 关联到 Execution（事实源在 agent_executions 表）
-  target_execution_id     UUID,            -- 接受后由 E7 写入
+                          CHECK (status IN ('PENDING','ACCEPTED','REJECTED','NEED_CONTEXT','UNRESOLVED','CANCELLED')),
+  -- v0.4.2 新增：slot reservation 引用（用于 release 时反查）
+  slot_lease_id           TEXT,                          -- Redis slot lease id（Lua 返回）
+  target_execution_id     UUID,                          -- E4 调 E7 API 后回填
   deadline_s              INT NOT NULL DEFAULT 600,
   idempotency_key         TEXT UNIQUE,
   created_at              TIMESTAMPTZ DEFAULT now(),
   resolved_at             TIMESTAMPTZ
 );
 
--- decision_records（事实源）
 CREATE TABLE decision_records (
   id                       UUID PRIMARY KEY,
   collaboration_request_id UUID NOT NULL REFERENCES collaboration_requests(id),
@@ -88,197 +105,200 @@ CREATE TABLE decision_records (
   decision                 TEXT NOT NULL CHECK (decision IN ('ACCEPT','REJECT','NEED_CONTEXT','DELEGATE')),
   reason                   TEXT,
   needs                    JSONB,
-  analysis                 JSONB NOT NULL,         -- {capability, context_score, permission}
+  analysis                 JSONB NOT NULL,
   delegate_to              UUID,
   decided_at               TIMESTAMPTZ,
   created_at               TIMESTAMPTZ DEFAULT now()
 );
-
--- agents 表新增：调度相关字段（v0.4.1）
---   max_concurrency  INT NOT NULL DEFAULT 1
---   active_slots     INT NOT NULL DEFAULT 0
--- E4 Resolver 调度依据
 ```
 
-### 3.1 v0.4.1 状态机收敛
+## 4. Agent Capacity 原子化（v0.4.2 核心修复）
+
+### 4.1 旧方案的问题
 
 ```
-PENDING ─┬─► ACCEPTED  ─► E4 不再跟踪 Execution 状态
-         ├─► REJECTED  ─► 通知发起人
-         ├─► NEED_CONTEXT
-         ├─► UNRESOLVED（全部候选超时）
-         └─► CANCELLED（发起人 / 管理员 / lifecycle 变更触发）
+agents.max_concurrency = 1
+agents.active_slots = 0  (DB 字段)
 
-Execution 状态完全在 E7：
-  agent_executions.status ∈ {PENDING, RUNNING, SUCCEEDED, FAILED, CANCELLED, TIMEOUT}
-
-UI 渲染时如需「执行中」状态，由前端从 Execution 拉取后做 projection（display_state）
+Request A → Resolver → SELECT agents WHERE active_slots < max_concurrency → 选 B
+Request B → Resolver → SELECT agents WHERE active_slots < max_concurrency → 选 B  (同一时刻)
+两个都到 B ACCEPT
+→ E7 写 active_slots++（两次）→ active_slots = 2，但 max_concurrency = 1
 ```
 
-## 4. 协议（v0.4.1 拆分）
+**双事实源 + 不可序列化 → race condition。**
 
-### 4.1 协议边界（关键）
+### 4.2 新方案：Redis Lua 原子 semaphore
 
-| Message type | 方向 | 拥有方 | 用途 |
-| --- | --- | --- | --- |
-| `collaboration.request` | Runtime → Orchestrator | E4 | （内部）创建 collaboration_request |
-| **`collaboration.decision`** | **Agent → Orchestrator** | **E4** | **Agent 对 collaboration_request 的回应（ACCEPT/REJECT/NEED_CONTEXT/DELEGATE）** |
-| `collaboration.cancelled` | Orchestrator / 发起人 | E4 | 取消协作 |
-| `collaboration.resolved` | Orchestrator → Client（WS） | E4 | Resolver 命中结果 |
-| **`execution.dispatch`** | **Runtime → Agent** | **E7** | **执行任务下发（execution_id 已存在）** |
-| `execution.event` | Agent → Runtime | E7 | 流式事件（STDOUT/PROGRESS/TOOL_CALL/LLM_TICK/ARTIFACT/ERROR） |
-| **`execution.result`** | **Agent → Runtime** | **E7** | **执行结果（不包含 decision）** |
-| `execution.error` | Agent → Runtime | E7 | 执行失败 |
-
-**关键**：`execution.result` 不能再携带 decision / reason / analysis / needs。这些是 `collaboration.decision` 的字段。
-
-### 4.2 协议 Envelope
-
-```jsonc
-// 通用
-{ "v": 1, "type": "<type>", "id": "uuid", "ts": 0, "payload": {} }
-
-// collaboration.decision（E4 拥有）
-{ "type": "collaboration.decision", "payload": {
-    "collaboration_request_id": "...",
-    "decision": "ACCEPT|REJECT|NEED_CONTEXT|DELEGATE",
-    "reason": "...",
-    "needs": ["api spec", "db design"],
-    "analysis": { "capability": true, "context_score": 88, "permission": true },
-    "delegate_to": "agent:..."
-}}
-
-// execution.dispatch（E7 拥有）
-{ "type": "execution.dispatch", "payload": {
-    "execution_id": "...",
-    "collaboration_request_id": "...",     // optional，可无 WorkItem 触发
-    "work_item_ref": {"provider_key":"builtin", "work_item_id":"..."}?,   // optional
-    "input": { "prompt": "...", "params": {} },
-    "context": { "memory_refs": [], "recent_messages": [], "permissions": {} },
-    "deadline_s": 600, "idempotency_key": "..."
-}}
-
-// execution.event
-{ "type": "execution.event", "payload": {
-    "execution_id": "...",
-    "attempt_no": 1,
-    "event_type": "STDOUT|PROGRESS|TOOL_CALL|LLM_TICK|ARTIFACT|ERROR",
-    "provider_event_id": "evt-uuid-123",   // 协议级幂等键（v0.4.1 新增）
-    "payload": { "content": "...", "meta": {} }
-}}
-
-// execution.result
-{ "type": "execution.result", "payload": {
-    "execution_id": "...",
-    "status": "SUCCEEDED|FAILED|CANCELLED",
-    "output": { "markdown": "...", "code": "..." },
-    "usage": { "tokens_in": 0, "tokens_out": 0, "duration_ms": 0 },
-    "artifacts": [ { "kind": "FILE", "name": "...", "s3_key": "..." } ]
-}}
 ```
+# Redis key: agent-capacity:{agent_id}
+# 结构：
+#   used        当前已 reservation 的 slot 数
+#   max         来自 agents.max_concurrency（启动时写入）
+#   leases      hash: lease_id → collaboration_request_id（用于 release 反查）
+```
+
+**EVAL Lua tryAcquireSlot(agent_id, collab_request_id)**：
+
+```lua
+-- KEYS[1] = agent-capacity:{agent_id}
+-- ARGV[1] = lease_id
+-- ARGV[2] = collab_request_id
+-- ARGV[3] = ttl_seconds (default 600 = deadline_s + 30s buffer)
+
+local used = tonumber(redis.call('HGET', KEYS[1], 'used') or '0')
+local max = tonumber(redis.call('HGET', KEYS[1], 'max') or '1')
+local current_lease = redis.call('HGET', KEYS[1], 'leases->' .. ARGV[1])
+
+if current_lease then
+    -- 重复 reservation（idempotency）：返回成功
+    return {1, ARGV[1], used}
+end
+
+if used >= max then
+    return {0, '', used}  -- 失败
+end
+
+redis.call('HSET', KEYS[1], 'used', used + 1)
+redis.call('HSET', KEYS[1], 'leases->' .. ARGV[1], ARGV[2])
+redis.call('EXPIRE', KEYS[1], tonumber(ARGV[3]))
+return {1, ARGV[1], used + 1}
+```
+
+**EVAL Lua releaseSlot(agent_id, lease_id)**：
+
+```lua
+-- KEYS[1] = agent-capacity:{agent_id}
+-- ARGV[1] = lease_id
+local collab = redis.call('HGET', KEYS[1], 'leases->' .. ARGV[1])
+if not collab then
+    return 0  -- 已经释放或不存在
+end
+redis.call('HDEL', KEYS[1], 'leases->' .. ARGV[1])
+local used = tonumber(redis.call('HGET', KEYS[1], 'used') or '1')
+redis.call('HSET', KEYS[1], 'used', math.max(0, used - 1))
+return 1
+```
+
+### 4.3 单一事实源
+
+- **`max_concurrency`**：DB 字段（durable config）
+- **`active_slots`**：Redis 字段（Runtime scheduling state）
+- 不再有 DB + Redis 双写
 
 ## 5. 关键流程
 
-### 5.1 Resolver 调度（v0.4.1 改）
+### 5.1 v0.4.2 Resolver 流程（修正 race）
 
 ```
-SELECT target_agent
-  FROM agents a
-  WHERE a.lifecycle = 'ACTIVE'
-    AND a.active_slots < a.max_concurrency
-    AND check(a, 'write_message', channel_scope) = 'ALLOW'
-    AND a.id IN (
-        SELECT member_id FROM channel_members
-        WHERE channel_id = $1 AND member_type = 'AGENT'
-    )
-  ORDER BY score DESC
-  LIMIT 3;
+1. Trigger 写入 triggers + collaboration_requests (status=PENDING)
+2. Resolver 跑 Capability ranking 产出 Top-N 候选
+3. 遍历候选（按 score 降序）：
+   a) 校验 permission
+   b) **tryAcquireSlot(agent_id, lease_id)**
+      - 成功 → 写 collaboration_requests.slot_lease_id + status 保持 PENDING，dispatch
+      - 失败 → 下一个候选
+4. 全部失败 → status=UNRESOLVED + 通知发起人
+5. Agent 收到 dispatch 推 collaboration.decision
+6a. ACCEPT → E4 调 E7 API 创建 execution（**lease 不释放**，由 E7 持有）
+6b. REJECT / NEED_CONTEXT / timeout / 管理员 cancel → **releaseSlot(lease_id)**
+7. E7 推 execution.result SUCCEEDED / FAILED → **releaseSlot**（如果是从 dispatch 拿的 lease）
 ```
 
-- **不再依赖 activity**（`AVAILABLE/THINKING/...`）做调度——activity 只做 UI derived
-- `active_slots` 由 E7 Execution 启动时 +1，结束时 -1
-- 调度写 decision_records → UI 通过 lifecycle 字段继续展示 Agent 状态
+**关键**：
+- Slot 在 Resolver 投递时 reservation，不等 ACCEPT
+- ACCEPT 后 lease 仍持有（E7 接管 active_slots 语义）
+- 任何路径失败（REJECT/NEED_CONTEXT/timeout/cancel/E7 完成）→ release
 
-### 5.2 ACCEPT → Execution 跨 epic 联动
-
-```
-1. Agent 上报 `collaboration.decision` { decision: ACCEPT }
-2. E4 Orchestrator 写 decision_records + collaboration_requests.status=ACCEPTED
-3. E4 Orchestrator **调用 E7 API** 创建 agent_executions（不是 Agent 自己创建）：
-   POST /internal/agent-executions
-   { collaboration_request_id, work_item_ref, input, context_refs }
-4. E7 写 agent_executions（PENDING）+ execution_attempts(1, STARTED) + active_slots++
-5. E7 派发 `execution.dispatch` 给 Agent
-6. Agent 推 `execution.event` 流式 / `execution.result` 最终结果
-7. E7 写 agent_executions.status=SUCCEEDED/FAILED，active_slots--
-8. UI 从 execution 拉取状态，projection display_state="EXECUTING"/"COMPLETED"
-```
-
-**关键**：`execution_id` 由 E4 Orchestrator → E7 API 调用产生，**不是** Agent 在 `collaboration.decision` 中返回的。这避免了 v0.4 之前"decision 与 execution_id 同时存在"的不可能时序。
-
-### 5.3 超时重路由
+### 5.2 超时重路由
 
 ```
-collaboration_requests.status = PENDING 时 BullMQ 60s 延迟任务
-  → 取下一个候选重投
-  → 全部超时 → status=UNRESOLVED
-  → 写 audit + 通知发起人
+PENDING 倒计时到：
+  → 释放原 agent 的 slot（lease_id）
+  → 取下一个候选
+  → tryAcquireSlot
+  → 成功 → 重新 dispatch
+  → 失败 → 继续下一个或标 UNRESOLVED
 ```
 
-## 6. UI
+### 5.3 容量边界
 
-- 决策卡片从 `decision_records` 投影（v0.4 不变）
-- **v0.4.1** 决策卡展示 + Execution 状态从 E7 拉取（projection display_state）
-- @all 预警文案不变
-- mention 胶囊命中结果气泡不变
+```
+max_concurrency = 1 时：
+  - 同时只能有 1 个 collaboration_request 持有该 agent 的 slot
+  - 第二个触发 SELECT agents WHERE max_concurrency=1 → 排队
+  
+max_concurrency = 3 时：
+  - 同 agent 并发 3 个
+  - 第 4 个触发 → 选下一个候选
+```
 
-## 7. 验收标准
+## 6. 协议（不变）
 
-### 7.1 功能
+```jsonc
+{ "type": "collaboration.decision", "payload": {
+    "collaboration_request_id": "...",
+    "decision": "ACCEPT|REJECT|NEED_CONTEXT|DELEGATE",
+    "reason": "...", "needs": [...],
+    "analysis": { "capability": true, "context_score": 88, "permission": true }
+}}
+```
 
-- **F1** MENTION 触发 → triggers 写 → collaboration_requests 同步
-- **F2** **v0.4.1 改** Resolver 过滤：`lifecycle=ACTIVE ∩ active_slots < max_concurrency`，**不再**用 activity
-- **F3** **v0.4.1 改** `collaboration.decision` 消息体不携带 execution_id（execution_id 由 E4 调用 E7 API 产生）
-- **F4** **v0.4.1 改** `execution.result` 消息体不携带 decision / reason / analysis / needs
-- **F5** Decision Accept → E4 调用 E7 API 创建 agent_executions
-- **F6** Decision Need Context 必带 needs[]
-- **F7** PENDING 60s 后未响应 → 重路由
-- **F8** 全部超时 → status=UNRESOLVED + 通知
-- **F9** 消息流 DECISION 形态的 content 只引 `decision_ref`
-- **F10** **v0.4.1 改** collaboration_requests.status 不含 EXECUTING/COMPLETED/FAILED
-- **F11** **v0.4.1 改** UI 渲染「执行中」从 agent_executions 投影（display_state）
+## 7. UI
 
-### 7.2 E2E
+- 决策卡片从 `decision_records` 投影
+- mention 胶囊命中结果气泡
+- @all 预警文案
+
+## 8. 验收标准
+
+### 8.1 功能
+
+- **F1** Resolver 在选 Agent 后立即 `tryAcquireSlot`，dispatch 前 reservation
+- **F2** **v0.4.2 新增** Redis Lua atomic tryAcquireSlot，10k 并发无 race
+- **F3** REJECT / NEED_CONTEXT / timeout / 管理员 cancel → releaseSlot
+- **F4** ACCEPT 后 lease 由 E7 持有，E7 完成时 release
+- **F5** `max_concurrency = 1` 时同 agent 真正串行（2 个请求不同时持有 slot）
+- **F6** **v0.4.2 改** agents 表无 `active_slots` 字段（schema 校验）
+- **F7** CollaborationRequest status 不含 EXECUTING/COMPLETED/FAILED
+- **F8** 超时重路由：释放原 slot + 新 slot
+
+### 8.2 E2E
 
 - `e2e/E4-001-resolver-rank`
 - `e2e/E4-002-decision-state-machine`
 - `e2e/E4-003-timeout-reroute`
 - `e2e/E4-004-all-timeout`
 - `e2e/E4-005-mention-visibility`
-- `e2e/E4-006-accept-creates-execution`（v0.4.1 改：E4 → E7 API 链）
-- `e2e/E4-007-protocol-boundary`（v0.4.1 新）—— 验证 execution.result 不含 decision；collaboration.decision 不含 execution_id
-- `e2e/E4-008-resolver-uses-concurrency`（v0.4.1 新）—— max_concurrency=1 时第二个请求不命中
-- `e2e/E4-009-cancel-from-actor`（v0.4.1 新）—— 发起人 CANCELLED
+- `e2e/E4-006-accept-creates-execution`
+- `e2e/E4-007-protocol-boundary`
+- `e2e/E4-008-resolver-uses-concurrency`
+- `e2e/E4-009-cancel-from-actor`
+- `e2e/E4-010-slot-reservation-race`（v0.4.2 新）—— 100 并发请求 max_concurrency=1 agent → 只有 1 个 reservation 成功
+- `e2e/E4-011-slot-release-on-reject`（v0.4.2 新）—— REJECT 后 slot 立即可用
+- `e2e/E4-012-slot-release-on-timeout`（v0.4.2 新）—— PENDING 超时后 slot 释放
+- `e2e/E4-013-slot-idempotency`（v0.4.2 新）—— 重复 reservation 同 lease_id 返回成功不增计数
 
-## 8. 与其他 Epic 的关系
+## 9. 与其他 Epic 的关系
 
-- **被依赖**：E7（Accept → Execution）/ E5（Need Context 触发搜索）/ E10（audit）
-- **依赖**：E2（lifecycle + active_slots）/ E3（消息载体 + Trigger 提取）/ E6（permission）
-- **冲突裁决**：CollaborationRequest status 与 Execution status 完全解耦（v0.4.1）；协议边界 `collaboration.*` vs `execution.*` 严格分离
+- **被依赖**：E7（Accept → 调 E7 API 创建 Execution）
+- **依赖**：E2（lifecycle + max_concurrency）/ E3（消息载体）/ E6（permission）
+- **冲突裁决**：
+  - **v0.4.2 改** 调度细节归 E4；E2 不再含 Resolver 规则
+  - activity 字段 E2 仍写（UI derived），但 E4 调度不再依赖
 
-## 9. 风险与开放问题
+## 10. 风险与开放问题
 
-- **R1**：active_slots 跨实例一致性 → Redis INCR/DECR（与 presence 同一基础设施）
-- **R2**：CANCELLED 触发条件（发起人 / admin / lifecycle 变更）→ V1 仅发起人；lifecycle=PAUSED 时已在 E2 触发 in-flight cancel
-- **R3**：Execution display_state projection 延迟 → UI 短期内存缓存 + WS 实时推
+- **R1**：Redis Lua 脚本在 Cluster 模式下要保证 `agent-capacity:{agent_id}` 落到同一 hash slot → 用 `{agent_id}` 哈希 tag
+- **R2**：Redis 故障时 slot 不可用 → 降级：DB 加 `agents.active_slots_fallback`（V2 启用，不进 MVP）
+- **R3**：lease TTL 600s 与 deadline_s 600s 对齐；超时后 Lua 自动过期，但要确保 releaseSlot 在超时前调用，否则 30s 内不可用
 
-## 10. 实施顺序（M4）
+## 11. 实施顺序（M4）
 
-1. **v0.4.1 改** agents 表加 `max_concurrency` / `active_slots`
-2. **v0.4.1 改** collaboration_requests.status 收敛（CANCELLED 新增 + EXECUTING/COMPLETED/FAILED 删除）
-3. **v0.4.1 改** Resolver 调度改 lifecycle + active_slots
-4. **v0.4.1 改** 协议拆分：collaboration.decision / execution.dispatch 分开
-5. E5 / E7 联动 API（Orchestrator → Runtime）
-6. CANCELLED REST 端点
-7. P5 决策卡 projection 改造（v0.4.1）
-8. E2E 套件
+1. Redis Lua 脚本（tryAcquireSlot / releaseSlot）
+2. E2 删 `active_slots` 字段（migration）
+3. E4 Resolver 改用 slot reservation
+4. ACCEPT / REJECT / timeout / cancel 路径都加 release
+5. lease 引用写入 collaboration_requests.slot_lease_id
+6. P5 决策卡 projection（不变）
+7. E2E 套件

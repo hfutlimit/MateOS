@@ -29,7 +29,8 @@ v0.4 把 WorkItem 域抽出来。**v0.4.1 关键收口**：
 - `WorkItem` 一张表（含 provider_key / external_ref / external_url / provider_status / provider_meta / search_text）
 - `WorkComment` / `WorkRelation`
 - `work_item_bindings`（Project × Provider 关联）+ **DB UNIQUE partial index** 强制 active 唯一
-- `work_management_connections`（Provider 凭据）
+- **v0.4.2 改** `work_management_connections` 解耦为 Org/Owner 级（多 Project 复用同一 connection）
+- **v0.4.2 新增** connection webhook 状态字段
 - 状态映射（canonical_status_category）
 - Provider 切换语义：Change Provider（仅影响新 WorkItem）+ Migrate Existing WorkItems（独立 Wizard，V2）
 - **v0.4.1 改** 路由规则：CREATE vs UPDATE 各自依据
@@ -99,17 +100,45 @@ CREATE UNIQUE INDEX uq_project_active_work_provider
   ON work_item_bindings(project_id)
   WHERE is_active = true;
 
--- work_management_connections：Provider 凭据
+-- v0.4.2 改：ProviderConnection 从 Project 解耦（Org/Owner 级，多 Project 复用同一个 Jira Site）
+-- 之前：work_management_connections 绑定 project_id + user_id
+-- 之后：ProviderConnection 是 org/owner 级；work_item_bindings 引用 connection_id
 CREATE TABLE work_management_connections (
   id                      UUID PRIMARY KEY,
-  provider_key            TEXT NOT NULL,
-  project_id              UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-  user_id                 UUID NOT NULL REFERENCES users(id),
+  provider_key            TEXT NOT NULL,                    -- 'jira' | 'linear' | ...
+  -- v0.4.2 改：connection 属于 org/owner，不再绑 project
+  org_id                  UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  owner_user_id           UUID NOT NULL REFERENCES users(id),
+  -- 一个 org 可以有多个 connection（不同 Jira site / 不同 user 授权）
+  display_label           TEXT,                             -- 'Atlassian Production' | 'Acme Jira Sandbox'
   access_token_encrypted  BYTEA,
   refresh_token_encrypted BYTEA,
   expires_at              TIMESTAMPTZ,
-  meta                    JSONB,
+  meta                    JSONB,                            -- site URL、scopes 等
+  -- v0.4.2 新增：webhook 状态（E9 用）
+  webhook_id              TEXT,
+  webhook_expires_at      TIMESTAMPTZ,
+  webhook_last_refreshed_at TIMESTAMPTZ,
   created_at              TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX idx_wmc_org ON work_management_connections(org_id);
+CREATE INDEX idx_wmc_owner ON work_management_connections(owner_user_id);
+CREATE INDEX idx_wmc_provider ON work_management_connections(provider_key);
+
+-- work_item_bindings：Project × Connection 关联（v0.4.2 改：引用 connection_id 而非 project 限定 token）
+CREATE TABLE work_item_bindings (
+  id                  UUID PRIMARY KEY,
+  project_id          UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  -- v0.4.2 改：connection_id 可空（BuiltInProvider 不需要 connection）
+  -- v0.4.2 改：provider_key 保留是为了快速索引；connection 才是真正的 token 持有者
+  provider_key        TEXT NOT NULL,
+  connection_id       UUID REFERENCES work_management_connections(id),
+  external_project_ref TEXT,                     -- Jira project key（如 'PROJ'）
+  settings            JSONB,                     -- status mapping 等
+  is_active           BOOLEAN NOT NULL DEFAULT true,
+  created_at          TIMESTAMPTZ DEFAULT now(),
+  updated_at          TIMESTAMPTZ DEFAULT now(),
+  UNIQUE (project_id, provider_key)
 );
 
 -- work_comments

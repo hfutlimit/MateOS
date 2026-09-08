@@ -1,21 +1,20 @@
-# MateOS UI Design System v0.5
+# MateOS UI Design System v0.6
 
 | 文档信息 | 内容 |
 | --- | --- |
-| 版本 | v0.5（v0.4 架构评审修订版，文件名保留 v0.2） |
+| 版本 | v0.6（v0.5 协议收口 + v0.4.2 capacity 原子化修订版，文件名保留 v0.2） |
 | 日期 | 2026-09-08 |
-| 上游 | `docs/requirement/MateOS-总体需求文档.md` (PRD v0.4)、SYSTEM_DESIGN v0.3、UI Design Guidelines v0.1 |
+| 上游 | `docs/requirement/MateOS-总体需求文档.md` (PRD v0.4)、SYSTEM_DESIGN v0.3.2、UI Design Guidelines v0.1 |
 | 配套原型 | `P3-agent-card.html` / `P4-project-dashboard.html` / `P5-channel-prototype.html` + 待做 Work / Approve / Settings |
 | 设计令牌 | `tokens.css`（**单一事实来源**） |
-| 状态 | Draft，**P4 / P5 原型需要按本版回修** |
+| 状态 | Draft，**P3 / P4 / P5 原型需要按本版 + v0.4.2 收口回修** |
 
-> **v0.5 修订要点**（架构评审后）：
-> 1. 删除所有 AgentBoard execution / 外部协作占位文案
-> 2. Work Management 域取代原「外部协作」卡，**Provider 动态表单**（Built-in / Jira 按需渲染）
-> 3. **Work 页面进入 MVP**（不再绑定 AgentBoard / V3）；P3/P4 原型 Tasks 入口改成 Work
-> 4. Agent 状态点拆为 **lifecycle × activity** 双语义（P3 卡片 / 顶栏 / 上下文面板同步）
-> 5. P3 Agent Card 增加 **lifecycle badge** + 删除 can_execute/can_review 行
-> 6. 消息流 5 形态保留 UI，但 DECISION/MEMORY_REQUEST 形态改为 **entity_ref 投影**
+> **v0.5 → v0.6 修订要点**（v0.4.2 收口）：
+> 1. **删除"Busy → 自动 NEED_CONTEXT"行为**——v0.4.2 E4 引入 Redis atomic slot 调度后，Busy Agent 直接被 Resolver 跳过，**不再**产生"我很忙所以需要上下文"的伪造决策
+> 2. P3 Agent Card「当前工作」区改读 `agent_executions`（E7 事实源），不再读旧的 Task 表
+> 3. Work Management Connection 改为 Org/Owner 级——P11 Settings UI 改为先选 Connection 再绑 Project
+> 4. P4「执行（AgentBoard）」卡彻底删除；P-Work 页面（WorkItem 列表）正式进 MVP
+> 5. decision 卡片从 `decision_records` 投影（不变），但 "执行中" 状态从 `agent_executions` 拉（projection）
 
 ---
 
@@ -96,48 +95,61 @@
 | **记忆申请投影** | 主色浅底 + 标题 + **entity_ref → memory_proposals** + 标签 + 三按钮 | **`memory_proposals` 是事实源** |
 
 > 关键：**消息流不存储事实**。点击决策卡 / 记忆卡跳转实体详情页（事实源）。
+> **v0.6 改** decision 卡片"执行中"显示从 `agent_executions` 拉（projection display_state），不再镜像 CollaborationRequest status。
 
 ### 5.2 成员行
 
 `状态点 7px`（双维度语义）+ 名称 13px + 右侧状态文字 11px；Agent 额外一行 capability 标签（canonical key 转 display name）+ lifecycle 徽标（若非 ACTIVE）。
 
-### 5.3 Agent Card（P3）— v0.5 修订
+### 5.3 Agent Card（P3）— v0.6 修订
 
 | 区块 | 调整 |
 | --- | --- |
-| **状态与身份** | 新增 lifecycle 徽标（PAUSED/DISABLED）；activity 与 reason 单独展示 |
-| **当前工作** | 改为展示 `agent_executions`（最近 1 条 RUNNING 详情）；点击跳转 Execution 详情页 |
-| **能力 Capabilities** | 移除"未启用"项概念（capability 集合即声明）；v0.5 改 4 个固定项 |
+| **状态与身份** | lifecycle 徽标（PAUSED/DISABLED）；activity 与 reason 单独展示 |
+| **当前工作** | **v0.6 改** 读 `agent_executions`（E7 事实源，最近 1 条 RUNNING 详情）；点击跳转 Execution 详情页 |
+| **能力 Capabilities** | 4 个固定 key（不再"未启用"） |
 | **可见范围** | 不变 |
 | **用量与成本** | 不变 |
-| **运行配置** | **删除** can_execute / can_review 行（v0.5 移除）；凭据行保留；Runtime 改"MateOS Runtime"（不再"V1+ 可切 AgentBoard"） |
+| **运行配置** | 删除 can_execute / can_review 行；凭据行保留；Runtime 改"MateOS Runtime"（不再"V1+ 可切 AgentBoard"） |
 | **最近活动** | 来源从 `audit_logs` 投影，按 decision / execution / memory 分类 |
 
 ### 5.4 Mention 输入器
 
 不变（v0.4 已落地）。
 
-### 5.5 Work 页面（v0.5 新增 MVP）
+### 5.5 Work 页面（v0.5 新增 MVP，v0.6 强化）
 
 - 路由：`/projects/:id/work`
-- 列表视图：表格（标题 / 类型 / 状态 / Assignee / Due / Updated）
+- 列表视图：表格（标题 / 类型 / 状态 / Assignee / Due / Updated / Provider 标签）
 - 顶部 Provider 切换器：Built-in 不可切；Jira 时显示"Jira" 标签 + 状态映射配置入口
 - 过滤：状态 / 类型 / Assignee / 提供方（Built-in / Jira）
 - 详情：WorkItem 详情 + 评论 + Execution 关联
 - 新建 WorkItem：弹窗（type / title / description / assignee / due）
 - "绑定 Provider"按钮：仅 Project owner 可见；跳转 Settings
 
-### 5.6 Project Settings（v0.5 改 Work Management 动态表单）
+### 5.6 Project Settings（v0.6 改：Connection 先选）
 
 | Section | 字段 |
 | --- | --- |
-| **Work Management** | Provider 单选：Built-in（默认）/ Jira（V1+）；选 Jira 时动态展开 Site / Project Key / Status Mapping 表 / Connection / Sync Status |
+| **Work Management** | **v0.6 改** Connection 选择器（Org 级已有 Connection 列表）；选 Connection 后再选 Provider；Project binding 配置 external_project_ref + Status Mapping；Sync Status 显示 |
 | **Members** | Human / Agent 邀请 |
 | **Channels** | CRUD |
 | **Memory Policy** | 默认人审；可放宽到 owner only |
 | **Agent Runtime** | lifecycle 批量控制（V3 启用） |
 
 > **删除**：旧的「执行后端」「项目跟踪」两块（v0.4 的"外部协作"卡已废弃）。
+
+### 5.7 **v0.6 新增**：删除"Busy → 自动 NEED_CONTEXT"行为
+
+v0.5 之前设计：当 Agent 处于 WORKING 状态收到新 mention，自动回复 "Need Context" 变体（"我很忙，请稍后 @ 我"）。
+
+**v0.6 删除此行为**——v0.4.2 引入 Redis atomic slot reservation 后：
+- Resolver 选 Agent 时，slot reservation 失败的 Agent 直接被跳过
+- Busy Agent 不进入候选（因为没有空闲 slot）
+- 没有"伪造 NEED_CONTEXT"语义
+- 用户体验：@backend 会被路由到其他可用的 Agent，**不**会让"很忙的 Agent"返回奇怪的 NEET_CONTEXT 响应
+
+> v0.5 之前的 Busy → NEED_CONTEXT 行为本质是 v0.4 旧 Resolver 设计（用 activity 当调度源）的补丁；v0.4.2 修复 Resolver 后不再需要。
 
 ---
 

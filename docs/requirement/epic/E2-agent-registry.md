@@ -11,7 +11,12 @@
 
 ## 1. 背景与动机
 
-Agent 是 MateOS 的一等成员。v0.4 重构后，E2 **只负责"Agent 是谁、能做什么、当前在什么状态"**——**不**管运行时、**不**管执行、**不**管权限事实。
+Agent 是 MateOS 的一等成员。v0.4.2 重构后，E2 **只负责"Agent 是谁、能做什么、最大并发配置"**——**不**管运行时、**不**管执行、**不**管权限事实、**不**管调度（activity 和 Resolver 规则归 E4）。
+
+**v0.4.2 关键收口**：
+- E2 不再含 Resolver 规则（上一版还写"lifecycle × activity 过滤"——已废）
+- E2 不再有 `active_slots` 字段（归 Redis）
+- activity 字段仅做 UI derived（E2 仍写，因为 UI 需要显示）
 
 ## 2. 范围
 
@@ -21,17 +26,18 @@ Agent 是 MateOS 的一等成员。v0.4 重构后，E2 **只负责"Agent 是谁�
 - Credential CRUD（Provider / secret 加密）
 - Agent 与 Credential 绑定（可热切换）
 - **v0.4 拆维度**：lifecycle（ACTIVE/PAUSED/DISABLED）+ activity（OFFLINE/AVAILABLE/THINKING/WORKING/WAITING_CONTEXT/ERROR）
+- **v0.4.2 改** E2 提供 `max_concurrency`（durable config）；active slot 状态归 Redis（E4 调度）
 - **v0.4 单一事实源**：Capability（能不能做，canonical key 集合）；Permission（允不允许，E6 统一管）
 - Agent lifecycle 由 owner 显式控制
-- Agent activity 由 Runtime / Orchestrator 自动更新（v0.4 起 Orchestrator 通过 E4 触发）
+- Agent activity 由 Runtime / Orchestrator 自动更新（v0.4.2 起仅做 UI derived）
 - Agent 在 Project 内的可见范围
 - Agent token 签发 + 撤销
-- 6 状态点 UI（lifecycle × activity 双维度）
 
 ### 2.2 Out of Scope
 
 - **执行 / dispatch**——归 E7
 - **状态细节产生**（activity 写入路径）——Runtime (E7) 和 Orchestrator (E4) 通过 WS / API 触达
+- **调度规则**（active_slots 原子 reservation、Resolver 过滤）——归 E4
 - 自动限频 / 智能体 marketplace / 共享 Agent（V2+）
 
 ## 3. 数据模型
@@ -49,7 +55,7 @@ CREATE TABLE credentials (
   created_at      TIMESTAMPTZ DEFAULT now()
 );
 
--- agents（v0.4 简化：无 can_execute/can_review；lifecycle + activity 拆开）
+-- agents（v0.4.2 改：删 active_slots 字段——归 Redis 持有；保留 max_concurrency 配置）
 CREATE TABLE agents (
   id              UUID PRIMARY KEY,
   owner_user_id   UUID NOT NULL REFERENCES users(id),
@@ -57,12 +63,14 @@ CREATE TABLE agents (
   name            TEXT NOT NULL,
   role            TEXT NOT NULL,
   capabilities    JSONB NOT NULL DEFAULT '[]',     -- canonical key 集合 ["coding","review","debugging"]
-  -- 单一事实源：lifecycle 由 owner 控制，activity 由系统/Runtime 更新
+  -- 单一事实源：lifecycle 由 owner 控制，activity 仅做 UI derived（不再用于 Resolver）
   lifecycle       TEXT NOT NULL DEFAULT 'ACTIVE'
                   CHECK (lifecycle IN ('ACTIVE','PAUSED','DISABLED')),
   activity        TEXT NOT NULL DEFAULT 'OFFLINE'
                   CHECK (activity IN ('OFFLINE','AVAILABLE','THINKING','WORKING','WAITING_CONTEXT','ERROR')),
   activity_reason TEXT,                            -- ERROR 时携带 fix_hint
+  -- v0.4.2 改：只存 durable config；active slot 数归 Redis
+  max_concurrency INT NOT NULL DEFAULT 1,
   daily_limit_usd  NUMERIC(10,2) DEFAULT 5.00,
   monthly_budget_usd NUMERIC(10,2) DEFAULT 50.00,
   created_at      TIMESTAMPTZ DEFAULT now(),
@@ -70,6 +78,7 @@ CREATE TABLE agents (
 );
 CREATE INDEX idx_agents_owner ON agents(owner_user_id);
 CREATE INDEX idx_agents_lifecycle_activity ON agents(lifecycle, activity);
+-- 删：active_slots 字段（v0.4.2）
 
 CREATE TABLE agent_project_membership (
   agent_id        UUID NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
@@ -107,7 +116,7 @@ CREATE TABLE agent_tokens (
 
 **冲突规则**：lifecycle ≠ ACTIVE → 强制显示 lifecycle 徽标（activity 灰点）；lifecycle=ACTIVE → 按 activity 语义显示。
 
-**Resolver 过滤**（E4）：`lifecycle=ACTIVE ∩ activity ∈ {AVAILABLE, THINKING}`
+> **v0.4.2 改** Resolver 过滤（E4 维护）：`lifecycle=ACTIVE ∩ Redis tryAcquireSlot 成功`。E2 不再持有 Resolver 规则。activity 字段仅做 UI derived，**不**用于调度。
 
 ### 3.2 Capability × Permission 单一事实源（v0.4 拆开）
 

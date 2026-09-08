@@ -11,10 +11,10 @@
 
 ## 1. 背景与动机
 
-Permission Model 是 MateOS 安全核心。v0.4 关键变化：
+Permission Model 是 MateOS 安全核心。v0.4 + v0.4.2 关键变化：
 1. **删除** Agent 的 `can_execute` / `can_review` 字段——Capability（能不能，E2）+ Permission（允不允许，本 epic）单一事实源
 2. **effect 改三态**：`ALLOW` / `DENY` / **`REQUIRE_APPROVAL`**（替换 `REQUEST`，避免与 CollaborationRequest / HTTP Request 概念冲突）
-3. **`REQUIRE_APPROVAL`** 的去向统一通过 E4（CollaborationRequest）或 E5（Memory 审批）—— **不在 Permission 层实现审批逻辑**
+3. **v0.4.2 改** **`REQUIRE_APPROVAL` 不再让普通 Guard 静默放行**——Guard 拆为 `checkPermission`（只决 ALLOW/DENY）+ `policy.evaluate()`（业务层显式调用），避免"Guard 放行后忘记审批"的安全 bug
 
 ## 2. 范围
 
@@ -24,13 +24,13 @@ Permission Model 是 MateOS 安全核心。v0.4 关键变化：
 - 默认权限矩阵（v0.4 改：write_memory / create_pr = REQUIRE_APPROVAL）
 - Project 级 / Channel 级覆盖
 - `check(subject, perm, scope) → ALLOW | DENY | REQUIRE_APPROVAL`（v0.4 改三态）
+- **v0.4.2 改** `policy.evaluate()` 业务层显式调用（不带"放行"含义）
 - 三层合并：Channel > Project > 默认
 - Redis 缓存 + `perm.changed` pub/sub 失效
-- NestJS Guard `@RequirePermission('perm_key')`
-- `REQUIRE_APPROVAL` 的处理：
-  - `write_memory` → E5 人审门禁
-  - `create_pr` → E4 CollaborationRequest（V3+ 启用，V1 默认 DENY）
-  - 其余 `REQUIRE_APPROVAL` 默认拒（V1 简化：仅有 write_memory 一项会真走门禁）
+- NestJS Guard `@RequirePermission('perm_key')`：**只决 ALLOW/DENY**，REQUIRE_APPROVAL 直接拒绝（默认 deny-by-default）
+- 业务层显式走审批路径：
+  - `write_memory` → E5 调 `memory_proposals` 创建 + P6 审批
+  - `create_pr` → E4 调 `collaboration_requests` 创建（V3+ 启用）
 
 ### 2.2 Out of Scope
 
@@ -123,21 +123,44 @@ check(subject, perm, scope):
   4. 返回 effect
 ```
 
-### 5.2 Guard 拦截（v0.4 改）
+### 5.2 Guard 拦截（v0.4.2 改：拆为 check + policy）
 
 ```ts
-@UseGuards(JwtGuard, PermissionGuard)
-@RequirePermission('write_memory')
-@Post('/memory-proposals')
-async proposeMemory(...) { ... }
+// packages/contracts
+
+// 只决 ALLOW / DENY，REQUIRE_APPROVAL 视为 DENY
+// Guard 不再"放行 + 走门禁"——避免安全 bug
+function checkPermission(
+  subject: MemberRef,
+  perm: PermKey,
+  scope: { type: 'PROJECT' | 'CHANNEL', id: string }
+): 'ALLOW' | 'DENY' | 'REQUIRE_APPROVAL';  // 仍返回三态，但 Guard 只放 ALLOW
+
+// 业务层显式调用，REQUIRE_APPROVAL 必须走业务门禁
+function policy(): {
+  evaluate(perm: PermKey, context: PolicyContext): Promise<PolicyDecision>;
+};
 ```
 
-Guard 流程：
+**v0.4.2 改** Guard 流程：
 1. JwtGuard 解析 → req.user
-2. PermissionGuard → check(req.user, perm, scope)
-3. ALLOW → next
-4. **DENY → 403**
-5. **REQUIRE_APPROVAL → 业务层走对应门禁**（E5 / E4）—— **Permission 层不抛错**
+2. PermissionGuard → `checkPermission(req.user, perm, scope)`
+3. `ALLOW` → next
+4. **`DENY` 或 `REQUIRE_APPROVAL` → 403 拒绝**（不再静默放行）
+5. 业务层如需触发审批，显式：
+   ```ts
+   // E5 写记忆
+   const decision = await policy.evaluate('write_memory', { projectId, ... });
+   if (decision === 'REQUIRE_APPROVAL') {
+     // 显式创建 memory_proposals + 走 E5 P6 审批
+   }
+   ```
+
+**为什么这样改**（v0.4.2 关键）：
+- 旧 v0.4.1：Guard 收到 REQUIRE_APPROVAL → 放行 → 业务层"忘记"调用门禁 → 审批被绕过
+- 新 v0.4.2：Guard 收到 REQUIRE_APPROVAL → 拒绝；业务层必须**显式**调用 policy.evaluate() 走门禁
+- 安全：调用栈里"忘了审批"就 403，强制每个 REQUIRE_APPROVAL 路径有显式调用
+- 同理 E4 的 `create_pr`（V3+ 启用）、E5 的 `write_memory`（MVP）
 
 ### 5.3 缓存失效
 
@@ -156,19 +179,21 @@ Guard 流程：
 - **F1** 默认矩阵：Human owner 写消息 ALLOW；Agent 写消息 ALLOW（已加入 channel）
 - **F2** Channel 覆盖优先
 - **F3** Project 覆盖被 Channel 覆盖优先
-- **F4** **v0.4 新增** `REQUIRE_APPROVAL` 走业务门禁（不返 403）
-- **F5** **v0.4 新增** Agent 表无 can_execute / can_review 字段
-- **F6** 跨实例缓存失效（pub/sub）
-- **F7** approve_memory 仅 project owner
+- **F4** **v0.4.2 改** Guard 收到 REQUIRE_APPROVAL → 拒绝 403（不静默放行）
+- **F5** **v0.4.2 改** 业务层显式 `policy.evaluate()` 走 E5 / E4 门禁
+- **F6** **v0.4 新增** Agent 表无 can_execute / can_review 字段
+- **F7** 跨实例缓存失效（pub/sub）
+- **F8** approve_memory 仅 project owner
 
 ### 7.2 E2E
 
 - `e2e/E6-001-default-matrix`
 - `e2e/E6-002-channel-override`
 - `e2e/E6-003-multi-instance-cache-invalidation`
-- `e2e/E6-004-write-memory-gate`（v0.4 改：REQUIRE_APPROVAL 走 E5 流程）
+- `e2e/E6-004-write-memory-gate`（v0.4.2 改：Guard 拒绝 + 业务层显式调 policy.evaluate）
 - `e2e/E6-005-approval-only-owner`
-- `e2e/E6-006-capability-permission-orthogonal`（v0.4 新）—— Agent capability=coding + permission=create_pr=DENY → 拒；capability=review + permission=approve_memory=DENY → 拒
+- `e2e/E6-006-capability-permission-orthogonal`
+- `e2e/E6-007-guard-bypass-resistance`（v0.4.2 新）—— Guard 不会静默放行 REQUIRE_APPROVAL
 
 ### 7.3 非功能
 
