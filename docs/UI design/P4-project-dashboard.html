@@ -22,7 +22,8 @@ button{font-family:inherit;font-size:12px;cursor:pointer;background:transparent;
 .icon-btn{height:28px;padding:0 9px;border:0.5px solid var(--border);border-radius:6px;color:var(--text-2);display:flex;align-items:center;gap:6px;background:var(--bg)}
 .bell{position:relative}
 .bell .dot{position:absolute;top:-4px;right:-4px;min-width:15px;height:15px;border-radius:8px;background:var(--error);color:#fff;font-size:10px;display:flex;align-items:center;justify-content:center;padding:0 4px}
-.avatar{width:24px;height:24px;border-radius:50%;background:var(--primary-100);color:var(--primary);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:500}
+.avatar{width:24px;height:24px;border-radius:6px;background:var(--primary-100);color:var(--primary);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:500}
+.av-agent{width:24px;height:24px;border-radius:50%;background:var(--primary-100);color:var(--primary);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:500}
 
 .shell{flex:1;display:flex;min-height:0}
 .navrail{width:58px;flex:none;border-right:0.5px solid var(--border);background:var(--surface);display:flex;flex-direction:column;align-items:center;padding:8px 0;gap:3px}
@@ -31,7 +32,8 @@ button{font-family:inherit;font-size:12px;cursor:pointer;background:transparent;
 .nav-item.active{background:var(--primary-50);color:var(--primary)}
 .nav-item svg{width:16px;height:16px}
 .nav-spacer{flex:1}
-.nav-item.avatar{width:26px;height:26px;padding:0;border-radius:50%;background:var(--primary-100);color:var(--primary);font-size:11px;font-weight:500}
+.nav-item.av-human{width:26px;height:26px;padding:0;border-radius:6px;background:var(--primary-100);color:var(--primary);font-size:11px;font-weight:500}
+.nav-item .v3{font-size:9px;background:var(--surface-2);color:var(--text-3);border-radius:3px;padding:0 3px;margin-top:2px}
 
 .sidebar{width:216px;flex:none;border-right:0.5px solid var(--border);background:var(--surface);display:flex;flex-direction:column;overflow-y:auto}
 .sb-head{padding:12px 12px 8px}
@@ -122,7 +124,7 @@ button{font-family:inherit;font-size:12px;cursor:pointer;background:transparent;
   <div class="tb-right">
     <button class="icon-btn">我的 Agents</button>
     <button class="icon-btn bell">通知<span class="dot">3</span></button>
-    <div class="avatar">J</div>
+    <div class="avatar av-human">J</div>
   </div>
 </div>
 
@@ -133,10 +135,10 @@ button{font-family:inherit;font-size:12px;cursor:pointer;background:transparent;
     <button class="nav-item"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M2 3.5h12v8H7l-3 2.5v-2.5H2z"/></svg>Channels</button>
     <button class="nav-item"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="3" y="5.5" width="10" height="8" rx="2"/><path d="M8 5.5V3"/><circle cx="8" cy="2.4" r=".9" fill="currentColor" stroke="none"/><path d="M6.2 9h.01M9.8 9h.01" stroke-width="2"/></svg>Agents</button>
     <button class="nav-item"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M8 2 14 5l-6 3L2 5z"/><path d="M2 8.5 8 11.5l6-3"/><path d="M2 11.5 8 14.5l6-3"/></svg>Memory</button>
-    <button class="nav-item"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><rect x="2.5" y="2.5" width="11" height="11" rx="2"/><path d="M5.5 8.2l1.8 1.8 3.2-3.6"/></svg>Tasks</button>
+    <button class="nav-item" title="V3+"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><rect x="2.5" y="2.5" width="11" height="11" rx="2"/><path d="M5.5 8.2l1.8 1.8 3.2-3.6"/></svg>Tasks<span class="v3">V3</span></button>
     <div class="nav-spacer"></div>
     <button class="nav-item"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.8v1.6M8 12.6v1.6M2.6 8h1.6M11.8 8h1.6M4.2 4.2l1.1 1.1M10.7 10.7l1.1 1.1M11.8 4.2l-1.1 1.1M5.3 10.7l-1.1 1.1"/></svg>Settings</button>
-    <div class="nav-item avatar" style="margin-top:4px">J</div>
+    <div class="nav-item av-human" style="margin-top:4px">J</div>
   </nav>
 
   <aside class="sidebar">
@@ -179,7 +181,7 @@ button{font-family:inherit;font-size:12px;cursor:pointer;background:transparent;
     <div class="metrics">
       <div class="metric"><div class="k">成员</div><div class="v">7<small>人类 4 · Agent 3</small></div><div class="s">本周新增 1 个 Agent</div></div>
       <div class="metric"><div class="k">频道</div><div class="v">5</div><div class="s">4 个活跃 · 1 个新建</div></div>
-      <div class="metric"><div class="k">记忆</div><div class="v">79<small>条</small></div><div class="s">决策 23 · 知识 56</div></div>
+      <div class="metric"><div class="k">记忆</div><div class="v">82<small>条</small></div><div class="s">决策 23 · 知识 56 · 待审批 3</div></div>
       <div class="metric"><div class="k">协作请求</div><div class="v">3<small>进行中</small></div><div class="s">1 个等待上下文</div></div>
     </div>
 
@@ -273,19 +275,33 @@ button{font-family:inherit;font-size:12px;cursor:pointer;background:transparent;
         </div>
 
         <div class="card">
-          <div class="card-h"><span class="t">项目记忆</span><span class="c">79</span><span class="more">Memory Center</span></div>
+          <div class="card-h"><span class="t">项目记忆</span><span class="c">82</span><span class="more">Memory Center</span></div>
           <div class="card-b">
-            <div class="memstat"><div class="n" style="color:var(--primary)">23</div><div style="flex:1"><div class="l">决策 Decision<i>ADR 与架构选择</i></div><div class="bar"><i style="width:29%;background:var(--primary)"></i></div></div></div>
-            <div class="memstat"><div class="n" style="color:var(--free-text)">56</div><div style="flex:1"><div class="l">知识 Knowledge<i>领域术语与业务规则</i></div><div class="bar"><i style="width:71%;background:var(--free)"></i></div></div></div>
+            <div class="memstat"><div class="n" style="color:var(--primary)">23</div><div style="flex:1"><div class="l">决策 Decision<i>ADR 与架构选择（已批准 79 · 占 96%）</i></div><div class="bar"><i style="width:28%;background:var(--primary)"></i></div></div></div>
+            <div class="memstat"><div class="n" style="color:var(--free-text)">56</div><div style="flex:1"><div class="l">知识 Knowledge<i>领域术语与业务规则（已批准 79 · 占 96%）</i></div><div class="bar"><i style="width:68%;background:var(--free)"></i></div></div></div>
             <div class="memstat"><div class="n" style="color:var(--waiting-text)">3</div><div style="flex:1"><div class="l">待审批 Pending<i>Agent 申请写入，需人类确认</i></div><div class="bar"><i style="width:4%;background:var(--waiting)"></i></div></div></div>
-            <div class="note">写入流程：Agent 申请 → 人类批准 → 进入共享记忆 → 可被 @ 引用</div>
+            <div class="note">写入流程：Agent 申请 → 人类批准 → 进入共享记忆 → 可被 @ 引用（Source 溯源必填，PRD FR-7）</div>
           </div>
         </div>
 
         <div class="card">
-          <div class="card-h"><span class="t">执行（AgentBoard）</span><span class="more">V3</span></div>
+          <div class="card-h"><span class="t">外部协作</span><span class="c">可选</span><span class="more">V1+ 启用</span></div>
           <div class="card-b">
-            <div class="note" style="padding:10px 8px">MVP 阶段 MateOS 只做协作，不展示 Worker / Runtime 细节。V3 打通后此处显示执行进度与「打开执行详情」入口。</div>
+            <div class="memstat">
+              <div class="n" style="color:var(--free-text);font-size:13px;width:auto">执行后端</div>
+              <div style="flex:1">
+                <div class="l" style="font-size:12px"><b>MateOS Runtime（默认）</b><i style="font-style:normal;display:block;font-size:11px;color:var(--text-3)">Accept 后由 MateOS Runtime 直接 dispatch（SYSTEM_DESIGN §6）</i></div>
+              </div>
+              <span class="pill n" style="font-size:9px">V1+</span>
+            </div>
+            <div class="memstat">
+              <div class="n" style="color:var(--free-text);font-size:13px;width:auto">项目跟踪</div>
+              <div style="flex:1">
+                <div class="l" style="font-size:12px"><b>无（仅 MateOS）</b><i style="font-style:normal;display:block;font-size:11px;color:var(--text-3)">协作请求与状态仅在 MateOS 内展示，不同步外部</i></div>
+              </div>
+              <span class="pill n" style="font-size:9px">V1+</span>
+            </div>
+            <div class="note" style="padding:8px 8px 4px">V1+ 启用后可切换：执行后端 <span class="cap">AgentBoard</span>（PRD §10.1）、项目跟踪 <span class="cap">AgentBoard Issue</span> / <span class="cap">Jira Issue</span>（PRD §10.2）。默认关闭，不影响 MVP 交付。</div>
           </div>
         </div>
       </div>

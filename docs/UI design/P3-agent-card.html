@@ -22,7 +22,8 @@ button{font-family:inherit;font-size:12px;cursor:pointer;background:transparent;
 .icon-btn{height:28px;padding:0 9px;border:0.5px solid var(--border);border-radius:6px;color:var(--text-2);display:flex;align-items:center;gap:6px;background:var(--bg)}
 .bell{position:relative}
 .bell .dot{position:absolute;top:-4px;right:-4px;min-width:15px;height:15px;border-radius:8px;background:var(--error);color:#fff;font-size:10px;display:flex;align-items:center;justify-content:center;padding:0 4px}
-.avatar{width:24px;height:24px;border-radius:50%;background:var(--primary-100);color:var(--primary);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:500}
+.avatar{width:24px;height:24px;border-radius:6px;background:var(--primary-100);color:var(--primary);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:500}
+.av-agent{width:24px;height:24px;border-radius:50%;background:var(--primary-100);color:var(--primary);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:500}
 
 .shell{flex:1;display:flex;min-height:0}
 .navrail{width:58px;flex:none;border-right:0.5px solid var(--border);background:var(--surface);display:flex;flex-direction:column;align-items:center;padding:8px 0;gap:3px}
@@ -30,8 +31,9 @@ button{font-family:inherit;font-size:12px;cursor:pointer;background:transparent;
 .nav-item:hover{background:var(--surface-2);color:var(--text-2)}
 .nav-item.active{background:var(--primary-50);color:var(--primary)}
 .nav-item svg{width:16px;height:16px}
+.nav-item .v3{font-size:9px;background:var(--surface-2);color:var(--text-3);border-radius:3px;padding:0 3px;margin-top:2px}
 .nav-spacer{flex:1}
-.nav-item.avatar{width:26px;height:26px;padding:0;border-radius:50%;background:var(--primary-100);color:var(--primary);font-size:11px;font-weight:500}
+.nav-item.av-human{width:26px;height:26px;padding:0;border-radius:6px;background:var(--primary-100);color:var(--primary);font-size:11px;font-weight:500}
 
 .sidebar{width:216px;flex:none;border-right:0.5px solid var(--border);background:var(--surface);display:flex;flex-direction:column;overflow-y:auto}
 .sb-head{padding:12px 12px 8px}
@@ -115,7 +117,7 @@ button{font-family:inherit;font-size:12px;cursor:pointer;background:transparent;
   <div class="tb-right">
     <button class="icon-btn">我的 Agents</button>
     <button class="icon-btn bell">通知<span class="dot">3</span></button>
-    <div class="avatar">J</div>
+    <div class="avatar av-human">J</div>
   </div>
 </div>
 
@@ -126,10 +128,10 @@ button{font-family:inherit;font-size:12px;cursor:pointer;background:transparent;
     <button class="nav-item"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M2 3.5h12v8H7l-3 2.5v-2.5H2z"/></svg>Channels</button>
     <button class="nav-item active"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="3" y="5.5" width="10" height="8" rx="2"/><path d="M8 5.5V3"/><circle cx="8" cy="2.4" r=".9" fill="currentColor" stroke="none"/><path d="M6.2 9h.01M9.8 9h.01" stroke-width="2"/></svg>Agents</button>
     <button class="nav-item"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M8 2 14 5l-6 3L2 5z"/><path d="M2 8.5 8 11.5l6-3"/><path d="M2 11.5 8 14.5l6-3"/></svg>Memory</button>
-    <button class="nav-item"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><rect x="2.5" y="2.5" width="11" height="11" rx="2"/><path d="M5.5 8.2l1.8 1.8 3.2-3.6"/></svg>Tasks</button>
+    <button class="nav-item" title="V3+"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><rect x="2.5" y="2.5" width="11" height="11" rx="2"/><path d="M5.5 8.2l1.8 1.8 3.2-3.6"/></svg>Tasks<span class="v3">V3</span></button>
     <div class="nav-spacer"></div>
     <button class="nav-item"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.8v1.6M8 12.6v1.6M2.6 8h1.6M11.8 8h1.6M4.2 4.2l1.1 1.1M10.7 10.7l1.1 1.1M11.8 4.2l-1.1 1.1M5.3 10.7l-1.1 1.1"/></svg>Settings</button>
-    <div class="nav-item avatar" style="margin-top:4px">J</div>
+    <div class="nav-item av-human" style="margin-top:4px">J</div>
   </nav>
 
   <aside class="sidebar">

@@ -27,7 +27,8 @@ button{font-family:inherit;font-size:12px;cursor:pointer;background:transparent;
 .icon-btn:hover{border-color:var(--border-strong);color:var(--text)}
 .bell{position:relative}
 .bell .dot{position:absolute;top:-4px;right:-4px;min-width:15px;height:15px;border-radius:8px;background:var(--error);color:#fff;font-size:10px;display:flex;align-items:center;justify-content:center;padding:0 4px}
-.avatar{width:24px;height:24px;border-radius:50%;background:var(--primary-100);color:var(--primary);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:500}
+.avatar{width:24px;height:24px;border-radius:6px;background:var(--primary-100);color:var(--primary);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:500}
+.av-agent{width:24px;height:24px;border-radius:50%;background:var(--primary-100);color:var(--primary);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:500}
 
 /* ---------- shell ---------- */
 .shell{flex:1;display:flex;min-height:0}
@@ -39,8 +40,9 @@ button{font-family:inherit;font-size:12px;cursor:pointer;background:transparent;
 .nav-item.active{background:var(--primary-50);color:var(--primary)}
 .nav-item svg{width:16px;height:16px}
 .nav-item .nb{position:absolute;top:2px;right:4px;min-width:14px;height:14px;border-radius:7px;background:var(--error);color:#fff;font-size:10px;display:flex;align-items:center;justify-content:center;padding:0 3px}
+.nav-item .v3{font-size:9px;background:var(--surface-2);color:var(--text-3);border-radius:3px;padding:0 3px;margin-top:2px}
 .nav-spacer{flex:1}
-.nav-item.avatar{width:26px;height:26px;padding:0;border-radius:50%;background:var(--primary-100);color:var(--primary);font-size:11px;font-weight:500}
+.nav-item.av-human{width:26px;height:26px;padding:0;border-radius:6px;background:var(--primary-100);color:var(--primary);font-size:11px;font-weight:500}
 
 /* ---------- sidebar ---------- */
 .sidebar{width:216px;flex:none;border-right:0.5px solid var(--border);background:var(--surface);display:flex;flex-direction:column;overflow-y:auto}
@@ -121,16 +123,19 @@ pre{font-family:var(--mono);font-size:12px;line-height:1.6;background:var(--surf
 .btn:hover{border-color:var(--text-3)}
 .btn.primary{background:var(--primary);border-color:var(--primary);color:#fff}
 .btn.ghost{border-color:transparent;background:transparent;color:var(--text-2)}
-.btn.sm{height:22px;padding:0 8px;font-size:11px}
+.btn.sm{height:24px;padding:0 8px;font-size:11px}
 
 /* system + invite + memory */
 .system{font-size:11px;color:var(--text-3);text-align:center;padding:5px 16px;display:flex;align-items:center;justify-content:center;gap:8px}
-.system .btn{height:22px;padding:0 8px;font-size:11px}
+.system .btn{height:24px;padding:0 8px;font-size:11px}
 .memcard{border:0.5px solid var(--primary-100);border-radius:var(--radius-card);background:var(--primary-50);padding:10px 12px;margin-top:2px}
 .memcard.done{background:var(--surface);border-color:var(--border)}
 .mc-top{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--primary);margin-bottom:5px}
 .mc-title{font-size:13px;font-weight:500;margin-bottom:4px}
 .mc-body{font-size:12px;color:var(--text-2);line-height:1.6;font-family:var(--mono);background:rgba(255,255,255,.75);border:0.5px solid var(--border);border-radius:5px;padding:6px 8px}
+.mc-source{font-size:11px;color:var(--text-3);margin:4px 0 7px;display:flex;align-items:center;gap:4px;flex-wrap:wrap}
+.mc-source b{color:var(--text-2);font-weight:500}
+.mc-source.mc-warn{color:var(--error-text);background:var(--error-bg);border-radius:4px;padding:2px 6px;display:inline-block}
 .mc-tags{display:flex;gap:5px;margin-top:7px}
 .mc-actions{display:flex;gap:6px;margin-top:9px}
 .typing{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--text-3);padding:4px 16px}
@@ -223,7 +228,7 @@ pre{font-family:var(--mono);font-size:12px;line-height:1.6;background:var(--surf
     <button class="icon-btn" onclick="toggleNotes()" data-page-node-id="s03FnuNbYAhY7za3ZMKDLS">设计说明</button>
     <button class="icon-btn" data-page-node-id="CgNpJvtpIHQNsev3w7xNsM">我的 Agents</button>
     <button class="icon-btn bell" data-page-node-id="sm2YiW8DwFIlZUIPjo2eN8">通知<span class="dot" id="bellCount" data-page-node-id="OB2Pjo2Fnx3FNWrj7tG5eQ">2</span></button>
-    <div class="avatar" data-page-node-id="dvd9vkg0mVCW1GCkNIpOEn">J</div>
+    <div class="avatar av-human" data-page-node-id="dvd9vkg0mVCW1GCkNIpOEn">J</div>
   </div>
 </div>
 
@@ -249,16 +254,16 @@ pre{font-family:var(--mono);font-size:12px;line-height:1.6;background:var(--surf
     <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M8 2 14 5l-6 3L2 5z"/><path d="M2 8.5 8 11.5l6-3"/><path d="M2 11.5 8 14.5l6-3"/></svg>
     Memory
   </button>
-  <button class="nav-item" title="Tasks">
+  <button class="nav-item" title="V3+">
     <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><rect x="2.5" y="2.5" width="11" height="11" rx="2"/><path d="M5.5 8.2l1.8 1.8 3.2-3.6"/></svg>
-    Tasks
+    Tasks<span class="v3">V3</span>
   </button>
   <div class="nav-spacer"></div>
   <button class="nav-item" title="Settings">
     <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.8v1.6M8 12.6v1.6M2.6 8h1.6M11.8 8h1.6M4.2 4.2l1.1 1.1M10.7 10.7l1.1 1.1M11.8 4.2l-1.1 1.1M5.3 10.7l-1.1 1.1"/></svg>
     Settings
   </button>
-  <div class="nav-item avatar" style="margin-top:4px">J</div>
+  <div class="nav-item av-human" style="margin-top:4px">J</div>
 </nav>
 
   <aside class="sidebar" data-page-node-id="SfOYY2zBPoWtWPc7y0um9o">
@@ -305,7 +310,7 @@ pre{font-family:var(--mono);font-size:12px;line-height:1.6;background:var(--surf
           <button class="btn sm" data-page-node-id="E6GaF2gxok3cnig9ZZFwzc">附件</button>
         </div>
         <div class="comp-input" style="position:relative" data-page-node-id="JFwPeEmQkziBzP6fMNWU9V">
-          <textarea id="ta" placeholder="输入消息…  按 @ 提及成员、能力组或项目记忆"></textarea>
+          <textarea id="ta" placeholder="输入消息…  按 @ 提及成员或能力组，# 引用频道，/ 引用项目记忆"></textarea>
           <div class="mention-pop" id="mp" style="display:none" data-page-node-id="YVNc4UxNnSfLGowGyM7kyk">
             <div class="mp-group" data-page-node-id="koFCRQBEgeWEP0AavLuZwQ">
               <div class="mp-group-title">People</div>
@@ -322,7 +327,7 @@ pre{font-family:var(--mono);font-size:12px;line-height:1.6;background:var(--surf
               <div class="mp-group-title">能力组 / 全体</div>
               <div class="mp-item"><span class="nm">@backend</span><span class="cap">按能力匹配 Agent</span></div>
               <div class="mp-item"><span class="nm">@all</span><span class="cap">全体成员</span></div>
-              <div class="mp-warn">@all 将触发 2 个 Agent 自行判断是否响应，预计消耗约 3.2k tokens</div>
+              <div class="mp-warn">@all 将触发频道内 2 个有效 Agent（已排除 ERROR/忙碌的 Architecture Agent），预计消耗约 3.2k tokens</div>
             </div>
             <div class="mp-hint">输入 # 引用频道，输入 / 引用项目记忆</div>
           </div>
@@ -427,6 +432,7 @@ const CHANNELS = {
         html:'建议改成分级退避：<br><br>1. 基础间隔 1s，指数增长 1 → 5 → 25 → 125s<br>2. 每次附加 ±20% 抖动，避免重试风暴<br>3. 超过 5 次转死信队列，人工介入<br>4. 仅对 5xx 与 timeout 重试，4xx 直接失败',
         code:'retry:\n  max_attempts: 5\n  base_delay: 1s\n  multiplier: 5\n  jitter: 0.2\n  retryable: [502, 503, 504, timeout]'},
       {type:'memory',id:'mem-retry',name:'Backend Agent',title:'Webhook 重试上限 5 次，间隔 1/5/25/125 秒，仅重试 5xx',
+        source:{channel:'webhook-retry', seq:42, time:'21:44'},
         body:'# 重试策略约定\n\n- max_attempts: 5\n- base_delay: 1s, multiplier: 5\n- jitter: ±20%\n- 仅对 5xx / timeout 重试，4xx 直接失败',
         tags:[['p','项目记忆'],['d','待批准']],state:'pending'},
       {type:'typing',name:'QA Agent 正在判断是否需要响应…'}
@@ -532,14 +538,15 @@ function renderMsg(m){
   }
 
   if(m.type==='memory'){
+    const src = m.source ? '<div class="mc-source">Source · <b>#'+m.source.channel+'</b> · seq '+m.source.seq+' · '+m.source.time+'</div>' : '<div class="mc-source mc-warn">Source 缺失（PRD FR-7 必填）</div>';
     if(m.state==='approved'){
       return '<div class="msg'+(m.gap?' gap':'')+'"><div class="row"><div class="av agent">'+m.name.charAt(0)+'</div><div class="body">'+
         '<div class="memcard done"><div class="mc-top">已写入项目记忆 · Jason 批准</div>'+
-        '<div class="mc-title">'+m.title+'</div></div></div></div></div>';
+        '<div class="mc-title">'+m.title+'</div>'+src+'</div></div></div></div>';
     }
     return '<div class="msg'+(m.gap?' gap':'')+'"><div class="row"><div class="av agent">'+m.name.charAt(0)+'</div><div class="body">'+
       '<div class="memcard" id="mc1"><div class="mc-top">记忆写入申请 · 需人类批准</div>'+
-      '<div class="mc-title">'+m.title+'</div>'+
+      '<div class="mc-title">'+m.title+'</div>'+src+
       '<div class="mc-body">'+m.body.replace(/\n/g,'<br>')+'</div>'+
       '<div class="mc-tags">'+m.tags.map(t=>'<span class="badge '+t[0]+'">'+t[1]+'</span>').join('')+'</div>'+
       '<div class="mc-actions"><button class="btn sm primary" onclick="approveMem()">批准</button>'+

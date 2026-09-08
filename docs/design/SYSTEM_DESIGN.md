@@ -1,12 +1,14 @@
-# MateOS 系统架构设计（SYSTEM_DESIGN v0.1）
+# MateOS 系统架构设计（SYSTEM_DESIGN v0.2）
 
 | 文档信息 | 内容 |
 | --- | --- |
-| 上游文档 | docs/requirement/MateOS-总体需求文档.md（PRD v0.2） |
+| 上游文档 | docs/requirement/MateOS-总体需求文档.md（PRD v0.3） |
 | 文档状态 | Draft |
-| 版本 | v0.1 |
-| 日期 | 2026-09-07 |
-| 前提 | **MateOS 为独立自洽系统**：协作、决策、Agent 运行时与执行能力均为自身组件，不依赖外部执行平台；对外只暴露开放协议（见 §8） |
+| 版本 | v0.2 |
+| 日期 | 2026-09-08 |
+| 前提 | **MateOS 为独立自洽系统**：协作、决策、Agent 运行时与执行能力均为自身组件；同时通过 §8 / §10 协议保留与 AgentBoard / Jira 等外部系统的可选协作扩展点（默认关闭） |
+
+> **v0.1 → v0.2 变更摘要**：Agent 状态枚举扩展为 6 态（新增 ERROR 触发与恢复，与 PRD / UI DS 收敛）；§8 协议汇总新增「MateOS ↔ AgentBoard 协作协议」v1；新增 §10 外部集成扩展点（执行后端切换 + 项目管理工具切换）；Mention 流水线新增 Resolver 结果回写事件。
 
 ---
 
@@ -23,7 +25,7 @@
 ┌───────────────▼─────────────────────▼───────────────┐
 │  Application 层（NestJS Modular Monolith）           │
 │  auth │ org/team/project │ channel/message │ mention│
-│  memory │ permission │ agent-registry │ task        │
+│  memory │ permission │ agent-registry │ runtime     │
 └───────┬──────────────┬───────────────┬──────────────┘
         │               │               │
 ┌───────▼──────┐ ┌──────▼───────┐ ┌─────▼─────────────┐
@@ -31,7 +33,7 @@
 │ Worker       │ │ Worker       │ │ Gateway + Sandbox │
 │ (Resolver/   │ │ (索引/检索/   │ │ (Connector 协议、  │
 │  Decision)   │ │  门禁)       │ │  容器沙箱)         │
-└───────┬──────┘ └──────┬───────┘ └─────┬─────────────┘
+└───────┬──────┘ └──────┬───────┘ └─────┬────────────┘
         └───────────────┼───────────────┘
                         │
       ┌─────────────────▼──────────────────┐
@@ -97,12 +99,13 @@ services/         # 从 api 拆出的独立进程（同一镜像不同启动参�
 | auth/iam | 注册登录、JWT、org/team/project 成员管理 | Channel 级权限（归 permission） |
 | channel | Channel CRUD、成员邀请、消息读写、已读、seq 分配 | Mention 解析（归 orchestrator） |
 | mention | Mention 存储、@all 群发 | 候选排序与路由（归 orchestrator） |
-| orchestrator | Mention Resolver 流水线、Decision 状态机、Delegate 路由、超时重路由 | 执行任务 |
+| orchestrator | Mention Resolver 流水线、Decision 状态机、Delegate 路由、超时重路由 | 执行任务（默认归 MateOS Runtime；可选切 AgentBoard，§10.1） |
 | memory | 四类 Memory 的 CRUD、人审门禁、Source 溯源、embedding 索引与检索 | 消息存储 |
 | permission | 权限矩阵存储与判定（sync API，供所有模块调用） | 权限的 UI 配置 |
-| agent-registry | Agent CRUD、Credential 绑定、状态聚合（presence） | Agent 任务执行 |
+| agent-registry | Agent CRUD、Credential 绑定、状态聚合（presence，6 态） | Agent 任务执行 |
 | runtime | Connector 协议接入、任务下发、心跳保活、沙箱生命周期 | 业务决策 |
 | task | 任务/子任务模型（V1 最小实现，V2 全量） | 代码执行（归 runtime sandbox） |
+| integration | 外部集成（§10）：AgentBoard / Jira 适配器，状态/评论双向同步 | 外部系统内部逻辑 |
 
 ---
 
@@ -111,18 +114,22 @@ services/         # 从 api 拆出的独立进程（同一镜像不同启动参�
 ### 4.1 Mention Resolver 流水线（异步化）
 
 ```
-用户发送 @backend-team 请审查支付 API
+用户发送 @backend 请审查支付 API
   ↓ api/channel 模块：消息落库（同步），生成 mention 行（status=RESOLVING）
   ↓ 入 BullMQ 队列 mention.resolve
   ↓ orchestrator Worker：
     ① 硬过滤：channel 成员资格 + permission（read/write）
-    ② 候选排序：capability 匹配度（规则分） + 当前负载（status!=BUSY 加分）
+    ② 候选排序：capability 匹配度（规则分） + 当前负载（status!=WORKING 加分）
        + 近期相关性（该 agent 在本 project 近 30 天被 accept 的比例）
-    ③ 产出 Top-N，mention 行更新为 RESOLVED(targets=[...])
+    ③ 产出 Top-N，mention 行更新为 RESOLVED(targets=[...], scores=[...])
   ↓ 逐个向候选成员投递 decision 请求（WS 实时 + 队列兜底）
+  ↓ WS 事件 mention.resolved 回推前端高亮 + 命中分数气泡
 ```
 
-要点：**消息发送永远同步成功**（Mention 解析失败不影响消息送达）；解析结果通过 WS 事件 `mention.resolved` 回推前端高亮。
+要点：
+- **消息发送永远同步成功**（Mention 解析失败不影响消息送达）
+- **解析结果必须回推前端**（v0.2 起）：事件 `mention.resolved` 含 `targets[]` 与 `scores[]`，UI 展示命中的 Agent 与分数，禁止黑箱
+- **6 态上线**（v0.2 起）：Resolver 排除 `OFFLINE` / `ERROR` / `WORKING` 候选
 
 ### 4.2 Decision 状态机
 
@@ -136,9 +143,9 @@ services/         # 从 api 拆出的独立进程（同一镜像不同启动参�
  通知发起人
 ```
 
-所有 Decision 落 `decision_records` 表（谁、对什么请求、什么决策、依据），这是审计与后续"Agent 表现评分"的数据底座。
+所有 Decision 落 `decision_records` 表（谁、对什么请求、什么决策、依据），这是审计与后续"Agent 表现评分"的数据底座。Decision 必带 `analysis{capability, context_score, permission}` 三项（与 UI 决策卡片三格对齐）。
 
-### 4.3 Memory 写入门禁
+### 4.3 Memory 写入门禁（v0.3 起进 MVP）
 
 ```
 Agent 产生 memory proposal（type/content/source 引用 channel_message id）
@@ -147,6 +154,8 @@ Agent 产生 memory proposal（type/content/source 引用 channel_message id）
   ↓ Human Approve → status=APPROVED，入队 memory.index → 切块 + embedding 写 memory_chunks
     Human Reject → status=REJECTED（保留记录，供 Agent 学习"什么不该提议"）
 ```
+
+Source 溯源（PRD FR-7 硬性要求）：`memory_items.source_type` / `source_channel_id` / `source_message_seq` 三件套缺一不可；UI 记忆卡必须展示该行。
 
 检索（V2）：`hybrid = pgvector ANN(top_k=50) + PG 全文(BM25 近似) → 按 project_id/type 过滤 → 轻量 rerank`；Personal Memory 只对 owner 生效，在检索层做成员级过滤。
 
@@ -161,17 +170,18 @@ Agent 产生 memory proposal（type/content/source 引用 channel_message id）
 | users | id, email, password_hash, display_name | — |
 | credentials | id, user_id, provider, secret_encrypted, meta | **加密存储（AES-256-GCM，KMS/信封加密）**，永不回显明文 |
 | teams | id, org_id, name | — |
-| projects | id, team_id, name, repo_url | 知识边界 |
+| projects | id, team_id, name, repo_url, integration_backend('mateos'\|'agentboard'), issue_tracker('none'\|'agentboard'\|'jira') | 知识边界 + 外部集成开关（§10） |
 | channels | id, project_id, name, last_seq | 通信边界 |
-| agents | id, owner_user_id, credential_id, name, role, capabilities(jsonb), can_execute, can_review, status | 状态为缓存值，真源在 Redis presence |
+| agents | id, owner_user_id, credential_id, name, role, capabilities(jsonb), can_execute, can_review, status | 状态枚举 v0.2 改 6 态（OFFLINE/AVAILABLE/THINKING/WORKING/WAITING_CONTEXT/ERROR）；为缓存值，真源在 Redis presence |
 | channel_members | channel_id, member_type(HUMAN\|AGENT), member_id, joined_at | 多态成员；唯一索引(channel_id, member_type, member_id) |
 | messages | id, channel_id, seq, sender_type, sender_id, content, content_type, client_msg_id, created_at, deleted_at | **seq 为 channel 内单调递增**（用 channel 计数器表 + 事务分配），前端按 last_seq 断线续传；client_msg_id 唯一索引幂等去重；**按月分区** |
-| mentions | id, message_id, mention_type(USER\|AGENT\|GROUP\|ALL), raw_text, status(RESOLVING\|RESOLVED\|UNRESOLVED), targets(jsonb) | — |
-| decision_records | id, mention_id, agent_id, decision(ACCEPT\|REJECT\|NEED_CONTEXT\|DELEGATE), reason, needs(jsonb), delegate_to, expires_at, decided_at | Decision 状态机真源 |
-| memory_items | id, project_id, owner_user_id(nullable), type(PERSONAL\|PROJECT\|DECISION\|KNOWLEDGE), content, status(PROPOSED\|APPROVED\|REJECTED), source_type, source_id, approved_by, created_at | Source 溯源（PRD FR-7） |
+| mentions | id, message_id, mention_type(USER\|AGENT\|GROUP\|ALL), raw_text, status(RESOLVING\|RESOLVED\|UNRESOLVED), targets(jsonb), scores(jsonb) | v0.2 新增 scores 字段（Resolver 命中分数），前端 WS 推送展示 |
+| decision_records | id, mention_id, agent_id, decision(ACCEPT\|REJECT\|NEED_CONTEXT\|DELEGATE), reason, needs(jsonb), analysis(jsonb), delegate_to, expires_at, decided_at | Decision 状态机真源；analysis 必带三件套（capability/context_score/permission） |
+| memory_items | id, project_id, owner_user_id(nullable), type(PERSONAL\|PROJECT\|DECISION\|KNOWLEDGE), content, status(PROPOSED\|APPROVED\|REJECTED), source_type, source_channel_id, source_message_seq, approved_by, created_at | **v0.2 起：source 三件套强约束（not null 至少 channel_id + message_seq）**；MVP 范围内 |
 | memory_chunks | id, memory_id, chunk_text, embedding vector(1536), tsv | pgvector HNSW 索引(embedding)；tsv 为全文列 |
 | permissions | id, scope_type(PROJECT\|CHANNEL), scope_id, subject_type, subject_id, perm_key, effect | 权限矩阵（§7 Permission Model） |
 | tasks | id, project_id, title, status, created_from(decision_record_id), assignee_type, assignee_id | V1 最小：Accept 后可建任务占位；V2 接 runtime 执行 |
+| external_links | id, entity_type('task'\|'memory'\|'request'), entity_id, external_system, external_id, external_url, synced_at | §10 外部集成双向同步表；V1+ 启用 |
 | attachments | id, message_id, s3_key, size, mime | — |
 | audit_logs | id, actor_type, actor_id, action, target, detail(jsonb), created_at | append-only |
 
@@ -181,6 +191,7 @@ Agent 产生 memory proposal（type/content/source 引用 channel_message id）
 - **消息不可变**：编辑走 `message_edits` 版本表（V2），删除为软删；一切下游（Memory source、mention）通过 message id 引用，永不悬空。
 - **seq 分配**：`channel_seq_counters(channel_id, next_seq)` 行级锁 + 事务，保证 channel 内严格有序，这是 WS `resume(last_seq)` 的基础。
 - **检索过滤前置**：memory_chunks 必须带 project_id（冗余自 memory_items），向量检索时先按 project_id 过滤再 ANN，避免跨项目泄漏。
+- **Capability canonical key**：DB 存 `capabilities jsonb` 用英文 snake_case canonical key（`coding` / `review`）；显示名由前端 i18n 渲染，避免 PRD / SYSTEM_DESIGN / UI 三处词汇漂移。
 
 ---
 
@@ -193,13 +204,24 @@ MateOS 自研 Agent 运行时，采用 **出站连接（Agent 主动连入）** 
         │  WSS 出站连接 + JWT(agent token)
         ▼
 Agent Runtime Gateway（services/runtime）
-  ├─ 注册/心跳：agent 上报 status(FREE/BUSY/THINKING/WAITING_CONTEXT/OFFLINE)
+  ├─ 注册/心跳：agent 上报 status(OFFLINE/AVAILABLE/THINKING/WORKING/WAITING_CONTEXT/ERROR)
   ├─ 任务下发：Gateway → agent 的 dispatch 消息（见协议）
   ├─ 流式回传：agent 执行进度/结果/产物（diff、文件、日志）经 Gateway 广播到 Channel
   └─ 保活判定：心跳 >90s 丢失 → presence=OFFLINE
 ```
 
-### Connector 协议（JSON envelope over WebSocket）
+### 6.1 ERROR 态触发与恢复（v0.2 新增）
+
+| 触发条件 | 进入 ERROR | 恢复条件 |
+| --- | --- | --- |
+| Provider HTTP 5xx 连续 3 次 | 立即 | 下次心跳自动 → AVAILABLE |
+| Provider 401/403（密钥失效） | 立即 | owner 更新 credential 并 `agent.activate` |
+| 日/周限额触顶 | 立即 | owner 调整限额 |
+| Sandbox 启动失败 | 立即 | Runtime 自动重试 2 次，仍失败 → 通知 owner |
+
+ERROR 态时：Agent 不出现在 Resolver 候选；Channel 列表/Avatar 仍可见但红点；Owner 收到通知与 `fix_hint`（如「检查 Anthropic API Key」）。
+
+### 6.2 Connector 协议（JSON envelope over WebSocket）
 
 ```jsonc
 // 通用 envelope
@@ -219,7 +241,15 @@ Agent Runtime Gateway（services/runtime）
 // decision（Agent 对 mention 的回应，同 §4.2 状态机）
 { "type": "result", "payload": {
     "task_id": "…", "decision": "ACCEPT|REJECT|NEED_CONTEXT|DELEGATE",
-    "reason": "…", "needs": ["api spec", "db design"], "delegate_to": "agent:…" } }
+    "reason": "…", "needs": ["api spec", "db design"],
+    "analysis": { "capability": true, "context_score": 88, "permission": true },
+    "delegate_to": "agent:…" } }
+
+// status（Agent 上报状态，6 态）
+{ "type": "status", "payload": {
+    "status": "OFFLINE|AVAILABLE|THINKING|WORKING|WAITING_CONTEXT|ERROR",
+    "reason": "rate_limit_exceeded",     // ERROR 时携带
+    "since": 1736380800 } }
 ```
 
 设计原则：
@@ -250,8 +280,32 @@ Agent Runtime Gateway（services/runtime）
 | Agent ↔ Runtime | **WSS Connector 协议**（§6） | 对外开放、版本化（v1），第三方 Agent 可按协议接入 |
 | LLM 调用 | OpenAI-compatible HTTP | Provider Adapter 统一，流式 SSE 转发 |
 | 对象存储 | S3 API（预签名 URL 直传/下载） | 服务端只发票据不代理大流量 |
+| **MateOS ↔ AgentBoard**（§10.1，v0.2 新增） | **CollaborationRequest over WSS** | `collab.request / collab.status / collab.result`；v1 envelope，版本化 |
+| **MateOS ↔ Jira**（§10.2，v0.2 新增） | **REST + Webhook** | OAuth 2.0（3LO）授权，Issue / Comment / Status 双向同步；webhook 入队 BullMQ |
 
 WS envelope 规范：所有事件含 `{v, type, id, ts, payload}`；客户端 ACK 按 channel 维度推进 `last_seq`；服务端事件幂等（事件 id 去重窗口 5min）。
+
+### 8.1 MateOS ↔ AgentBoard 协作协议（v1）
+
+```jsonc
+// MateOS → AgentBoard
+{ "type": "collab.request", "payload": {
+    "request_id": "collab-…",
+    "from": { "channel_id": "…", "actor": "agent:backend" },
+    "task": { "title": "…", "description": "…", "context_refs": ["mem:…", "msg:…"] },
+    "sla": { "deadline_s": 3600 } } }
+
+// AgentBoard → MateOS
+{ "type": "collab.status", "payload": {
+    "request_id": "collab-…",
+    "status": "accepted|in_progress|completed|failed",
+    "external_ref": { "issue_id": "ab-1234", "url": "https://…" } } }
+
+{ "type": "collab.result", "payload": {
+    "request_id": "collab-…",
+    "summary": "…",
+    "artifacts": [ { "type": "pr", "url": "https://…" } ] } }
+```
 
 ---
 
@@ -259,22 +313,73 @@ WS envelope 规范：所有事件含 `{v, type, id, ts, payload}`；客户端 AC
 
 | 用途 | Key 模式 | 类型 | TTL | 失效策略 |
 | --- | --- | --- | --- | --- |
-| Agent presence | `presence:{agent_id}` | Hash(status, since, node) | 90s（心跳续期） | 心跳过期自动失效 |
+| Agent presence | `presence:{agent_id}` | Hash(status, since, node, last_heartbeat) | 90s（心跳续期） | 心跳过期自动失效 |
 | Agent 状态广播 | `pubsub:presence` | Pub/Sub | — | 变更即发，WS 层推前端 |
 | Channel 近期消息 | `timeline:{channel_id}` | ZSet(message_id, seq) | 10min | 新消息 ZADD；LRU 淘汰 |
 | 未读计数 | `unread:{member_id}:{channel_id}` | String(INCR) | 24h | 已读事件 DEL + 异步落库 |
 | 权限矩阵 | `perm:{scope_type}:{scope_id}:{subject_type}:{subject_id}` | Hash | 5min | `perm.changed` 事件精确失效 |
 | Mention 排序特征 | `mfeat:{project_id}:{agent_id}` | Hash(accept_rate, load) | 1h | decision 落库后增量更新 |
+| Mention 解析结果 | `mention:{mention_id}` | Hash(targets, scores, resolved_at) | 10min | resolver 落库后写入 |
 | 限流 | `rl:{principal}:{route}` | Sorted Set 滑窗 | 窗口期 | — |
 | 分布式锁 | `lock:{resource}` | SET NX PX | ≤30s | Memory 审批、seq 相关临界区 |
 | Session/刷新令牌 | `rt:{user_id}:{jti}` | String | 30d | 登出/吊销 DEL |
 | Memory 热点上下文 | `mctx:{project_id}:{agent_id}` | String(JSON) | 15min | memory_items APPROVED 事件失效 |
+| 外部集成 token | `ext:{system}:{user_id}` | String(access/refresh) | 按 provider | refresh 事件续期 |
 
 原则：**Redis 只放可重建数据**（presence、计数、缓存、锁），持久真源一律在 PG；缓存 miss 的重建路径必须存在且幂等。
 
 ---
 
-## 10. 数据库与存储设计
+## 10. 外部集成扩展点（v0.2 新增）
+
+> 原则：所有外部集成**默认关闭**，由 Project 级配置开关启用（`projects.integration_backend` / `projects.issue_tracker`）。MVP 不实现真实同步逻辑，只预留数据模型与适配器骨架。
+
+### 10.1 执行后端：MateOS Runtime ↔ AgentBoard
+
+| 维度 | MateOS Runtime（默认） | AgentBoard（V1+ 启用） |
+| --- | --- | --- |
+| 决策 Accept 后 | MateOS Runtime Gateway 直接 dispatch | 推送 `collab.request` 到 AgentBoard |
+| 任务编排 | Runtime Worker（BullMQ） | AgentBoard 内部 Task / Worker |
+| 产物（PR / diff） | 留 V3+ 沙箱执行 | AgentBoard 回写 `collab.result` |
+| 协议 | 自有 Connector 协议（§6） | §8.1 collab.* envelope |
+
+实现要点：
+- `projects.integration_backend` 字段（`'mateos'` 默认 / `'agentboard'` V1+）
+- API 层在 Decision Accept 后根据项目设置选择 dispatch 路径
+- AgentBoard 回写的事件落 `external_links` 表
+- Channel 消息流同时兼容两种来源的产出
+
+### 10.2 项目管理工具切换：None / AgentBoard / Jira
+
+| 集成项 | None（默认） | AgentBoard Issue | Jira Issue |
+| --- | --- | --- | --- |
+| 协作请求视图 | MateOS 内部 | 同步到 AgentBoard Issue | 同步到 Jira Issue |
+| 评论 / 决策回写 | MateOS 内部 | 写入 Issue 评论 | 写入 Issue 评论 |
+| 状态同步 | 单向（MateOS → 视图） | 双向 | 双向 |
+
+实现要点：
+- `projects.issue_tracker` 字段（`'none'` 默认 / `'agentboard'` / `'jira'` V1+）
+- Jira：OAuth 2.0（3LO）授权，`/rest/api/3/issue` 双向同步；webhook 入队 BullMQ
+- AgentBoard：复用 §8.1 collab.* 协议，扩展 `issue.sync` 消息类型
+- 双向同步去重：消息指纹（content_hash）落 `external_links` 表
+
+### 10.3 集成模块架构
+
+```
+services/integration/        # 从 api 拆出的独立进程（V1+ 启用）
+  ├─ agentboard/             # AgentBoard 适配器
+  │   ├─ collab_client.ts    # 发送 collab.request
+  │   └─ collab_receiver.ts  # 处理 collab.status / collab.result
+  ├─ jira/                   # Jira 适配器
+  │   ├─ oauth.ts            # 3LO 授权与 token 刷新
+  │   ├─ issue_sync.ts       # Issue CRUD
+  │   └─ webhook.ts          # webhook 入队
+  └─ common/                 # 通用：external_links 落库、去重、重试
+```
+
+---
+
+## 11. 数据库与存储设计
 
 ### PostgreSQL
 
@@ -297,7 +402,7 @@ WS envelope 规范：所有事件含 `{v, type, id, ts, payload}`；客户端 AC
 
 ---
 
-## 11. 非功能设计
+## 12. 非功能设计
 
 | 维度 | 方案 |
 | --- | --- |
@@ -309,31 +414,35 @@ WS envelope 规范：所有事件含 `{v, type, id, ts, payload}`；客户端 AC
 
 ---
 
-## 12. 实施顺序（对齐 PRD MVP）
+## 13. 实施顺序（对齐 PRD MVP）
 
 | 阶段 | 交付 | 对应 PRD |
 | --- | --- | --- |
 | M1 基座 | monorepo 脚手架、auth/JWT、org/team/project/channel CRUD、PG+Redis 部署 | MVP: User/Team/Project/Channel |
 | M2 通信 | 消息收发（seq/幂等/分区表）、WS 网关与 resume、附件直传 | MVP: Chat |
-| M3 成员与 Agent | Agent CRUD、Credential 加密、presence、channel 邀请 | MVP: Agent/成员 |
-| M4 Mention | mention 存储、Resolver Worker、Decision 状态机（Accept/Reject/Need Context，Delegate 留枚举）、权限 Guard | MVP: Mention/Decision/Permission |
-| M5 打磨 | @all 仲裁、通知、审计、监控面板、压测（1k WS 并发） | MVP 收尾 |
-| V2 起 | Memory 门禁与检索、Delegate 路由、Runtime 任务执行 | PRD V2 |
+| M3 成员与 Agent | Agent CRUD、Credential 加密、presence（6 态）、channel 邀请 | MVP: Agent/成员 |
+| M4 Mention | mention 存储、Resolver Worker、Decision 状态机（Accept/Reject/Need Context，Delegate 留枚举）、权限 Guard、Resolver WS 回写 | MVP: Mention/Decision/Permission |
+| M5 Memory | memory_items CRUD（Source 三件套强约束）、人审门禁、P6 审批中心、embedding 索引 | MVP: Shared Memory |
+| M6 打磨 | @all 仲裁、通知、审计、监控面板、压测（1k WS 并发） | MVP 收尾 |
+| V1+ 起 | 项目集成（§10.1/§10.2）、Delegate 路由、Runtime 沙箱执行 | PRD V1+/V2 |
 
 ---
 
-## 13. 开放问题
+## 14. 开放问题
 
 - [ ] 中文分词扩展选型（zhparser vs pg_jieba）需在 M2 前用真实语料对比
 - [ ] Agent token 的签发/吊销生命周期（设备绑定 vs 长期密钥）
 - [ ] WS 消息压缩阈值（permessage-deflate 开销 vs 收益）
 - [ ] embedding 模型与维度（1536 起，换模型需重建索引，预留 version 字段）
 - [ ] Decision 超时 60s 的默认值需用真实使用数据校准
+- [ ] AgentBoard collab.* 协议（§8.1）的幂等键与外部 Issue 双绑策略
+- [ ] Jira webhook 事件过滤与去重（避免循环回写）
 
 ---
 
-## 14. 更新记录
+## 15. 更新记录
 
 | 版本 | 日期 | 变更 |
 | --- | --- | --- |
 | v0.1 | 2026-09-07 | 初稿：独立系统架构（NestJS 单体 + 3 Worker）；技术选型、模块拆分、Mention Resolver/Decision/Memory 流程、PG+pgvector 数据模型、Redis 缓存矩阵、Connector 开放协议、实施顺序 |
+| v0.2 | 2026-09-08 | 原型评审修订：Agent 状态 6 态（新增 ERROR 触发/恢复与状态枚举）；Mention 流水线新增 Resolver 结果回写 + 6 态过滤；决策记录 analysis 必填三件套对齐 UI 三格；Memory 进 MVP（Source 三件套强约束、Source Channel/Seq 索引）；§8 新增 MateOS↔AgentBoard / Jira 协议；§10 新增外部集成扩展点（执行后端切换 + 项目管理切换），含 integration 模块骨架；新增 ExternalIntegration 实体 + 集成表 |

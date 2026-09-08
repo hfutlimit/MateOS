@@ -1,14 +1,15 @@
-# MateOS 总体需求文档（PRD v0.2）
+# MateOS 总体需求文档（PRD v0.3）
 
 | 文档信息 | 内容 |
 | --- | --- |
 | 产品名称 | MateOS（备选：MatePro / Crewly / Memora） |
-| 文档状态 | Draft（v0.2，吸收外部架构师 review 后修订） |
-| 版本 | v0.2 |
-| 日期 | 2026-09-07 |
-| 下游文档 | 系统设计文档 SYSTEM_DESIGN（待建，见 §12 后续步骤） |
+| 文档状态 | Draft（v0.3，原型评审修订） |
+| 版本 | v0.3 |
+| 日期 | 2026-09-08 |
+| 下游文档 | 系统设计文档 SYSTEM_DESIGN v0.2、UI Design System v0.4 |
 
-> **v0.1 → v0.2 变更摘要**：新增 Project 实体（Channel/Project 边界分离）；新增 V1 范围声明与 Non Goals；新增 Permission Model、User Story、核心实体清单三章；Mention 系统升级为 Mention Resolver；Agent 决策模型增加 Delegate；Agent Capability 结构化；Agent Credential 与 Agent 分离；Memory 增加 Source 溯源；Agent 协作职责收敛为 CollaborationRequest（执行归 AgentBoard）。
+> **v0.2 → v0.3 变更摘要**：执行层口径回归自洽（MateOS 独立运行，AgentBoard 改为可选协作扩展点而非分层前提）；Agent 状态枚举收敛为 6 态（与 UI DS / SYSTEM_DESIGN 对齐）；Shared Memory 人审门禁从 V2 提前到 MVP；新增「外部项目集成」扩展点（AgentBoard / Jira 可切换）；Capability taxonomy 统一为 canonical key + 显示名。
+> **v0.1 → v0.2 变更摘要**：新增 Project 实体（Channel/Project 边界分离）；新增 V1 范围声明与 Non Goals；新增 Permission Model、User Story、核心实体清单三章；Mention 系统升级为 Mention Resolver；Agent 决策模型增加 Delegate；Agent Capability 结构化；Agent Credential 与 Agent 分离；Memory 增加 Source 溯源。
 
 ---
 
@@ -54,7 +55,7 @@ MateOS 的解法：以 Team → Project → Channel → Human + AI Agents → Sh
 
 当前个人解决问题的产出（Chat history + Local knowledge）无法被团队复用。
 
-MateOS 的解法：将架构决策、Feature 讨论、Bug 经验、Coding 规范沉淀为 **Project Shared Memory**。
+MateOS 的解法：将架构决策、Feature 讨论、Bug 经验、Coding 规范沉淀为 **Project Shared Memory**，并通过人审门禁确保质量。
 
 ### 2.3 AI Agent 缺少团队协作能力
 
@@ -127,7 +128,7 @@ Agent 能力为结构化声明（不再只是扁平字符串数组）：
 }
 ```
 
-> 细粒度 skills 标签体系（python / fastapi / postgres 等）**暂缓至 V2+**，V1 用 role + capabilities 已够 Mention Resolver 做能力排序，避免过早过度设计。
+> **Capability taxonomy**：v0.3 收敛为 `canonical_key + display_name` 模式。`canonical_key` 用于 Resolver 打分、过滤、决策模型（英文 snake_case，如 `coding` / `debugging` / `review` / `testing` / `architecture`），`display_name` 按用户语言展示（中文 / English / Mixed）。细粒度 skills 标签体系（python / fastapi / postgres 等）**暂缓至 V2+**，V1 用 role + capabilities 已够 Mention Resolver 做能力排序。
 
 ### 4.3 Agent Ownership 与 Credential 分离
 
@@ -142,9 +143,22 @@ Agent 能力为结构化声明（不再只是扁平字符串数组）：
   "credential_id": "",
   "provider": "OpenAI/Anthropic",
   "model": "",
-  "status": "FREE/BUSY/OFFLINE"
+  "status": "OFFLINE/AVAILABLE/THINKING/WORKING/WAITING_CONTEXT/ERROR"
 }
 ```
+
+### 4.4 Agent 状态机（与 SYSTEM_DESIGN / UI DS 对齐的 6 态）
+
+| 状态 | 含义 | 触发 |
+| --- | --- | --- |
+| `OFFLINE` | 未部署 / owner 暂停 / 日限额触顶 | owner 启用 |
+| `AVAILABLE` | 空闲且在线 | 收到 Mention 退出 |
+| `THINKING` | 正在做能力/上下文/权限判断 | 收到 Mention |
+| `WORKING` | 决策为 Accept，正在产出 | 决策 Accept |
+| `WAITING_CONTEXT` | 决策为 Need Context，等待人类补齐 | 决策 Need Context |
+| `ERROR` | Provider 调用失败 / 密钥失效 | Runtime 报错 |
+
+> 6 态是 PRD / SYSTEM_DESIGN / UI DS 单一事实来源（v0.3 起；v0.2 三处枚举不一致问题关闭）。
 
 ---
 
@@ -161,11 +175,11 @@ Agent 能力为结构化声明（不再只是扁平字符串数组）：
 - Channel 可邀请 Human 成员与 Agent 成员
 - 邀请后成员进入该 Channel 的共享上下文；Agent 同时获得所属 Project 的知识边界（Memory / 决策 / 规范）
 
-### FR-3 Agent 状态管理
+### FR-3 Agent 状态管理（6 态）
 
-Channel 中展示 Agent 状态，状态集合：
+Channel 中展示 Agent 状态，状态集合（与 §4.4 / SYSTEM_DESIGN §6 / UI DS §4 收敛）：
 
-- `FREE` / `BUSY` / `THINKING` / `WAITING_CONTEXT` / `OFFLINE`
+`OFFLINE` / `AVAILABLE` / `THINKING` / `WORKING` / `WAITING_CONTEXT` / `ERROR`
 
 ### FR-4 Mention 系统（核心差异点，优先级最高）
 
@@ -174,7 +188,7 @@ Channel 中展示 Agent 状态，状态集合：
 | Mention 形式 | 行为 |
 | --- | --- |
 | `@指定成员` | 直接路由给该成员（Human 或 Agent） |
-| `@channel-group`（如 @backend-team） | 走 **Mention Resolver** 寻找合适成员 |
+| `@channel-group`（如 @backend） | 走 **Mention Resolver** 寻找合适成员 |
 | `@all` | 所有成员收到；Agent 自行判断是否需要响应，避免 Agent 无限聊天 |
 
 **Mention Resolver**（未来 AI team orchestration 的基础）：
@@ -190,6 +204,8 @@ Capability Ranking（按 role/capabilities 打分，如 Backend-Agent 0.95 / Sec
   ↓
 Decision（路由给 Top-N 或征求确认）
 ```
+
+> UI 必须展示 Resolver 命中结果（被选中的 Agent 与分数），不可黑箱。
 
 ### FR-5 Agent 决策模型（Decision Model）
 
@@ -210,20 +226,17 @@ Decision 四种结果：
 
 ### FR-6 Agent 协作（Collaboration，职责收敛）
 
-**MateOS 不负责任务执行与自动任务拆分**（那是执行层的事）。MateOS 负责：
-
-- Conversation（对话）、Intent（意图）、Collaboration（协作编排意图）、Decision（决策）
-
-当 Agent Accept 一个请求后，MateOS 产生 **CollaborationRequest** 交给 AgentBoard：
+**MateOS 自洽**（v0.3 修订）：MateOS 负责 Conversation、Intent、Collaboration、Decision 全链路；执行层由 MateOS 自研 Runtime（SYSTEM_DESIGN §6 Connector）承接，**不强制依赖 AgentBoard**。如需与 AgentBoard 协作，遵循 §10 可选协作扩展点。
 
 ```
-MateOS: Backend-Agent accepted feature request → create execution request
-AgentBoard: Task / Worker / Code / PR / Review
+MateOS：User / Channel / Memory / Mention / Decision / Runtime(自研)
+       ↕ 可选协议（§10）
+AgentBoard：Task / Worker / CLI / Code / PR / Review（V1+ 集成）
 ```
 
-自动任务拆分（Parent Task → 子任务分派）归 AgentBoard 编排，MateOS 只透出协作视图。
+> 当 Agent Accept 一个请求后，MateOS Runtime 自身执行（对话型 LLM 调用）；如需长时任务/代码执行，进入 §10 的可切换执行后端。
 
-### FR-7 Shared Memory（核心竞争力）
+### FR-7 Shared Memory（核心竞争力，v0.3 提前到 MVP）
 
 | Memory 类型 | 归属 | 示例 |
 | --- | --- | --- |
@@ -238,15 +251,16 @@ AgentBoard: Task / Worker / Code / PR / Review
 {
   "type": "DECISION",
   "content": "Payment uses Stripe webhook",
-  "source": { "type": "CHANNEL_MESSAGE", "id": "12345" },
+  "source": { "type": "CHANNEL_MESSAGE", "channel_id": "...", "message_seq": 12345 },
   "approved_by": "Jason"
 }
 ```
 
-**Memory 生命周期（人审门禁）：**
+**Memory 生命周期（人审门禁）**：
 
 1. Agent 提出记忆写入申请（"I learned: ... Save to project memory?"）
 2. Human **Approve** 后才进入 Shared Memory
+3. UI 端必须在记忆卡上展示 Source 行（频道 + 消息引用）
 
 > 自动 Memory Extraction（Agent 无感自动沉淀）列入暂缓，见 §11。
 
@@ -276,7 +290,7 @@ Human 成员权限沿用常规协作工具模型（owner / member），V1 从简
 
 **Team Lead（Tom）：**
 
-> 作为团队负责人，我希望 @backend-team 发起请求时，系统自动匹配最合适的 Agent，而不是我逐个指定。
+> 作为团队负责人，我希望 @backend 发起请求时，系统自动匹配最合适的 Agent，而不是我逐个指定。
 
 **Agent（Backend-Agent）：**
 
@@ -294,28 +308,47 @@ Human 成员权限沿用常规协作工具模型（owner / member），V1 从简
 
 ---
 
-## 9. 与 AgentBoard 的集成边界
-
-MateOS 与 AgentBoard 分层解耦：
-
-| 层 | 系统 | 职责 |
-| --- | --- | --- |
-| **协作层（Collaboration Layer）** | MateOS | User、Channel、Memory、Mention、Decision → 产出 **CollaborationRequest** |
-| **执行层（Execution Layer）** | AgentBoard | Task、Worker、CLI、Code、PR、Review |
+## 9. 核心实体清单（架构设计输入）
 
 ```
-            MateOS（协作层）
-     User / Channel / Memory / Mention / Decision
-                   |
-          CollaborationRequest
-                   |
-            AgentBoard（执行层）
-     Task / Worker / CLI / Code / PR / Review
+Organization / User / Team / Project / Channel / Member
+Agent / Credential / Message / Mention / Memory
+CollaborationRequest / Permission
+ExternalIntegration（v0.3 新增：AgentBoard / Jira 等可选）
 ```
 
 ---
 
-## 10. 版本规划
+## 10. 外部集成扩展点（v0.3 新增）
+
+MateOS 自洽运行（§FR-6），但为长期生态预留两条可选集成扩展点。两条都是**可选开关**，默认关闭，不影响 MVP 交付。
+
+### 10.1 执行后端切换（AgentBoard 协作）
+
+如用户已部署 AgentBoard，MateOS 可在 Project 设置中开启「执行后端：AgentBoard」：
+
+- MateOS 决策 Accept 后，将请求以 `CollaborationRequest` 协议推送到 AgentBoard
+- AgentBoard 负责 Task / Worker / Code / PR / Review 编排
+- 结果回写 MateOS Channel（仍展示决策与产出，但不占用 MateOS Runtime 资源）
+- 协议细节：见 SYSTEM_DESIGN §8 协议汇总
+
+**默认**：执行后端 = MateOS Runtime（自研）。
+
+### 10.2 项目管理工具切换（AgentBoard / Jira）
+
+项目管理页面（未来 P-Project Center）支持外部 Issue 跟踪系统集成：
+
+| 集成项 | 默认 | 可选 |
+| --- | --- | --- |
+| 协作请求视图 | MateOS 内部 | AgentBoard Issue 视图 / Jira Issue 视图 |
+| 任务状态同步 | MateOS 内部 | 双向同步到 AgentBoard / Jira |
+| 评论 / 决策回写 | MateOS 内部 | 写入外部 Issue 评论 |
+
+**V1+ 范围**：MVP 不实现同步逻辑，仅在 P4 Project Dashboard 预留「外部项目集成」开关位（V1+ 启用，UI 见 P4 原型）。
+
+---
+
+## 11. 版本规划
 
 ### MVP（V1）— AI Engineering Team Workspace
 
@@ -324,50 +357,41 @@ MateOS 与 AgentBoard 分层解耦：
 | User | 注册、登录 |
 | Team | 创建团队 |
 | **Project** | 创建项目（知识边界） |
-| Agent | 创建 Agent、配置 Credential、状态管理 |
+| Agent | 创建 Agent、配置 Credential、状态管理（6 态） |
 | Channel | 创建 Channel、邀请成员 |
 | Chat | 消息收发 |
 | Mention | @Human、@Agent、@group（Mention Resolver）、@all |
 | Agent Decision | Accept / Reject / Need Context（Delegate 留接口） |
+| **Shared Memory** | **人审门禁 + Source 溯源（v0.3 提前到 MVP）** |
+| Memory 审批中心 | P6 页面（V1 含） |
 | Permission | §6 默认权限矩阵 |
 
 ### V2
 
-- Shared Memory（含 Source 溯源 + 人审门禁）
-- Project Context
-- Agent Collaboration（CollaborationRequest 全链路）
-- Agent Delegate（跨 Agent 委派路由）
+- Delegate 路由（跨 Agent 委派）
+- Project Context 扩展
+- Agent Collaboration 协议对接 AgentBoard（§10.1）
+- 项目管理外部集成（§10.2）
 
 ### V3
 
-- Agent Autonomous Task Delegation（Agent 自主任务委派）
-- PR Review
-- Code Execution
+- Agent Autonomous Task Delegation
+- PR Review / Code Execution
 
 ### V4
 
-- AI Engineering Organization（AI 工程组织）
+- AI Engineering Organization
 
 ---
 
-## 11. 明确暂缓项
+## 12. 明确暂缓项
 
 | 项 | 原因 |
 | --- | --- |
-| 自动任务拆分（Parent Task → 子任务分派） | 属执行层编排，归 AgentBoard；MateOS 只透出视图 |
+| 自动任务拆分（Parent Task → 子任务分派） | MateOS Runtime 内部编排；执行后端可切到 AgentBoard（§10.1） |
 | Agent 自主协作（无人类参与的 Agent 间循环） | 防失控，V1 Non Goal |
 | 自动 Memory Extraction | 记忆质量优先，先跑通人审门禁 |
 | 细粒度 skills 标签体系 | V1 用 role + capabilities 足够 |
-
----
-
-## 12. 核心实体清单（架构设计输入）
-
-```
-Organization / User / Team / Project / Channel / Member
-Agent / Credential / Message / Mention / Memory
-CollaborationRequest / Permission
-```
 
 ---
 
@@ -377,20 +401,16 @@ CollaborationRequest / Permission
 - [ ] Agent Runtime 的具体形态（本地进程 / 远端 Worker / 混合）
 - [ ] Memory 的存储与检索方案（向量 / 结构化 / 混合）
 - [ ] Permission Model 与 Decision Model 的交互细节（Permission Check 失败时走 Reject 还是 Need Context）
-- [ ] CollaborationRequest 的协议格式（与 AgentBoard 既有 Task/Story 模型如何映射）
+- [ ] AgentBoard 协作协议（§10.1）的最终消息格式
+- [ ] Jira 集成（§10.2）的 webhook + OAuth 策略
 
 ---
 
 ## 14. 后续步骤
 
-1. 编写 **SYSTEM_DESIGN.md**（架构设计文档），重点设计：
-   - 数据模型（基于 §12 实体清单）
-   - Channel / Message / Mention / Mention Resolver 架构
-   - Agent Runtime 接口与 Credential 管理
-   - Memory 系统与 Source 溯源
-   - CollaborationRequest 协议与 AgentBoard 边界
-   - Permission Model 实现
-2. 架构文档落点建议：`docs/design/` 目录
+1. 维护 **SYSTEM_DESIGN.md** v0.2，落地：6 态、§10 扩展点协议、§V1+ 项目集成位
+2. 维护 **UI Design System** v0.4，关掉 0.5px 验证、P6/P7 升 MVP、加 §10.2 UI 钩子
+3. 修订三张原型（P3/P4/P5）兑现 v0.3 变更
 
 ---
 
@@ -400,3 +420,4 @@ CollaborationRequest / Permission
 | --- | --- | --- |
 | v0.1 | 2026-09-07 | 初稿，整理自外部 PRD 草案 |
 | v0.2 | 2026-09-07 | 吸收外部架构师 review：新增 Project 实体与 Channel/Project 边界分离；V1 收敛为 AI Engineering Team Workspace 并增加 Non Goals；新增 Permission Model / User Story / 核心实体清单；Mention 升级为 Mention Resolver；Decision Model 增加 Delegate（MVP 实现前三种）；Agent Capability 结构化 + Credential 分离；Memory 增加 Source 溯源；FR-6 职责收敛为 CollaborationRequest |
+| v0.3 | 2026-09-08 | 原型评审修订：执行层回归自洽（FR-6 + §10.1 协作扩展点替代硬分层）；Agent 状态 6 态对齐 SYSTEM_DESIGN / UI DS；Shared Memory 人审门禁从 V2 提前到 MVP（FR-7 + 页面清单 P6/P7 升 MVP）；新增「外部项目集成」扩展点（§10.2，AgentBoard / Jira 可切换）；Capability taxonomy 收敛为 canonical_key + display_name |

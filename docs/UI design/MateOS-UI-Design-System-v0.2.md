@@ -1,22 +1,22 @@
-# MateOS UI Design System v0.3
+# MateOS UI Design System v0.4
 
 | 文档信息 | 内容 |
 | --- | --- |
-| 版本 | v0.3（v0.2 评审修订版，文件名保留 v0.2） |
-| 日期 | 2026-09-07 |
-| 上游 | `docs/requirement/MateOS-总体需求文档.md` (PRD v0.2)、MateOS UI Design Guidelines v0.1 |
+| 版本 | v0.4（v0.3 原型评审修订版，文件名保留 v0.2） |
+| 日期 | 2026-09-08 |
+| 上游 | `docs/requirement/MateOS-总体需求文档.md` (PRD v0.3)、MateOS UI Design Guidelines v0.1、SYSTEM_DESIGN v0.2 |
 | 配套原型 | `P3-agent-card.html` / `P4-project-dashboard.html` / `P5-channel-prototype.html` |
 | 设计令牌 | `tokens.css`（**单一事实来源**，三张原型统一引用；本文件 §3 为其文档化子集） |
 | 状态 | 待评审 |
 
-> **v0.3 修订要点**（详见文末「更新记录」）：令牌收敛到 `tokens.css`；字号下限收敛为 10px（限标签/徽标类）；三页共用同一演示数据集；a11y 焦点环与 reduced-motion 已在原型落地；凭据展示与 PRD v0.2 的「Credential 与 Agent 分离」对齐。
+> **v0.4 修订要点**（详见文末「更新记录」）：执行层口径回归自洽（与 PRD/SYSTEM_DESIGN 同步，外部集成为可选扩展）；0.5px 边框在 Windows 1x DPI 实测关掉待验证（接受 1px 渲染）；Capability 词汇统一为 canonical key + display name；P6/P7 升 MVP；新增 §6.6 外部项目集成钩子（AgentBoard / Jira 可切换）。
 
 ---
 
 ## 1. 设计原则
 
 1. **成员优先，不是消息优先。** 人和 Agent 在同一份成员列表里，用同一套状态语义。UI 的第一任务是回答「谁在做什么、为什么做、做到哪了」。
-2. **Agent 的行为必须可解释。** 每一次 Accept / Reject / Need Context 都要展示判断依据（能力 / 上下文 / 权限），不接受黑箱结论。
+2. **Agent 的行为必须可解释。** 每一次 Accept / Reject / Need Context 都要展示判断依据（能力 / 上下文 / 权限），不接受黑箱结论。Mention Resolver 命中结果也必须可见（候选 + 分数），不黑箱。
 3. **上下文常驻，不折叠。** 成员、记忆、待办是产品的核心资产，不能像 Slack 那样收进抽屉。
 4. **人类始终握有闸门。** Agent 入频道、记忆写入都必须有显式的审批入口，并且默认折叠到「待办」而不是霸占消息流。
 5. **工程化密度。** 长时间使用的生产力工具，信息密度优先于留白；动效只用于表达「进行中」，不做装饰。
@@ -27,12 +27,13 @@
 
 | # | 冲突点 | v0.1 说法 | 本版裁决 | 理由 |
 | --- | --- | --- | --- | --- |
-| C1 | **Agent 状态集** | 指南给 7 态（含 Error），PRD §4.2 只有 3 态、§5 FR-3 有 5 态 | **统一为 6 态**：`OFFLINE` / `AVAILABLE` / `THINKING` / `WORKING` / `WAITING_CONTEXT` / `ERROR`。`FREE=AVAILABLE`，`BUSY=WORKING`，新增 `ERROR` | 三处枚举必须收敛成一个事实来源；`ERROR`（调用失败 / 触顶限额）是运维刚需 |
+| C1 | **Agent 状态集** | 指南给 7 态（含 Error），PRD §4.2 只有 3 态、§5 FR-3 有 5 态 | **统一为 6 态**：`OFFLINE` / `AVAILABLE` / `THINKING` / `WORKING` / `WAITING_CONTEXT` / `ERROR`。`FREE=AVAILABLE`，`BUSY=WORKING`，新增 `ERROR` | v0.4 三处枚举收敛到一个事实来源（PRD §4.4 / SYSTEM_DESIGN §6 / UI DS §4） |
 | C2 | **Channel 上下文放哪** | §2 布局图放消息下方，§5 又说放右侧 | **右侧常驻面板** | 消息流是纵向无限流，放在下方会永远在视口外，等于没有 |
 | C3 | **@ 提及里的 Channels** | §8 把 `#backend-team` 放进 @ 下拉 | **@ 只路由成员与能力组；引用频道/记忆改用 `#` 和 `/`**。能力组命名统一 `@backend` 不带 `-team` | `@` 与 `#` 语义混用会让用户分不清「叫谁来做」和「引用什么」；`-team` 后缀还会和频道名撞车 |
 | C4 | **Memory 分类** | §10 分为 Architecture / Decisions / Knowledge / Pending Approval | **类型沿用 PRD 四类**（Personal / Project / Decision / Knowledge）；**Pending Approval 是状态不是类型**，只出现在审批中心 | 否则同一条记忆会同时出现在「Knowledge」和「待审批」两层，重复且难维护 |
-| C5 | **Tasks 页面** | §12 建议独立 Task 页面 | **MVP 不做独立页**，只在频道内用「协作请求卡片」表达；V3 打通 AgentBoard 后再升格 | MVP 定调「只动嘴不动手」，独立 Tasks 页会是空壳 |
+| C5 | **Tasks 页面** | §12 建议独立 Task 页面 | **MVP 不做独立页**，只在频道内用「协作请求卡片」表达；V3 打通 AgentBoard 后再升格 | MVP 定调「只动嘴不动手」，独立 Tasks 页会是空壳；导航 Tasks 入口在 v0.4 起标注 V3 |
 | C6 | **风格配比** | 70% Linear + 30% Teams | **70% Linear + 30% GitHub** | Teams 的宽间距与「信息密度高」直接冲突；而决策卡片、Review、Approve 全是 GitHub 的模式 |
+| C7 | **外部集成** | 隐含依赖 AgentBoard | **默认关闭的扩展点**（执行后端可切 AgentBoard；项目管理可切 AgentBoard/Jira） | 执行层走 SYSTEM_DESIGN 自洽路线，AgentBoard 是可选协作扩展点；Jira/AgentBoard 项目管理同步为 V1+ 钩子 |
 
 ---
 
@@ -105,7 +106,7 @@
 
 - 基准 **4px**，梯度 4 / 8 / 12 / 16 / 24 / 32。组件内部用 8 / 12，区块之间用 16 / 24。
 - 圆角：控件 6px（`--radius-ctl`）、卡片 8px（`--radius-card`）、容器 12px（`--radius-box`）、外层 16px（`--radius-xl`）；**Agent 头像用圆形，人类头像用 6px 圆角方**（形状即身份）。
-- 边框统一 `0.5px`，暗色描边仅用于强调。**待验证项**：`0.5px` 在高 DPI 屏渲染为 1px 没问题，但在 **Windows 1x DPI** 下部分浏览器会取整或发虚，需真机验证后再定稿（主力用户环境为 win32）。
+- 边框统一 `0.5px`，暗色描边仅用于强调。**已验证**（v0.4 关掉待验证项）：本机 win32 DPR=1 实测 `0.5px` 渲染为 `1px`，边框不消失、不发虚。**接受现状**——三页原型统一沿用 0.5px 声明（DPR ≥1.5 屏渲染为真实 0.5px），开发期如发现视觉过重再降为 1px 变量。
 - 阴影只在浮层使用（弹层 `--shadow-pop`、深浮层 `--shadow-layer`），卡片一律靠边框分层。
 
 ---
@@ -119,7 +120,7 @@
 | `THINKING` | 已接收，正在做能力/上下文/权限判断 | 产出决策 | 紫点 + 呼吸动效，消息流显示「正在判断」占位卡 |
 | `WORKING` | 决策为 Accept，正在产出 | 产出完成 | 蓝点 + 流式输出光标 |
 | `WAITING_CONTEXT` | 决策为 Need Context | 人类补齐上下文并再次 @ | 琥珀点 + 决策卡片列出缺失项 + 顶栏计数 +1 |
-| `ERROR` | Provider 调用失败 / 密钥失效 | owner 处理 | 红点 + 错误信息 + 「查看日志」 |
+| `ERROR` | Provider 调用失败 / 密钥失效 / 限额触顶 | owner 处理 | 红点 + 错误信息 + 「查看日志」 |
 
 **Busy 时收到 @**：不排队、不静默丢弃——自动回复一条 `Need Context` 变体：「正在处理 X，预计 N 秒，可稍后 @ 我」。避免用户以为 Agent 挂了。
 
@@ -135,7 +136,7 @@
 | **Agent 决策卡片** | 圆形头像 + 决策徽标 + **分析三格** + 理由 + 缺失清单 + 操作 | 左侧 2px 色条按结果着色（Accept 绿 / Reject 红 / Need Context 琥珀） |
 | **Agent 输出** | 圆形头像 + Markdown + 代码块 + 元信息行 | 元信息行展示 model / tokens / 延迟，可展开「查看使用的上下文」 |
 | **系统事件** | 单行居中灰色小字 | 11px，不带头像；可内联操作按钮（如「批准邀请」） |
-| **记忆申请卡** | 主色浅底 + 标题 + Markdown 正文 + 标签 + 三按钮 | 三个动作：**批准 / 驳回 / 编辑后批准** |
+| **记忆申请卡** | 主色浅底 + 标题 + **Source 溯源行** + Markdown 正文 + 标签 + 三按钮 | 三个动作：**批准 / 驳回 / 编辑后批准**；Source 行展示 `#频道名 · message_seq` 与发布时间（PRD FR-7 硬性要求） |
 
 **分析三格（决策依据）规格**：等宽三列，分别为「能力匹配 ✓/×」「上下文完整度 N%（带进度条，≥80% 转绿）」「权限检查 ✓/×」。
 
@@ -143,19 +144,22 @@
 
 ### 5.2 成员行
 
-`状态点 7px` + 名称 13px + 右侧状态文字 11px；Agent 额外一行能力标签（`coding` / `review` / model 名）。
+`状态点 7px` + 名称 13px + 右侧状态文字 11px；Agent 额外一行能力标签（canonical key 转 display name，如 `coding` / `review` / model 名）。
+
+> v0.4 起 capability 显示名统一：DB 存英文 canonical key（`coding` / `debugging` / `review` / `testing` / `architecture`），前端 i18n 渲染。PRD / SYSTEM_DESIGN / UI DS 三处词汇必须收敛为同一份 taxonomy。
 
 ### 5.3 Agent Card（P3）
 
-必需区块：**状态与身份**（名 / 状态 / Role / Model / Provider）、**当前工作**（所在频道 / 协作请求 / 决策 / 阻塞于谁）、**能力清单**（含未启用项）、**可见范围**（项目 → 频道两级，标注「加入后可见」或「已授权读历史」）、**用量与成本**（本月金额 / 预算进度条 / 决策分布）、**运行配置**、**最近活动**（时间线，可审计）。
+必需区块：**状态与身份**（名 / 状态 / Role / Model / Provider）、**当前工作**（所在频道 / 协作请求 / 决策 / 阻塞于谁）、**能力清单**（含未启用项）、**可见范围**（项目 → 频道两级，标注「加入后可见」或「已授权读历史」）、**用量与成本**（本月金额 / 预算进度条 / 决策分布）、**运行配置**（Provider / Model / Runtime / **凭据：引用组织凭据·独立管理，与 Agent 解耦** / 日限额）、**最近活动**（时间线，可审计）。
 
 > v0.1 的 Agent Card 缺「可见范围」和「最近活动」——作为一等成员，能看什么、做过什么是刚需，已补上。
 
 ### 5.4 Mention 输入器
 
-分组：`People` / `Agents`（带状态点与能力）/ `能力组 · 全体`。
-- `@all` 必须带成本预警条：「将触发 N 个 Agent 自行判断是否响应，预计消耗约 X tokens」。
+分组：`People` / `Agents`（带状态点与能力，状态点排除 `OFFLINE` / `ERROR` / `WORKING`）/ `能力组 · 全体`。
+- `@all` 必须带成本预警条：「将触发 N 个 Agent 自行判断是否响应，预计消耗约 X tokens」（N = AVAILABLE+THINKING 态的 Agent 数）。
 - 底部固定提示：`输入 # 引用频道，输入 / 引用项目记忆`。
+- **v0.4 新增**：mention 命中结果必须显示在消息流中——胶囊 hover/点击展开「命中候选：Backend Agent 0.95 · QA Agent 0.62」气泡（Resolver 不黑箱）。
 
 ### 5.5 其他状态
 
@@ -163,22 +167,30 @@
 - **加载**：Agent 响应是异步的，用「正在判断」占位卡 + 呼吸点，不用全屏 spinner。
 - **错误**：Agent 调用失败在消息流内呈现为错误卡片，附重试入口，不弹 toast。
 
+### 5.6 外部项目集成钩子（v0.4 新增）
+
+P4 Project Dashboard 底部新增「外部协作」卡，承载 §10 外部集成扩展点：
+
+- **执行后端**：默认「MateOS Runtime」；可选「AgentBoard」（V1+ 启用，PRD §10.1）
+- **项目跟踪**：默认「无（仅 MateOS）」；可选「AgentBoard Issue」/「Jira Issue」（V1+ 启用，PRD §10.2）
+- 当前原型仅展示占位与状态徽标（badge 灰底「V1+」），**未实现真实同步逻辑**——MVP 不做外部写入
+
 ---
 
-## 6. 页面清单（MVP 8 项）
+## 6. 页面清单（MVP 8 项，v0.4 起 P6/P7 升 MVP）
 
 | 优先级 | 页面 | 原型 | 关键内容 |
 | --- | --- | --- | --- |
 | ★★★ | **P5 Channel 主界面** | `P5-channel-prototype.html` | 四栏、5 种消息形态、决策依据、审批入口 |
-| ★★ | **P4 Project Dashboard** | `P4-project-dashboard.html` | 项目状态、成员（人+Agent）、频道、协作请求、记忆统计 |
+| ★★ | **P4 Project Dashboard** | `P4-project-dashboard.html` | 项目状态、成员（人+Agent）、频道、协作请求、记忆统计、外部协作钩子（V1+） |
 | ★★ | **P3 Agent Card** | `P3-agent-card.html` | 一等成员详情页，含可见范围与审计 |
-| ★★ | P6 审批中心 | 待做 | 入频道审批 + 记忆审批统一收口 |
+| ★★ | **P6 审批中心** | 待做（原 v0.2 标 V2 依赖，v0.4 升 MVP） | 入频道审批 + 记忆审批统一收口 |
 | ★ | P2 我的 Agents（列表 + 创建向导） | 待做 | 状态筛选、成本列 |
-| ★ | P7 Memory 文档 | 待做 | Markdown + 类型标签 + 版本 + 批准人 |
+| ★ | **P7 Memory 文档** | 待做（原 v0.2 标 V2 依赖，v0.4 升 MVP） | Markdown + 类型标签 + 版本 + 批准人 + Source 溯源 |
 | ★ | P1 登录 / 注册 | 待做 | — |
 | ★ | P8 团队与组织设置 | 待做 | 成员、Agent 准入策略 |
 
-**MVP 明确不做**：完整聊天系统（表情/已读/私聊）、企业权限后台、Memory 知识图谱、Agent 自动协作动画、Task 执行页（留给 AgentBoard）。
+**MVP 明确不做**：完整聊天系统（表情/已读/私聊）、企业权限后台、Memory 知识图谱、Agent 自动协作动画、Task 执行页（留给 V3+ 或外部执行后端）。
 
 ---
 
@@ -189,7 +201,7 @@
 - **焦点**：所有可交互元素有 2px 主色 focus ring，offset 2px。（v0.3 起已通过 `tokens.css` 的 `:focus-visible` 兜底规则在原型落地）
 - **不靠颜色单独传达状态**：状态点必须配文字标签（右栏、Agent Card 均已带）。
 - **动效**：呼吸动画与流式光标尊重 `prefers-reduced-motion`。（v0.3 起已通过 `tokens.css` 的 reduce 查询在原型落地）
-- **触控目标**：最小 24×24px（桌面端），关键按钮 28px 高。
+- **触控目标**：最小 24×24px（桌面端），关键按钮 28px 高。**v0.4 起 `.btn.sm` 由 22px 升 24px**（原型 P5 已修正）。
 
 ---
 
@@ -211,25 +223,40 @@ UI 侧不依赖 API 即可推进，基于以下核心对象设计：
 ```
 Organization · Team · Project · Channel · Member(Human|Agent)
 Message · Decision · CollaborationRequest · Memory · Approval
+ExternalIntegration（v0.4 新增：AgentBoard / Jira 可切换）
 ```
 
-**待系统设计确认、会影响 UI 的三点**：
-1. `Message.type` 枚举是否按本文档的 5 形态定义（人类 / 决策 / 输出 / 系统 / 记忆申请）。
-2. `Decision` 是否携带 `analysis{capability, context_score, permission}`——这直接决定决策卡片的三格能否落地。
-3. `Agent.status` 是否采纳 6 态，以及 `ERROR` 的触发与恢复条件。
+**v0.4 三处枚举已对齐**（C1 收敛）：
+1. `Message.type` 5 形态（人类 / 决策 / 输出 / 系统 / 记忆申请）—— SYSTEM_DESIGN §3 / §4 已回写
+2. `Decision.analysis` 三件套（capability / context_score / permission）—— SYSTEM_DESIGN §5.1 / §6.2 已约束
+3. `Agent.status` 6 态 + `ERROR` 触发恢复 —— SYSTEM_DESIGN §6.1 已落实
 
 ---
 
 ## 10. 下一步
 
-1. 评审并确认 §2 的 6 条冲突裁决。
-2. 补 P6 审批中心、P2 我的 Agents、P7 Memory 文档三个原型的线框。
+1. 评审并确认 §2 的 7 条冲突裁决（C7 为 v0.4 新增）。
+2. 补 P6 审批中心（V1 含）、P7 Memory 文档（V1 含）、P2 我的 Agents 三个原型的线框。
 3. 出组件切图与状态清单，交付前端。
 4. 如采用设计工具（Figma），把 `tokens.css` 同步为 Variables，避免二次漂移。
 
 ---
 
 ## 11. 更新记录
+
+### v0.4（2026-09-08，原型评审修订）
+
+PRD v0.3 + SYSTEM_DESIGN v0.2 配套修订，原则：**跨文档不互相矛盾，规范与实现一一收敛**。
+
+1. **执行层口径回归自洽**：C7 裁决「默认关闭的扩展点」；P4「执行」卡改为「外部协作」占位（含执行后端 + 项目跟踪两个开关，V1+ 启用）；SYSTEM_DESIGN §10 同步新增「外部集成扩展点」章节。
+2. **0.5px 边框待验证关闭**：本机 win32 DPR=1 实测渲染为 1px，§3.5 写明「接受现状」并给出未来降级为 1px 变量的逃生口。
+3. **Capability 词汇统一**：DB 存英文 canonical key（`coding` / `debugging` / `review` / `testing` / `architecture`），前端 i18n 渲染；§5.2 写明 taxonomy 与三处收敛要求。
+4. **P6/P7 升 MVP**：原 v0.2 标 V2 依赖的 P6 审批中心 + P7 Memory 文档升为 MVP 范围；§6 页面清单同步调整（★ → ★★ / ★★）。
+5. **Mention Resolver 不黑箱**：§5.4 新增「mention 命中结果气泡」规范，消息流胶囊必须展示「Backend Agent 0.95 · QA Agent 0.62」类命中分数，与 SYSTEM_DESIGN §4.1 / §5.1 `mentions.scores` 字段对齐。
+6. **记忆卡 Source 溯源行**：§5.1 「记忆申请卡」增「Source 溯源行（#频道名 · message_seq + 发布时间）」，与 PRD FR-7 硬性要求 + SYSTEM_DESIGN §5.1 `source_channel_id`/`source_message_seq` 强约束对齐。
+7. **触控目标修正**：§7 `.btn.sm` 由 22px 升 24px，原型 P5 同步修正（决策卡/记忆卡按钮）。
+8. **导航 Tasks 入口**：C5 裁决 V1 不做独立 Task 页，§6 页面清单标 Tasks 为 V3，原型 P3/P4/P5 导航 Tasks 入口加 V3 灰徽标。
+9. **跨文档枚举对齐**：§4 状态机 6 态 + ERROR 触发恢复与 SYSTEM_DESIGN §6.1 / PRD §4.4 一一对应；§5.1 决策三格对应 SYSTEM_DESIGN §5.1 `analysis` 三件套。
 
 ### v0.3（2026-09-07，评审修订）
 
