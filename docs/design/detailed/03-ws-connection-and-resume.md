@@ -1,439 +1,449 @@
 # Detailed Design · 03 · WebSocket Connection and Resume
 
-> Agent ↔ Runtime 的 WebSocket 连接生命周期 + v0.4.2 resume 协议。
+> **v0.4.3 修正**：
+> 1. **P0-1 配合**：新增 `collaboration.request` 协议（E4 拥有，transport 经 Runtime Gateway）
+> 2. **P1-1**：Runtime restart 区分 resume vs re-dispatch（dispatch_acked_at 字段）
+> 3. **P1-2**：`MAX(seq)` 改 contiguous cursor（`last_persisted_seq`）
 > 前置：[00-overview.md](./00-overview.md) / [01-single-agent-task-lifecycle.md](./01-single-agent-task-lifecycle.md)
 
 ## 0. 范围
 
-- **WS 连接生命周期**：hello / heartbeat / close
-- **WSS 协议**：dispatch / status / collaboration.* / execution.*
-- **断线 / 重连 / 恢复**：resume_request / resume_ack（v0.4.2 反向协议）
-- **多 Agent 复用单连接**（V2+）
+- WS 连接生命周期
+- 完整 message type 清单（**v0.4.3 新增 `collaboration.request`**）
+- 断线 / 重连 / 恢复：resume_request / resume_ack
+- 多 Agent 复用单连接（V2+）
+- v0.4.3 新增：`dispatch_acked_at` 跟踪 Runtime restart 行为
+- v0.4.3 新增：contiguous cursor（`last_persisted_seq`）
 
 ## 1. 连接生命周期
 
-```
-┌──────────────────────────────────────────────────────────┐
-│                                                          │
-│   Agent 进程                                              │
-│   ┌──────────────┐                                        │
-│   │ SDK 启动      │                                        │
-│   └──────┬───────┘                                        │
-│          │ TCP/TLS                                        │
-│          ▼                                                │
-│   ┌──────────────┐  WS  ┌────────────────────────────┐   │
-│   │ wss://api/... │ ◄──► │ Runtime Gateway            │   │
-│   │ (agent 端)   │      │ (server 端)                 │   │
-│   └──────────────┘      │                              │   │
-│          │               │ 1. hello 校验                │   │
-│          │               │ 2. 注册 runtime_session_id   │   │
-│          │               │ 3. 鉴权 agent_token          │   │
-│          │               └────────────────────────────┘   │
-│          ▼                                                  │
-│   ┌──────────────┐                                        │
-│   │ ready 状态    │  ← push 任何 envelope                  │
-│   └──────┬───────┘                                        │
-│          │                                                │
-│          ▼                                                │
-│   ┌──────────────┐                                        │
-│   │ 心跳 30s     │  ← agent 推 heartbeat                  │
-│   └──────┬───────┘     server 推 ping（如果需要）         │
-│          │                                                │
-│          ▼                                                │
-│   ┌──────────────┐                                        │
-│   │ close 帧     │  ← 正常退出 OR 进程崩溃                 │
-│   └──────────────┘                                        │
-│                                                          │
-└──────────────────────────────────────────────────────────┘
-```
-
-## 2. Hello 协议
-
-### 2.1 Agent → Runtime
-
-```jsonc
-{ "type": "hello", "id": "uuid-1", "ts": ..., "payload": {
-    "agent_id": "...",
-    "agent_token": "jwt-v1...",          // 短期（V1: 30d）
-    "runtime_version": "1.0.0",
-    "runtime_session_id": "sess-...",    // V1: 每次 hello 重新生成 UUID
-    "capabilities": ["coding", "debugging", "review"]
-}}
-```
-
-### 2.2 Runtime → Agent
-
-```jsonc
-{ "type": "hello_ack", "id": "uuid-2", "ts": ..., "payload": {
-    "session_id": "sess-...",            // Runtime 端 session id
-    "server_version": "1.0.0",
-    "config": {
-        "heartbeat_interval_s": 30,
-        "max_idle_s": 90,
-        "max_payload_kb": 1024
-    }
-}}
-```
-
-### 2.3 校验失败
-
-```jsonc
-{ "type": "hello_nack", "id": "uuid-2", "ts": ..., "payload": {
-    "code": "INVALID_TOKEN|UNKNOWN_AGENT|TOKEN_EXPIRED",
-    "message": "..."
-}}
-```
-
-→ Runtime 主动 close（code=4001）
-
-## 3. Heartbeat
-
-### 3.1 协议
-
-```jsonc
-{ "type": "heartbeat", "id": "uuid-hb-1", "ts": ..., "payload": {} }
-```
-
-双向（agent 推 / server 推），任一即可。V1 简化为 agent 单向推。
-
-### 3.2 间隔
-
-- `heartbeat_interval_s = 30`（来自 hello_ack.config）
-- `max_idle_s = 90`（server 容忍 3 倍间隔才断）
-- 实际：server 收心跳 → 更新 `agent_tokens.last_seen_at`
-
-### 3.3 超时
+（同 v0.4.2，详见 01 §1.1）
 
 ```
-Background worker 每 30s 扫：
-  for each agent where active executions exist OR lifecycle='ACTIVE':
-    if last_seen_at < now - 90s:
-      - DB: agents.activity = 'OFFLINE'
-      - Redis: presence {status: OFFLINE, last_heartbeat: now-90s}
-      - WS 推 agent.activity_changed
-      - 触发"长时断线"路径（详见 02-interrupt-and-cancel.md §2.5）
+Agent 进程
+  → TCP/TLS 连接到 wss://api/runtime
+  → hello
+  → hello_ack
+  → ready 状态（推任何 envelope）
+  → heartbeat 30s
+  → close 帧
 ```
 
-## 4. Envelope 协议（v0.4.2）
-
-```jsonc
-// 所有 envelope 必填 id（去重键）
-{ "v": 1, "type": "<type>", "id": "<uuid>", "ts": <epoch_ms>, "payload": { ... } }
-```
-
-### 4.1 类型总览
-
-| 方向 | type | 拥有方 | 说明 |
-| --- | --- | --- | --- |
-| 双向 | `hello` / `hello_ack` / `hello_nack` / `heartbeat` | 共同 | 连接管理 |
-| Runtime → Agent | `dispatch` | E7 | 任务下发 |
-| Runtime → Agent | `cancel` | E7 | 取消执行 |
-| Agent → Runtime | `status` | E7（fact 写 agents.activity） | 6 态上报 |
-| Agent → Runtime | `collaboration.decision` | E4 | 决策（v0.4.1 与 execution 拆开） |
-| Agent → Runtime | `event` | E7 | 流式事件 |
-| Agent → Runtime | `result` | E7 | 终态（不携带 decision） |
-| Agent → Runtime | `error` | E7 | 错误 |
-| Agent → Runtime | `resume_request` | E7（v0.4.2 反向） | 询问持久化位点 |
-| Runtime → Agent | `resume_ack` | E7（v0.4.2 反向） | 回答持久化位点 + dispatch snapshot |
-
-### 4.2 完整 message type
+## 2. 完整 message type（v0.4.3）
 
 ```jsonc
 // ─── 连接管理 ───
-{ "type": "hello",        "payload": { "agent_id", "agent_token", "runtime_session_id", "runtime_version", "capabilities" }}
-{ "type": "hello_ack",    "payload": { "session_id", "server_version", "config": { heartbeat_interval_s, max_idle_s, max_payload_kb } }}
-{ "type": "hello_nack",   "payload": { "code", "message" }}
-{ "type": "heartbeat",    "payload": {} }
+{ "type": "hello",        "id": "uuid", "ts": 1736380800000, "payload": { ... }}
+{ "type": "hello_ack",    "id": "uuid", "ts": ..., "payload": { ... }}
+{ "type": "hello_nack",   "id": "uuid", "ts": ..., "payload": { code, message }}
+{ "type": "heartbeat",    "id": "uuid", "ts": ..., "payload": {} }
 
-// ─── E7 派发 ───
-{ "type": "dispatch",     "payload": {
+// ─── E4 拥有（v0.4.3 新增 collaboration.request）───
+{ "type": "collaboration.request",     "payload": {
+    "collaboration_request_id",
+    "from_actor": { type, id },
+    "context_refs": { channel_id, message_seq, memory_refs, work_item_ref? },
+    "required_capabilities": ["coding"],
+    "deadline_s"
+}}
+
+{ "type": "collaboration.decision",    "payload": {
+    "collaboration_request_id",
+    "decision": "ACCEPT|REJECT|NEED_CONTEXT|DELEGATE",
+    "reason"?, "needs"?, "analysis": { capability, context_score, permission }
+}}
+
+{ "type": "collaboration.cancelled",   "payload": {
+    "collaboration_request_id", "reason"
+}}
+
+{ "type": "collaboration.resolved",     "payload": {
+    "collaboration_request_id", "status", "target_execution_id"?, "scores"?, "resolved_at"
+}}
+
+// ─── E7 拥有（Execution 域）───
+{ "type": "execution.dispatch",   "payload": {
     "execution_id", "collaboration_request_id"?, "work_item_ref"?,
-    "input": { "prompt", "params" },
-    "context": { "memory_refs", "recent_messages", "permissions" },
+    "input": { prompt, params },
+    "context": { memory_refs, recent_messages, permissions },
     "deadline_s", "idempotency_key"
 }}
 
-{ "type": "cancel",       "payload": {
-    "execution_id", "attempt_no",
-    "reason": "USER_CANCEL|LIFECYCLE_PAUSED|LIFECYCLE_DISABLED|DEADLINE_EXCEEDED|TIMEOUT_NO_RESUME"
-}}
-
-// ─── Agent 上报 ───
-{ "type": "status",       "payload": {
-    "status": "OFFLINE|AVAILABLE|THINKING|WORKING|WAITING_CONTEXT|ERROR",
-    "reason"?, "since"
-}}
-
-{ "type": "collaboration.decision", "payload": {
-    "collaboration_request_id",
-    "decision": "ACCEPT|REJECT|NEED_CONTEXT|DELEGATE",
-    "reason"?, "needs"?, "analysis": { "capability", "context_score", "permission" }
-}}
-
-{ "type": "event",        "payload": {
+{ "type": "execution.event",        "payload": {
     "execution_id", "attempt_no",
     "event_type": "STDOUT|PROGRESS|TOOL_CALL|LLM_TICK|ARTIFACT|ERROR",
-    "provider_event_id", "seq",
-    "payload": { "content", "meta" }
+    "provider_event_id",
+    "seq",                           // contiguous cursor
+    "payload": { content, meta }
 }}
 
-{ "type": "result",       "payload": {
+{ "type": "execution.result",       "payload": {
     "execution_id", "attempt_no",
     "status": "SUCCEEDED|FAILED|CANCELLED",
-    "output": { "markdown", "code" },
-    "usage": { "tokens_in", "tokens_out", "duration_ms" },
-    "artifacts": [ { "kind", "name", "s3_key" } ]
+    "output": { markdown, code },
+    "usage": { tokens_in, tokens_out, duration_ms },
+    "artifacts": [{ kind, name, s3_key }]
 }}
 
-{ "type": "error",        "payload": {
+{ "type": "execution.error",        "payload": {
     "execution_id", "attempt_no",
     "code": "PROVIDER_5XX|PROVIDER_401|RATE_LIMIT|SANDBOX_INIT_FAILED|DEADLINE_EXCEEDED",
     "message", "retry_after_s"?
 }}
 
-// ─── v0.4.2 反向 resume 协议 ───
-{ "type": "resume_request", "payload": {
-    "execution_id", "attempt_no"
-}}
-
-{ "type": "resume_ack",     "payload": {
+{ "type": "execution.cancel",       "payload": {  // Runtime → Agent
     "execution_id", "attempt_no",
-    "last_persisted_seq",     // 0 表示从 dispatch snapshot 重发
-    "snapshot": {              // 重发 dispatch 内容（input + context）
-        "execution_id", "input", "context", "deadline_s"
-    }
+    "reason": "USER_CANCEL|LIFECYCLE_PAUSED|LIFECYCLE_DISABLED|DEADLINE_EXCEEDED|TIMEOUT_NO_RESUME"
+}}
+
+// ─── v0.4.3 反向 resume（contiguous cursor）───
+{ "type": "execution.resume_request", "payload": { execution_id, attempt_no }}
+
+{ "type": "execution.resume_ack",     "payload": {
+    "execution_id", "attempt_no",
+    "last_persisted_seq",           // last contiguous seq（不是 MAX）
+    "snapshot": { execution_id, input, context, deadline_s }
+}}
+
+// ─── Agent 上报 lifecycle/activity ───
+{ "type": "status",       "payload": {
+    "status": "OFFLINE|AVAILABLE|THINKING|WORKING|WAITING_CONTEXT|ERROR",
+    "reason"?, "since"
 }}
 ```
 
-## 5. Resume 协议（v0.4.2 反向）
+## 3. Resume 协议（v0.4.3 反向 + contiguous cursor）
 
-### 5.1 为什么反向
+### 3.1 为什么反向
 
-**v0.4.1 旧设计**（错的）：
-
-```
-Agent → resume { last_event_seq: 42 }   // Agent 告诉 Runtime 它收到 42
-Runtime → 补发 seq 43+                  // Runtime 把 Agent 自己的 event 重发给 Agent
-```
-
-**逻辑错误**：
-- event 是 Agent **产生**的（STDOUT、TOOL_CALL、LLM_TICK 都是 Agent 端的输出）
-- Runtime 没产 event，Runtime 补发是错的
-- Agent 收到自己刚发的事件会造成循环/重复
-
-**v0.4.2 新设计**（反向）：
+**v0.4.2 旧设计**（错的）：
 
 ```
-Agent → resume_request { execution_id, attempt_no }   // Agent 问：我应该从哪个 seq 开始？
-Runtime → resume_ack { last_persisted_seq: 42, snapshot }  // Runtime 答：你从 seq 43 开始
-Agent → 从 seq 43 续发 event                              // Agent 主动重发自己产的内容
+Agent → resume { last_event_seq: 42 }
+Runtime → 补发 seq 43+  // event 是 Agent 产，Runtime 补发是错的
+```
+
+**v0.4.3 新设计**：
+
+```
+Agent → resume_request { execution_id, attempt_no }
+Runtime → resume_ack { last_persisted_seq, snapshot }
+Agent → 从 seq+1 续发
+```
+
+### 3.2 contiguous cursor（v0.4.3 修复 P1-2）
+
+**v0.4.2 bug**：
+
+```
+SQL: last_persisted_seq = MAX(seq) WHERE attempt_id=?
+  - seq 40 persisted
+  - seq 41 lost (network blip)
+  - seq 42 persisted
+  - MAX = 42
+  - Agent 从 43 开始
+  - seq 41 永久丢失
+```
+
+**v0.4.3 修复**：
+
+```sql
+-- execution_attempts 加 last_persisted_seq 字段
+ALTER TABLE execution_attempts
+  ADD COLUMN last_persisted_seq BIGINT NOT NULL DEFAULT 0;
+```
+
+Event insert 严格 cursor：
+
+```python
+async def insert_event(attempt_id, event):
+    async with db.transaction() as tx:
+        # 1. 读 expected
+        row = await tx.execute("""
+            SELECT last_persisted_seq FROM execution_attempts
+            WHERE id = $1 FOR UPDATE
+        """, attempt_id)
+        expected = row.last_persisted_seq + 1
+
+        # 2. 三态判断
+        if event.seq < expected:
+            # 重复 / stale
+            log.info(f'duplicate event seq={event.seq}, expected={expected}')
+            return  # 忽略，不抛错
+
+        if event.seq > expected:
+            # gap：拒收，请求 resend
+            log.warning(f'event seq={event.seq} > expected={expected}, gap detected')
+            # 推 WS resume_request 让 Agent 重新发从 expected 开始
+            await runtime.push_to_agent(agent_id, {
+                'type': 'execution.resume_request',
+                'payload': { 'execution_id': ..., 'attempt_no': ..., 'expected_seq': expected }
+            })
+            raise GapDetected()
+
+        # 3. seq == expected → 写入
+        await tx.execute("""
+            INSERT INTO execution_events (attempt_id, event_type, provider_event_id, seq, payload)
+            VALUES ($1, $2, $3, $4, $5)
+        """, attempt_id, event.event_type, event.provider_event_id, event.seq, event.payload)
+
+        # 4. 更新 cursor
+        await tx.execute("""
+            UPDATE execution_attempts SET last_persisted_seq = $1 WHERE id = $2
+        """, event.seq, attempt_id)
 ```
 
 **关键**：
-- Runtime 持久化 event 后只告知位点
-- Agent 自己续发（不是 Runtime 补发）
-- `last_persisted_seq` 是 Runtime 端 max(seq) WHERE attempt_id=?
-- `last_persisted_seq=0` 表示 Runtime 还没收到任何 event（极端情况：Agent 发了 hello 后就断）
+- `last_persisted_seq` 严格 contiguous（v0.4.2 的 `MAX(seq)` 会跳过 gap）
+- seq < expected → 重复，忽略
+- seq > expected → gap，拒收 + 主动 resume_request
+- seq == expected → 写入
 
-### 5.2 完整时序
+### 3.3 resume_ack 用 last_persisted_seq
+
+```python
+async def handle_resume_request(agent_id, execution_id, attempt_no):
+    # 1. 校验 attempt
+    attempt = await get_attempt(execution_id, attempt_no)
+    if not attempt:
+        return  # 已不存在
+
+    # 2. 读 contiguous cursor
+    last_seq = attempt.last_persisted_seq
+
+    # 3. 返回 resume_ack + dispatch snapshot
+    execution = await get_execution(execution_id)
+    await runtime.push_to_agent(agent_id, {
+        'type': 'execution.resume_ack',
+        'payload': {
+            'execution_id': execution_id,
+            'attempt_no': attempt_no,
+            'last_persisted_seq': last_seq,
+            'snapshot': {
+                'execution_id': execution_id,
+                'input': execution.input,
+                'context': execution.context_refs,
+                'deadline_s': ...
+            }
+        }
+    })
+```
+
+### 3.4 完整时序
 
 ```
-T0:  Agent 正常执行
-T1:  WS 断开（Agent 端）
-T2:  Runtime 检测 close frame:
-     - 标记 in_flight=true
-     - 不取消（等 resume）
-T3:  Agent 重连，hello（新 runtime_session_id）
-T4:  Runtime:
-     a) 查 in-flight executions for this agent
-     b) 对每个：UPDATE execution_attempts SET runtime_session_id=new_session_id
-T5:  Agent 主动推 resume_request { execution_id, attempt_no: 1 }
-T6:  Runtime:
-     a) 查 attempt.last_persisted_seq = MAX(execution_events.seq) WHERE attempt_id=?
-     b) 取 dispatch snapshot（input + context + permissions）
-     c) 返回 resume_ack { last_persisted_seq, snapshot }
-T7:  Agent 从 seq=last_persisted_seq+1 开始续发 event
-T8:  Runtime 收到 event：
-     a) UNIQUE(attempt_id, provider_event_id) 检查
-     b) UNIQUE(attempt_id, seq) 检查
-     c) 都通过 → 落 execution_events
+T0  Agent 正常执行（seq=1, 2, 3, 4, 5）
+T1  WS 断开
+T2  Runtime: 不取消 attempt，等 resume
+T3  Agent 重连，hello（新 runtime_session_id）
+T4  Runtime: 更新 attempt.runtime_session_id
+T5  Agent 推 resume_request { execution_id, attempt_no }
+T6  Runtime: 读 attempt.last_persisted_seq = 5
+T7  Runtime: 返回 resume_ack { last_persisted_seq: 5, snapshot }
+T8  Agent: 从 seq=6 开始续发 event
+T9  Runtime: seq=6 == 5+1 → INSERT + UPDATE last_persisted_seq=6
+T10 Agent: seq=7 → INSERT + UPDATE
+T11 Agent: 推 result
+T12 Runtime: CAS terminal
 ```
 
-### 5.3 边界情况
+### 3.5 边界情况
 
 | 场景 | 行为 |
 | --- | --- |
-| `last_persisted_seq=0` | Agent 重新完整执行（不发 event，直接推 result 或重新跑） |
-| Agent 重发 event with same provider_event_id | UNIQUE 冲突 → ignore（不抛错） |
-| Agent 重发 event with new provider_event_id + same seq | UNIQUE(attempt_id, seq) 冲突 → 拒绝（agent bug） |
-| Agent 重发 result with same envelope.id | terminal_envelope_id 已存在 → ignore |
-| Agent 重发 result with new envelope.id + status='SUCCEEDED' | CAS 失败（已是 SUCCEEDED）→ ignore |
-| 长时断线（> 5 分钟）| Runtime 主动 cancel（详见 02 §2.5） |
+| `last_persisted_seq=0` | Agent 重新完整执行（不发 event，直接推 result 或重跑） |
+| Agent 重发 event with same provider_event_id | UNIQUE 冲突 → 忽略 |
+| Agent 重发 event with new provider_event_id + seq < expected | cursor 拒收 |
+| Agent 重发 event with seq > expected | gap detected → 推 resume_request 让 Agent 从 expected 重发 |
+| Agent 重发 result with same envelope.id | terminal_envelope_id 已存在 → 忽略 |
+| Agent 重发 result with new envelope.id + status='SUCCEEDED' | CAS 失败（已是 SUCCEEDED）→ 忽略 |
+| 长时断线（> 5 分钟）| Runtime 主动 cancel（详见 02） |
 
-## 6. Idempotency 三层保护
+## 4. Runtime Restart 行为（v0.4.3 修复 P1-1）
 
-### 6.1 协议级去重（envelope.id）
+### 4.1 v0.4.2 矛盾
+
+**v0.4.2 同时说**：
+- 短断线：Runtime 不发新 dispatch，等 resume
+- Runtime restart：加载 in-flight，重新 dispatch
+
+**矛盾**：
+- 如果 Execution 已 RUNNING，Agent 正在写文件
+- Runtime 重启，**重发 dispatch** → Agent 重新跑任务 → 重复写文件
+
+### 4.2 v0.4.3 修复：dispatch_acked_at 跟踪
+
+```sql
+ALTER TABLE execution_attempts
+  ADD COLUMN dispatch_sent_at TIMESTAMPTZ,
+  ADD COLUMN dispatch_acked_at  TIMESTAMPTZ;  -- Agent 收到 dispatch 后推 status=WORKING 时回填
+```
+
+```python
+async def on_runtime_startup():
+    """Runtime 启动时"""
+    inflight = await db.query("""
+        SELECT * FROM agent_executions
+        WHERE status IN ('PENDING', 'RUNNING')
+    """)
+
+    for execution in inflight:
+        attempt = await get_active_attempt(execution)
+        if not attempt:
+            continue
+
+        # v0.4.3 关键：区分 PENDING 还是 RUNNING
+        if attempt.dispatch_acked_at is None:
+            # Agent 还没 ACK（可能没收到 dispatch）
+            # 安全：重新 dispatch
+            await runtime.dispatch(attempt)
+            log.info(f'Re-dispatched PENDING execution {execution.id}')
+        else:
+            # Agent 已 ACK，正在执行
+            # **绝不** re-dispatch
+            # 等 Agent reconnect + resume_request
+            log.info(f'Execution {execution.id} is RUNNING, waiting for resume')
+
+    # 短断线：等 resume
+    # 长断线（> 5min）：cancel + 通知
+```
+
+**关键规则（v0.4.3 冻结）**：
+
+| Attempt 状态 | Runtime restart 行为 |
+| --- | --- |
+| PENDING（dispatch_acked_at=null） | 重发 dispatch |
+| RUNNING（dispatch_acked_at 已 set） | **不**重发，等 resume_request |
+| 无 attempt（异常） | cancel + 通知 owner |
+
+### 4.3 完整启动流程
+
+```python
+async def on_runtime_startup():
+    # 1. 加载配置
+    # 2. PG 迁移检查
+    # 3. 加载 in-flight executions
+    inflight = await load_inflight_executions()
+
+    # 4. 分类处理
+    for execution in inflight:
+        attempt = execution.active_attempt
+        if not attempt:
+            await cancel_execution(execution, 'NO_ACTIVE_ATTEMPT')
+            continue
+
+        if attempt.dispatch_acked_at is None:
+            # Agent 可能没收到 dispatch（connection lost）
+            await re_dispatch(execution, attempt)
+        else:
+            # Agent 正在执行中
+            # 不动，等 Agent reconnect + resume_request
+            # 设置长断线 watchdog
+            schedule_long_disconnect_check(execution.id, timeout_minutes=5)
+
+    # 5. 启动 heartbeat sweeper
+    # 6. 启动 outbox worker
+    # 7. 启动 WS 端口
+```
+
+## 5. Idempotency 三层保护
+
+### 5.1 协议级去重（envelope.id）
 
 - 所有 envelope 必填 `id`（UUIDv4）
 - Runtime 记录最近 1 小时 envelope.id 集合（Redis Set，TTL 1h）
 - 重复 envelope.id 立即忽略
-- DB 落 `terminal_envelope_id` 用于永久去重（result/error/cancel）
 
-### 6.2 业务级去重（event provider_event_id）
+### 5.2 业务级去重（event provider_event_id + seq cursor）
 
-```
-DB UNIQUE: execution_events (attempt_id, provider_event_id)
-  - Agent 推 same provider_event_id → 冲突 → 忽略
-  - 用于 crash recovery / WS 重传 / 多 source 重复
-```
+- DB UNIQUE(attempt_id, provider_event_id)：重复 event 忽略
+- DB UNIQUE(attempt_id, seq)：同 attempt 内 seq 唯一
+- v0.4.3 新增：cursor 检查（last_persisted_seq 严格 contiguous）
 
-### 6.3 业务级去重（event seq）
-
-```
-DB UNIQUE: execution_events (attempt_id, seq)
-  - 单 attempt 内 seq 单调
-  - 同 attempt 内重复 seq → 拒绝（agent bug）
-```
-
-### 6.4 业务级去重（result/error/cancel via terminal_envelope_id）
+### 5.3 业务级去重（result/error/cancel via terminal_envelope_id）
 
 ```sql
--- 表 schema
 agent_executions.terminal_envelope_id TEXT
-
--- 写入 result 时
-UPDATE agent_executions
-SET status = $1, ..., terminal_envelope_id = $2
-WHERE id = $3 AND status IN ('PENDING', 'RUNNING')
-  AND (terminal_envelope_id IS NULL OR terminal_envelope_id = $2)
 ```
 
-实际上 CAS 已经够用（status 已是终态后再次 UPDATE 不影响行数）。`terminal_envelope_id` 字段更多是审计目的。
+CAS 已足够；terminal_envelope_id 用于审计。
 
-## 7. WSS 实现细节
+## 6. WSS 实现细节
 
-### 7.1 库
-
-- **Server**: NestJS Gateway + `ws` package
-- **Client**: V1 各语言官方 SDK（先出 Node.js / Python / Go）
-- **V2 计划**: 支持多 Agent 复用单 connection（`agent_ids: [...]` 在 hello）
-
-### 7.2 限速
+（同 v0.4.2）
 
 ```
-WS 推 / 推限速（per session）：
-  - 10 msgs / sec （防滥用）
-  - 超过 → 推 backpressure 帧
-  - 客户端必须等待 ack 才能推下一批
-
-事件推送（server → agent）：
-  - 实时 push（低延迟）
-  - 高频事件（LLM_TICK）可降采样（每 100ms 聚合）
+Server: NestJS Gateway + ws
+Client SDK: Node.js / Python / Go
+限速: 10 msgs/sec per session
+帧大小: max_payload_kb = 1024
+Artifact 走 S3 预签名
 ```
 
-### 7.3 帧大小
+## 7. Runtime Gateway 实现
 
-```
-max_payload_kb = 1024 (1MB)
-超限 → 拆帧 OR reject（V1 reject，V2 拆帧）
-Artifact 走 S3 预签名，不走 WS payload
-```
+### 7.1 进程模型
 
-## 8. Runtime Gateway 实现
+（同 v0.4.2）
 
-### 8.1 进程模型
+### 7.2 v0.4.3 新增：dispatch_acked_at 跟踪
 
-```
-Runtime Gateway (Node.js / NestJS)
-  ├─ WebSocketAdapter (ws)
-  ├─ SessionManager (in-memory map: session_id → Connection)
-  ├─ Dispatcher (per execution_id queue)
-  ├─ EventRouter (per agent_id queue)
-  └─ HealthCheck (heartbeat sweep)
-```
-
-### 8.2 启动流程
-
-```
-1. 加载配置 (env: REDIS_URL, PG_URL, JWT_PUBLIC_KEY)
-2. PG 迁移检查
-3. 加载 in-flight executions:
-   - SELECT * FROM agent_executions WHERE status IN ('PENDING','RUNNING')
-4. 对每个 in-flight:
-   - 重新 dispatch（带 idempotency_key）
-   - 如果 agent_token 过期 → 标 FAILED + 通知 owner
-5. Heartbeat sweep 启动
-6. 监听 WS 端口
-```
-
-### 8.3 优雅关闭
-
-```
-SIGTERM 收到：
-  1. 停止接受新 WS 连接
-  2. 等待在飞 WS 帧 flush
-  3. 关闭所有 WS
-  4. 关闭 DB / Redis 连接
-  5. 退出
-  6. K8s readiness 探针立即失败 → 流量切换
+```python
+async def dispatch_to_agent(execution_id, attempt_no):
+    """Runtime → Agent 推 execution.dispatch"""
+    execution = await get_execution(execution_id)
+    attempt = await get_attempt(execution_id, attempt_no)
+    
+    # 1. 写 dispatch_sent_at
+    await db.update("""
+        UPDATE execution_attempts
+        SET dispatch_sent_at = NOW()
+        WHERE id = $1
+    """, attempt.id)
+    
+    # 2. 推 dispatch
+    await runtime.push_to_agent(execution.agent_id, {
+        'type': 'execution.dispatch',
+        'payload': {
+            'execution_id': execution_id,
+            'attempt_no': attempt_no,
+            'input': execution.input,
+            ...
+        }
+    })
+    # 注意：不在这里写 dispatch_acked_at
+    # dispatch_acked_at 由 Agent 推 status=WORKING 时回填
 ```
 
-**V1 简化**：不做"in-flight dispatch 持久化"（靠 DB 重建）。
+```python
+async def on_agent_status(agent_id, status, execution_id=None, attempt_no=None):
+    """Agent 推 status envelope 时"""
+    if status == 'WORKING' and execution_id and attempt_no:
+        # Agent 已 ACK dispatch
+        await db.update("""
+            UPDATE execution_attempts
+            SET dispatch_acked_at = NOW()
+            WHERE execution_id = $1 AND attempt_no = $2
+              AND dispatch_acked_at IS NULL
+        """, execution_id, attempt_no)
+```
 
-## 9. Agent SDK 设计（V1）
+## 8. Agent SDK 设计
 
-### 9.1 Node.js SDK
+（同 v0.4.2）
 
 ```ts
 class AgentClient {
-  constructor(opts: { agentId: string, agentToken: string, baseUrl: string })
-
-  // 连接
-  async connect(): Promise<void>  // hello + hello_ack
-  async disconnect(): Promise<void>  // close
-
-  // 监听
-  on(type: 'dispatch' | 'cancel' | 'resume_ack', handler)
-
-  // 推送
-  async sendStatus(status, reason?)
-  async sendDecision(decision, opts)
-  async sendEvent(event_type, payload, opts)
-  async sendResult(result, opts)
-  async sendError(code, message, opts)
-  async sendResumeRequest(execution_id, attempt_no)
-
-  // 内部
-  startHeartbeat()
-  handleCancel(cancelEnvelope)  // abort LLM, cleanup, send result=CANCELLED
-  handleResumeAck(ackEnvelope)  // 续发 event from last_persisted_seq + 1
+  on('cancel', handler)  // 必须实现
+  on('resume_ack', handler)  // v0.4.3
+  sendDecision(...)  // collab.decision
+  sendEvent(...)  // execution.event with seq
+  sendResult(...)  // execution.result
+  sendResumeRequest(...)
 }
 ```
 
-### 9.2 必须实现的 cancel handler
-
-```ts
-// SDK 强制要求（V1 是 convention，V2 是 spec）
-client.on('cancel', async (cancel) => {
-  // 1. 立即 abort 所有 in-flight LLM 调用
-  if (currentLLMRequest?.abortController) {
-    currentLLMRequest.abortController.abort();
-  }
-  // 2. 清理 sandbox
-  await cleanupSandbox();
-  // 3. 推 result=CANCELLED
-  await client.sendResult({
-    execution_id: cancel.payload.execution_id,
-    attempt_no: cancel.payload.attempt_no,
-    status: 'CANCELLED',
-    output: { summary: 'cancelled by ' + cancel.payload.reason }
-  });
-});
-```
-
-**这是 Agent 端的核心责任**。不实现 cancel handler = 不响应打断 = 用户体验差。
-
-## 10. E2E 验收点
+## 9. E2E 验收点
 
 ```
 e2e/03-ws-resume/
@@ -461,13 +471,30 @@ e2e/03-ws-resume/
     When Runtime sends cancel
     Then Agent aborts LLM, sends result=CANCELLED within 1s
 
-  test_006_restart_resumes_inflight.json
-    Given 3 in-flight executions
+  test_006_restart_resumes_inflight.json              # v0.4.3 修复
+    Given 3 in-flight executions, dispatch_acked_at all set
     When Runtime restarts
-    Then all 3 re-dispatched, no duplicate result
+    Then no re-dispatch, all 3 wait for resume
+
+  test_007_restart_redispatch_pending.json             # v0.4.3 新增
+    Given 2 in-flight executions, dispatch_acked_at both null
+    When Runtime restarts
+    Then both re-dispatched
+
+  test_008_seq_gap_detection.json                     # v0.4.3 修复 P1-2
+    Given attempt.last_persisted_seq=5
+    When agent sends seq=7 (skipped 6)
+    Then event rejected, resume_request pushed to agent
+
+  test_009_dispatch_ack_tracking.json                 # v0.4.3 新增
+    When Runtime pushes execution.dispatch
+    Then dispatch_sent_at is set
+    And  when agent pushes status=WORKING
+    And  then dispatch_acked_at is set
+    And  restart logic uses these fields correctly
 ```
 
-## 11. 与其他设计的关系
+## 10. 与其他设计的关系
 
 - 详见 [01-single-agent-task-lifecycle.md](./01-single-agent-task-lifecycle.md)（完整时序）
 - 详见 [02-interrupt-and-cancel.md](./02-interrupt-and-cancel.md)（Cancel 路径）

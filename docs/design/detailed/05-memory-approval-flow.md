@@ -1,6 +1,9 @@
 # Detailed Design · 05 · Memory Approval Flow
 
-> E5 Shared Memory + 人审门禁 + Source 溯源。
+> **v0.4.3 修正**：
+> 1. **P1-8**：`/memory-proposals` 端点不挂只决 ALLOW 的 Guard；业务层显式 `policy.evaluate('propose_memory')`（拆权限键）
+> 2. **P1-9**：Memory approval CAS + `UNIQUE(proposal_id)` 防重复
+> 3. **P1-10**：Memory Search 用 `accessible_project_ids()` 不手写 team→project
 > 前置：[00-overview.md](./00-overview.md) / [07-permission-and-approval-orchestration.md](./07-permission-and-approval-orchestration.md)
 
 ## 0. 范围
@@ -10,167 +13,112 @@
 - Agent 申请 → 人类审批 → 写入
 - P6 审批中心
 - 消息流 MEMORY_REQUEST 投影
-- 检索（V1 简化：tsv + 强制 project_id 过滤）
+- 检索（V1 简化：tsv + accessible_project_ids）
 
 ## 1. 4 类 Memory
 
-| 类型 | 归属 | 谁能读 | 谁能写（v0.4.2） |
-| --- | --- | --- | --- |
-| `PERSONAL` | owner_user_id | 仅 owner | `write_memory` permission (REQUIRE_APPROVAL) → 走 E5 流程 |
-| `PROJECT` | project_id（所有 member） | 所有 project member | 同上 |
-| `DECISION` | project_id | 所有 project member | 同上 |
-| `KNOWLEDGE` | project_id | 所有 project member | 同上 |
+（同 v0.4.2）
 
-**关键**：v0.4.2 之前 Agent 可能写过（v0.4 删 can_execute 字段；现在 Capability 决定能不能申请，Permission 决定能否走）。
+| 类型 | 归属 | 谁能读 | 谁能写（v0.4.3 改） |
+| --- | --- | --- | --- |
+| `PERSONAL` | owner_user_id | 仅 owner | `propose_memory` permission |
+| `PROJECT` | project_id | accessible_project_ids(current_user) | 同上 |
+| `DECISION` | project_id | 同上 | 同上 |
+| `KNOWLEDGE` | project_id | 同上 | 同上 |
+
+**v0.4.3 关键拆分**：
+- 旧：`write_memory` 一个键，Agent 写=REQUIRE_APPROVAL，Guard 永远 403
+- 新：**`propose_memory`**（申请 proposal）+ **`write_memory`**（直接写已批准 memory）两键
 
 ## 2. Source 三件套强约束
 
-```sql
-source_type         TEXT NOT NULL,             -- 'CHANNEL_MESSAGE' | 'HUMAN_DIRECT' | 'AGENT_OBSERVATION'
-source_channel_id   UUID REFERENCES channels(id),  -- CHANNEL_MESSAGE 时必填
-source_message_seq  BIGINT,                       -- CHANNEL_MESSAGE 时必填
-source_message_id   UUID,                         -- 冗余便于 join
+（同 v0.4.2）
+
+## 3. 完整流程：Agent 申请 → 人类审批（v0.4.3 修正 P1-8）
+
+### 3.1 v0.4.2 的问题
+
+```ts
+@UseGuards(JwtGuard, PermissionGuard)
+@RequirePermission('write_memory')  // 默认 REQUIRE_APPROVAL
+@Post('/memory-proposals')
+async proposeMemory(...) { ... }
 ```
 
-### 2.1 校验（v0.4.2 改）
+**bug**：Guard 收到 REQUIRE_APPROVAL → 拒绝 → 所有人调 `/memory-proposals` 都 403 → 端点形同虚设
 
-```
-INSERT/UPDATE memory_proposals:
-  if source_type = 'CHANNEL_MESSAGE':
-    必填 source_channel_id AND source_message_seq
-  elif source_type = 'HUMAN_DIRECT':
-    可空（用户直接写不引用消息）
-  elif source_type = 'AGENT_OBSERVATION':
-    可空（V2）
-```
+### 3.2 v0.4.3 修复
 
-V1 强制 DB CHECK 约束：
+**permission 拆键**：
 
-```sql
-CONSTRAINT chk_source_chmsg CHECK (
-  (source_type = 'CHANNEL_MESSAGE' AND source_channel_id IS NOT NULL AND source_message_seq IS NOT NULL)
-  OR (source_type <> 'CHANNEL_MESSAGE')
-)
+```python
+# 7 键 + 2 个新键
+PERMISSION_KEYS = [
+    'read_message', 'write_message', 'write_memory', 'execute_code',
+    'create_pr', 'approve_memory', 'manage_channel',
+    # v0.4.3 新增
+    'propose_memory'   # 申请（Agent + Human 都需；只 ALLOW）
+]
 ```
 
-### 2.2 Personal Memory 校验
+**默认矩阵（v0.4.3 改）**：
 
-```sql
-CONSTRAINT chk_owner_for_personal CHECK (
-  (type = 'PERSONAL' AND proposed_by_user_id IS NOT NULL)
-  OR (type <> 'PERSONAL')
-)
+| 键 | Human owner | Human member | Agent (lifecycle=ACTIVE) |
+| --- | --- | --- | --- |
+| `propose_memory` | ALLOW | ALLOW | ALLOW |
+| `write_memory` | DENY | DENY | DENY |
+| `approve_memory` | ALLOW | DENY | DENY |
+
+**`write_memory` 真正只能用于：**
+- 内部 service（E5 自己批准后写）
+- 写已通过审批的 memory_items（v0.4.3：proposal 批准后由 E5 service-to-service 调，不再经 Guard）
+
+**`/memory-proposals` 端点**：
+
+```ts
+@UseGuards(JwtGuard, PermissionGuard)
+@RequirePermission('propose_memory')  // ALLOW 通过
+@Post('/memory-proposals')
+async proposeMemory(@Body() body, @Req() req) {
+  // 1. Guard 已确保 propose_memory = ALLOW
+  // 2. INSERT memory_proposals (status=PROPOSED)
+  const proposal = await db.insert_memory_proposal({...body, status: 'PROPOSED'});
+  return proposal;
+}
 ```
 
-Personal Memory 只能由 Human 申请（不能由 Agent 自动申请）。
+**结果**：Agent/Human 都能申请。审批在 P6 独立走。
 
-## 3. 完整流程：Agent 申请 → 人类审批
-
-### 3.1 流程图
+### 3.3 流程图
 
 ```
-T+0  Agent 在 channel 产生 MEMORY_REQUEST 消息
-     (v0.4.1 projection: content.memory_proposal_ref=null，触发后写)
-
-T+1  Agent 推 execution.event { event_type: 'MEMORY_REQUEST' }  (可选，记录在事件流)
-
-T+2  Agent 调 E5 REST API: POST /memory-proposals
-     Headers: X-Agent-Token
-     Body:
-       {
-         "type": "PROJECT",                            // 或 DECISION/KNOWLEDGE
-         "title": "重试策略约定",
-         "content": "# 重试策略约定\n\n- max_attempts: 5\n- ...",
-         "source_type": "CHANNEL_MESSAGE",
-         "source_channel_id": "...",
-         "source_message_seq": 42
-       }
-
-T+3  E5 Memory Module:
-     a) 校验 Agent 身份（agent_token）
-     b) 校验 type：Agent 只能 PROJECT/DECISION/KNOWLEDGE
-     c) 校验 Source 三件套（DB CHECK）
-     d) 校验 Content（防止 XSS：DOMPurify-like sanitize）
-     e) INSERT memory_proposals (status=PROPOSED, proposed_by_agent_id=agent.id)
-
-T+4  E5 写消息流 MEMORY_REQUEST 投影:
-     INSERT messages (content_type='MEMORY_REQUEST', content={memory_proposal_ref: proposal.id})
-
-T+5  E5 WS 广播:
-     - 'memory.proposal_created' 给所有 project online member（per project owner 优先）
-     - 'message.created' 给 channel online member
-
-T+6  人类 owner 在 P6 审批中心看到待办（聚合）
-     - 显示：title / type / content / Source 引用（点击跳到原消息）
-
-T+7  owner 选「批准」:
-     POST /memory-proposals/:id/approve
-     Headers: { Authorization: Bearer ... }
-     Body: {} (optional note)
-
-T+8  E5 校验:
-     a) 校验 owner 权限: approve_memory (E6)
-     b) UPDATE memory_proposals SET status='APPROVED', approved_by=owner.id, approved_at=now()
-     c) INSERT memory_items (proposal_id, type, title, content, source_*, approved_by, version=1)
-     d) 入队 memory.index async（分块 + tsv 写 memory_chunks）
-     e) WS 广播 'memory.proposal_approved'
-
-T+9  索引 worker:
-     - SELECT content FROM memory_items WHERE id=?
-     - 分块（V1: 200 chars/chunk）
-     - 对每块：to_tsvector + INSERT memory_chunks
-     - UPDATE memory_items.search_text = to_tsvector('simple', content)
-
-T+10  原 MEMORY_REQUEST 投影消息标记 done:
-     - 看 P5 视觉：从"待批准" 变 "已写入项目记忆 · Jason 批准"
-     - 实现：客户端重新拉取 proposal → status='APPROVED' → 显示 done 样式
+T+0  Agent POST /memory-proposals { type, title, content, source_* }
+T+1  Guard: checkPermission(agent, 'propose_memory', project)
+T+2  Guard: ALLOW → next
+T+3  E5: 校验 type / Source / sanitize content
+T+4  E5: INSERT memory_proposals (status=PROPOSED, proposed_by_agent_id)
+T+5  E5: 写消息流 MEMORY_REQUEST projection (content.memory_proposal_ref)
+T+6  E5: WS 推 memory.proposal_created 给 project owner
+T+7  Owner 在 P6 选「批准」
+T+8  POST /memory-proposals/:id/approve
+T+9  E5: v0.4.3 CAS + UNIQUE(proposal_id) 防重（详见 §6）
+T+10 E5: BEGIN transaction:
+       - CAS proposal: PROPOSED → APPROVED
+       - INSERT memory_items
+       - INSERT memory_review_actions
+       - INSERT outbox('memory.approved')
+       COMMIT
+T+11 outbox worker 拾取 → 写 tsvector 索引
+T+12 原 MEMORY_REQUEST projection 变 "已写入项目记忆 · Jason 批准"
 ```
 
-### 3.2 Reject 路径
+### 3.4 Reject / Edit-Approve / Withdraw
 
-```
-owner 选「驳回」:
-  POST /memory-proposals/:id/reject
-  Body: { reason: "内容不准确" }
+（同 v0.4.2，CAS 都用上）
 
-E5:
-  a) UPDATE memory_proposals SET status='REJECTED', rejected_by=owner.id, reject_reason=?
-  b) WS 广播 'memory.proposal_rejected'
-  c) 消息流：原 MEMORY_REQUEST 投影消息消失（或标 "rejected"）
-  d) 写 memory_review_actions (action='REJECT', note=reason)
-  e) REJECTED 记录保留 1 年（供 Agent 学习）
-```
+## 4. 数据模型（v0.4.3 加 UNIQUE）
 
-### 3.3 Edit-Approve 路径
-
-```
-owner 选「编辑后批准」:
-  POST /memory-proposals/:id/edit-approve
-  Body: { content: "<edited content>" }
-
-E5:
-  a) 用新 content 写入 memory_items（覆盖原 proposal.content）
-  b) status='APPROVED'
-  c) version=1（V1 简化：覆盖）
-  d) V2 引入版本表：保留历史版本
-```
-
-### 3.4 Withdraw 路径
-
-```
-申请人主动撤回（仅 PROPOSED 状态）:
-  POST /memory-proposals/:id/withdraw
-  Headers: { Authorization: Agent token or user token }
-
-E5:
-  a) 校验申请人是当前调用方（proposed_by_agent_id=agent.id 或 proposed_by_user_id=user.id）
-  b) UPDATE status='WITHDRAWN'
-  c) 消息流投影消失
-```
-
-## 4. 数据模型（v0.4.1 拆表）
-
-### 4.1 memory_proposals（v0.4.1 拆出：申请阶段事实源）
+### 4.1 memory_proposals（v0.4.3 改：proposal_id 唯一）
 
 ```sql
 CREATE TABLE memory_proposals (
@@ -192,7 +140,7 @@ CREATE TABLE memory_proposals (
   reject_reason       TEXT,
   created_at          TIMESTAMPTZ DEFAULT now(),
   approved_at         TIMESTAMPTZ,
-  -- 强约束（DB CHECK）
+  -- 强约束
   CONSTRAINT chk_source_chmsg CHECK (
     (source_type = 'CHANNEL_MESSAGE' AND source_channel_id IS NOT NULL AND source_message_seq IS NOT NULL)
     OR (source_type <> 'CHANNEL_MESSAGE')
@@ -204,14 +152,14 @@ CREATE TABLE memory_proposals (
 );
 ```
 
-### 4.2 memory_items（v0.4.1 拆出：已批准事实源）
+### 4.2 memory_items（v0.4.3 加 UNIQUE(proposal_id)）
 
 ```sql
 CREATE TABLE memory_items (
   id                  UUID PRIMARY KEY,
   project_id          UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-  proposal_id         UUID NOT NULL REFERENCES memory_proposals(id),  -- v0.4.1：必须从 proposal 来
-  owner_user_id       UUID REFERENCES users(id),                       -- Personal 时填
+  proposal_id         UUID NOT NULL UNIQUE REFERENCES memory_proposals(id),  -- v0.4.3: UNIQUE
+  owner_user_id       UUID REFERENCES users(id),
   type                TEXT NOT NULL,
   title               TEXT NOT NULL,
   content             TEXT NOT NULL,
@@ -225,12 +173,12 @@ CREATE TABLE memory_items (
 );
 ```
 
-### 4.3 memory_review_actions（v0.4.1 改：记 proposal）
+### 4.3 memory_review_actions
 
 ```sql
 CREATE TABLE memory_review_actions (
   id          UUID PRIMARY KEY,
-  proposal_id UUID NOT NULL REFERENCES memory_proposals(id),  -- v0.4.1 改
+  proposal_id UUID NOT NULL REFERENCES memory_proposals(id),
   actor_id    UUID NOT NULL REFERENCES users(id),
   action      TEXT NOT NULL CHECK (action IN ('APPROVE','REJECT','EDIT_APPROVE','WITHDRAW')),
   note        TEXT,
@@ -238,163 +186,153 @@ CREATE TABLE memory_review_actions (
 );
 ```
 
-## 5. 消息流投影
+## 5. Approve 完整流程（v0.4.3 修复 P1-9 race）
 
-### 5.1 MEMORY_REQUEST 形态（v0.4.1 projection）
-
-```jsonc
-// messages.content
-{
-  "memory_proposal_ref": "proposal-uuid",  // 唯一事实引用
-  "summary": "申请写入项目记忆《重试策略约定》"  // 缓存，详情走 entity_ref
-}
-```
-
-不复制 title/content；详情走 `GET /memory-proposals/:id`。
-
-### 5.2 UI 渲染
+### 5.1 Race 场景
 
 ```
-P5 收到 message.created { content_type: 'MEMORY_REQUEST' }
-  → 显示：标题 + 摘要 + 三按钮（批准/驳回/编辑后批准）
-  → 点击 "查看详情" → GET /memory-proposals/:id
+Owner A 和 Owner B 同时点击「批准」:
+
+T+0  A 读 proposal.status='PROPOSED'
+T+1  B 读 proposal.status='PROPOSED'
+T+2  A INSERT memory_items
+T+3  B INSERT memory_items
+T+4  结果: 同一 proposal_id 两条 memory_items
 ```
 
-### 5.3 状态变化时的消息流
+### 5.2 v0.4.3 修复：CAS + UNIQUE
 
-| 状态变化 | 消息流表现 |
-| --- | --- |
-| `PROPOSED` | MEMORY_REQUEST 卡片：pending 状态 |
-| `APPROVED` | 卡片变 "已写入项目记忆 · Jason 批准"（done 样式） |
-| `REJECTED` | 卡片消失 + SYSTEM 事件 "Jason 驳回了记忆申请《xxx》" |
-| `WITHDRAWN` | 卡片消失 |
+```python
+async def approve_memory(proposal_id, owner):
+    async with db.transaction() as tx:
+        # 1. CAS proposal (事实源)
+        affected = await tx.execute("""
+            UPDATE memory_proposals
+            SET status='APPROVED', approved_by=$2, approved_at=NOW()
+            WHERE id=$1 AND status='PROPOSED'
+            RETURNING id, type, content, ...
+        """, proposal_id, owner.id)
 
-**实现**：客户端订阅 `memory.proposal_*` 事件，收到后刷新对应的 projection 卡片。
+        if not affected:
+            # 已 approved/rejected/withdrawn
+            # 或不存在
+            return await get_proposal(proposal_id)  # 返当前状态
 
-## 6. 检索（V1 简化）
+        proposal = affected[0]
 
-### 6.1 端点
+        # 2. INSERT memory_items
+        #    UNIQUE(proposal_id) 双保险
+        await tx.execute("""
+            INSERT INTO memory_items
+            (project_id, proposal_id, owner_user_id, type, title, content, source_*, approved_by)
+            VALUES (...)
+        """, ...)
 
-```http
-GET /work-items/search?q=...&type=...&status=...&page=...&size=20
+        # 3. 写 review_action
+        await tx.execute("""
+            INSERT INTO memory_review_actions (proposal_id, actor_id, action)
+            VALUES ($1, $2, 'APPROVE')
+        """, proposal_id, owner.id)
+
+        # 4. 写 outbox
+        await tx.execute("""
+            INSERT INTO outbox_events (event_type, payload, idempotency_key)
+            VALUES ('memory.approved', $1, $2)
+        """, {...}, f'memory-approved-{proposal_id}')
+
+    # 5. outbox worker → 索引
 ```
 
-不对，是 memory search：
+**v0.4.3 双保险**：
+- CAS `WHERE status='PROPOSED'`：仅一人 CAS 成功
+- `UNIQUE(proposal_id)`：DB 层兜底（即使 CAS 失败，DB 也拒绝重复 INSERT）
 
-```http
-GET /memory-items/search?q=...&type=PROJECT&page=1&size=20
-Headers: { Authorization: Bearer ... }
+## 6. 检索（V1 简化 + v0.4.3 修复 P1-10）
+
+### 6.1 v0.4.2 的问题
+
+```sql
+-- 手写 team → project
+WHERE m.project_id IN (
+  SELECT id FROM projects WHERE team_id IN (
+    SELECT team_id FROM team_members WHERE user_id = $1
+  )
+)
 ```
 
-### 6.2 查询
+**问题**：
+- 没考虑 project_members（team member 不一定是 project member）
+- 没考虑 Personal Memory
+- 每个模块都自己写一遍 → 旁路 authorization 风险
+
+### 6.2 v0.4.3 修复：accessible_project_ids()
+
+```python
+# packages/contracts
+async def accessible_project_ids(principal: MemberRef) -> list[UUID]:
+    """统一权限查询：返回 principal 能访问的所有 project_id"""
+    if principal.type == 'USER':
+        # User 能访问：自己 owner 的 project + 自己被邀请为 member 的 project
+        return await db.query("""
+            SELECT id FROM projects
+            WHERE team_id IN (
+              SELECT team_id FROM team_members
+              WHERE user_id = $1
+            )
+            OR id IN (
+              SELECT project_id FROM project_members
+              WHERE user_id = $1
+            )
+        """, principal.id)
+    elif principal.type == 'AGENT':
+        return await db.query("""
+            SELECT project_id FROM agent_project_membership
+            WHERE agent_id = $1 AND can_read_history = true
+        """, principal.id)
+```
+
+### 6.3 搜索查询（v0.4.3 修正）
 
 ```sql
 SELECT id, title, type, snippet, source_*
 FROM memory_items m
-WHERE m.project_id IN (  -- 强制 project 隔离
-    SELECT id FROM projects WHERE team_id IN (
-      SELECT team_id FROM team_members WHERE user_id = $current_user
-    )
-  )
-  AND m.type = $type  -- 可选
-  AND (m.owner_user_id = $current_user OR m.type != 'PERSONAL')  -- Personal 仅 owner
-  AND m.search_text @@ websearch_to_tsquery('simple', $q)
-ORDER BY ts_rank(m.search_text, websearch_to_tsquery($q)) DESC
+WHERE m.project_id = ANY($1::uuid[])  -- accessible_project_ids
+  AND (m.owner_user_id = $2 OR m.type != 'PERSONAL')  -- Personal 仅 owner
+  AND (m.type = $3 OR $3 IS NULL)
+  AND m.search_text @@ websearch_to_tsquery('simple', $4)
+ORDER BY ts_rank(m.search_text, websearch_to_tsquery($4)) DESC
 LIMIT 20;
 ```
 
-**强制 project_id 过滤**：从 session 用户的 team 推导，绝不返回跨 project 结果。
-
-### 5.4 Personal 隔离
-
-```sql
-AND (m.owner_user_id = $current_user OR m.type != 'PERSONAL')
-```
-
-Personal Memory 只能被 owner 自己看到。
+**v0.4.3 关键**：
+- `project_id = ANY($accessible_project_ids)` —— 统一权限
+- `owner_user_id = $current_user` for Personal
+- 任何模块搜 memory 都必须走 `accessible_project_ids()`
 
 ## 7. P6 审批中心
 
-### 7.1 列表
-
-```
-GET /memory-proposals/pending
-Query: ?project_id=&type=&since=
-Response: [
-  { id, title, type, proposed_by_agent_name, source: {...}, created_at }
-]
-```
-
-聚合：人类 owner 登录后看到所有（其 owner 的）项目的待审批 proposals。
-
-### 7.2 详情
-
-```
-GET /memory-proposals/:id
-Response: {
-  id, type, title, content, source: {channel, seq, message_preview},
-  proposed_by_agent: {id, name, avatar},
-  created_at
-}
-```
-
-### 7.3 审批操作
-
-```http
-POST /memory-proposals/:id/approve
-POST /memory-proposals/:id/reject   Body: { reason }
-POST /memory-proposals/:id/edit-approve Body: { content }
-POST /memory-proposals/:id/withdraw  (申请人)
-```
+（同 v0.4.2，但权限改用 `accessible_project_ids`）
 
 ## 8. 索引（V1 简化）
 
-### 8.1 memory_chunks
+（同 v0.4.2）
 
-```sql
-CREATE TABLE memory_chunks (
-  id          UUID PRIMARY KEY,
-  memory_id   UUID NOT NULL REFERENCES memory_items(id) ON DELETE CASCADE,
-  chunk_text  TEXT NOT NULL,
-  tsv         tsvector
-);
-```
+## 9. 与 Permission 的集成（v0.4.3 修正 P1-8）
 
-### 8.2 索引 worker
+- Agent 想申请 memory：调 `checkPermission(agent, 'propose_memory', project_scope)`
+- 默认 propose_memory = ALLOW（owner/member/Agent 都能申请）
+- Agent 想直接写 memory（绕过 proposal）：无端点（write_memory 只能 internal 调用）
 
-```python
-async def index_memory(memory_id):
-    memory = await get_memory_item(memory_id)
-    chunks = chunk_text(memory.content, chunk_size=200)  # V1: 200 chars
-    for i, chunk in enumerate(chunks):
-        await db.execute("""
-            INSERT INTO memory_chunks (memory_id, chunk_text, tsv)
-            VALUES ($1, $2, to_tsvector('simple', $2))
-        """, memory_id, chunk)
-    await db.execute("""
-        UPDATE memory_items SET search_text = to_tsvector('simple', content) WHERE id = $1
-    """, memory_id)
-```
-
-V2：embedding + pgvector + rerank。
-
-## 9. 与 Permission 的集成
-
-- Agent 想写 memory：调 `checkPermission(agent, 'write_memory', project_scope)`
-- 旧 v0.4.1 行为：Guard 收到 REQUIRE_APPROVAL → 放行 + 业务层"忘记"调用 → 漏洞
-- **v0.4.2 改**：Guard 收到 REQUIRE_APPROVAL → 拒绝 403
-- 业务层（E5）显式 `policy.evaluate('write_memory', {project_id, ...})` → 走 proposal 创建路径
-
-详见 [07-permission-and-approval-orchestration.md](./07-permission-and-approval-orchestration.md)
+**关键**：`/memory-proposals` 端点不再挂 Guard 防绕过——直接靠 Guard `propose_memory=ALLOW` 通过即可，审批在 P6 独立。
 
 ## 10. E2E 验收点
 
 ```
 e2e/05-memory-approval/
   test_001_agent_propose.json
-    Given Agent with capabilities + permission
+    Given Agent with propose_memory=ALLOW
     When POST /memory-proposals
-    Then status=PROPOSED, MEMORY_REQUEST 消息流, WS 通知 owner
+    Then status=PROPOSED, MEMORY_REQUEST 投影, WS 通知 owner
 
   test_002_owner_approve.json
     Given PROPOSED proposal
@@ -407,28 +345,32 @@ e2e/05-memory-approval/
 
   test_004_source_required.json
     When proposal without source_channel_id
-    Then 400 (DB CHECK 拦截)
+    Then 400
 
   test_005_personal_isolation.json
     Given user A has Personal memory
     When user B queries
-    Then 0 results (Personal 隔离)
+    Then 0 results (Personal 隔离 + accessible_project_ids)
 
-  test_006_cross_project_isolation.json
+  test_006_cross_project_isolation.json           # v0.4.3 改
     Given memory in Project X
     When user from Project Y queries
-    Then 0 results
+    Then 0 results (accessible_project_ids 不包含 X)
 
-  test_007_withdraw.json
+  test_007_approve_idempotent_race.json           # v0.4.3 修复 P1-9
+    Given 2 owners click approve at same time
+    When POST /approve (concurrent)
+    Then only 1 succeeds, 1 memory_items row exists (UNIQUE constraint)
+
+  test_008_withdraw.json
     When applicant withdraws
     Then status=WITHDRAWN, message removed
 
-  test_008_audit_trail.json
+  test_009_audit_trail.json
     Every action writes memory_review_actions
 ```
 
 ## 11. 与其他设计的关系
 
+- 详见 [07-permission-and-approval-orchestration.md](./07-permission-and-approval-orchestration.md)（P1-8 permission 拆分）
 - 详见 [01-single-agent-task-lifecycle.md](./01-single-agent-task-lifecycle.md)（消息流时序）
-- 详见 [07-permission-and-approval-orchestration.md](./07-permission-and-approval-orchestration.md)（REQUIRE_APPROVAL 流程）
-- 详见 [08-error-and-retry.md](./08-error-and-retry.md)（索引失败重试）

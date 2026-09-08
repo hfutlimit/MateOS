@@ -1,8 +1,9 @@
 # Detailed Design · 01 · Single Agent Task Lifecycle
 
-> **这是用户点名的重点**：单个 Agent 接受任务 → 处理 → 回复一整套。
+> **v0.4.3 修正**：Execution **必须**在 Agent 推 `collaboration.decision: ACCEPT` 之后由 E4 调 E7 内部 API 创建。
+> 详细设计原版（P0-1 错误）：Resolver 选中后立即 create_execution → 把 execution lifecycle 提前到 decision 之前。
+> 修复：Runtime Gateway 推 `collaboration.request`（transport 消息）→ Agent 推 `collaboration.decision` → ACCEPT 后 E4 写 outbox → outbox worker 调 E7 创建 Execution。
 > 前置：[00-overview.md](./00-overview.md) / [04-resolver-and-routing.md](./04-resolver-and-routing.md) / [03-ws-connection-and-resume.md](./03-ws-connection-and-resume.md)
-> 中断场景：[02-interrupt-and-cancel.md](./02-interrupt-and-cancel.md)
 
 ## 0. 范围
 
@@ -10,79 +11,115 @@
 
 - **不**覆盖：多 Agent 协作（V2 Delegate）、Sandbox 执行（V3）
 - **覆盖**：单 Agent 接收 dispatch → THINKING → ACCEPT → WORKING → events → result → 消息流投影
+- **关键边界**（v0.4.3 修正）：
+  - `collaboration.request`（E4 拥有，Runtime transport）= 触发 Agent 决策
+  - `collaboration.decision`（E4 拥有）= Agent 决策结果
+  - `execution.dispatch` / `event` / `result`（E7 拥有）= Execution 实际执行
+  - **Execution 在 ACCEPT 之后才创建**（v0.4.3 修复）
 
-## 1. 完整时序图
+## 1. 完整时序图（v0.4.3 修正）
 
 ```
-T+0     User 在 P5 Channel 发消息 "@Backend Agent 帮我看看这段代码"
-T+1     P5 客户端 POST /channels/:id/messages { text: "...@Backend Agent..." }
-T+2     E3 Channel Module 事务：
-          - 写 messages (content_type=HUMAN, mentions=[{raw:'@Backend Agent', type:AGENT}])
-          - 写 triggers (trigger_type='MENTION', ref={channel_id, message_seq})
-          - 同步写 collaboration_requests (status=PENDING, target_agent_id=NULL, required_capabilities=[])
-T+3     E3 WS 广播 message.created 给 channel 在线 member
-T+4     客户端渲染：消息泡 + mention 胶囊占位「⏳ 解析中」
-T+5     E4 Orchestrator 异步 Resolver 启动（BullMQ mention.resolve）
-T+6     Resolver 跑：
-          a) 硬过滤：agent.lifecycle=ACTIVE ∩ channel member ∩ permission ALLOW ∩ Redis tryAcquireSlot(agent_id, lease_id) 成功
-          b) Capability ranking: 0.6 * coding_match + 0.25 * (1 - load) + 0.15 * accept_rate_30d
-          c) 选 Backend Agent (top-1)
-          d) 写 collaboration_requests.target_agent_id + slot_lease_id
-T+7     E4 → E7 内部 API: POST /internal/agent-executions
-          { collaboration_request_id, input, context_refs }
-T+8     E7 Runtime Gateway:
-          - 查 agents.lifecycle = 'ACTIVE' (double check)
-          - INSERT agent_executions (status=PENDING)
-          - INSERT execution_attempts (attempt_no=1, status=STARTED, runtime_session_id=null)
-          - UPDATE agent_executions SET active_attempt_no=1
-          - active_slots++ (Redis, 已在 Resolver 步骤占用)
-          - 通过 WS push execution.dispatch 到 Agent
-T+9     Agent 收到 dispatch:
-          - 校验 execution_id / idempotency_key
-          - 推 status envelope: lifecycle=ACTIVE, activity=THINKING
-T+10    E7 收到 status envelope → Redis presence 更新 + DB agents.activity='THINKING'
-T+11    E7 WS 推 agent.activity_changed 给所有相关 client（前端更新状态点紫+呼吸）
-T+12    Agent 决定:
-          a) 校验 capability / context_score / permission 三件套
-          b) 推 execution.event { event_type: 'PROGRESS', content: '正在分析代码...' }
-T+13    E7 写 execution_events (attempt_id, provider_event_id, seq=1)
-T+14    Agent 决定 ACCEPT → 推 collaboration.decision { decision: ACCEPT, analysis: {...} }
-T+15    E4 收到 collaboration.decision:
-          - 写 decision_records
-          - UPDATE collaboration_requests SET status='ACCEPTED', resolved_at=now()
-          - WS 推 collaboration.resolved (给发起人 channel 客户端)
-          - E4 → E7: 转交 decision 上下文
-T+16    E7 写 decision_records（事实源）
-T+17    Agent 推 status envelope: activity=WORKING
-T+18    E7 更新 agents.activity='WORKING', execution_attempts.status='RUNNING', agent_executions.status='RUNNING', started_at=now()
-T+19    Agent 调用 LLM:
-          - 推 execution.event { event_type: 'LLM_TICK', payload: {tokens_in: 1500, tokens_out: 300} }
-          - 推 execution.event { event_type: 'TOOL_CALL', payload: {tool: 'read_file', args: {...}} }
-T+20    Agent 写出代码:
-          - 推 execution.event { event_type: 'ARTIFACT', payload: {kind: 'FILE', name: 'patch.diff', s3_key: '...'} }
-          - 服务端写 execution_artifacts + 上传 S3
-T+21    Agent 推 execution.result { status: 'SUCCEEDED', output: {markdown: '...', code: '...'}, usage: {...}, artifacts: [...] }
-T+22    E7 收到 result:
-          - CAS UPDATE: SET status='SUCCEEDED', completed_at=now(), terminal_envelope_id=...
-            WHERE id=? AND status IN ('PENDING','RUNNING')
-          - affected_rows = 1 → 真正完成
-          - active_attempt_no=NULL
-          - 写 execution_attempts.status='COMPLETED', completed_at=now()
-          - active_slots-- (Redis release)
-          - 写 audit
-          - 写 llm_calls
-T+23    Agent 推 status envelope: activity=AVAILABLE
-T+24    E7 更新 agents.activity='AVAILABLE'
-T+25    E4 / E3 联动: 消息流写 AGENT_OUTPUT 投影消息:
-          - content_type='AGENT_OUTPUT'
-          - content.execution_ref=execution.id
-          - content.artifact_id=<S3 ref>
-T+26    E3 写 messages + seq 分配
-T+27    E3 WS 广播 message.created 给 channel 在线 member
-T+28    客户端渲染: 决策卡（v0.4.1 projection）+ Agent 输出卡
+T+0   User 在 P5 Channel 发消息 "@Backend Agent 帮我看看这段代码"
+T+1   P5 客户端 POST /channels/:id/messages
+T+2   E3 Channel Module 事务：
+        - 写 messages (content_type=HUMAN, mentions=[{raw:'@Backend Agent', type:AGENT}])
+        - 写 triggers (trigger_type='MENTION', ref={channel_id, message_seq})
+        - 写 collaboration_requests (status=PENDING, target_agent_id=NULL,
+                                     required_capabilities=[],
+                                     context_refs={channel_id, ...})
+T+3   E3 WS 广播 message.created 给 channel 在线 member
+T+4   客户端渲染：消息泡 + mention 胶囊占位「⏳ 解析中」
+T+5   E4 Orchestrator 异步 Resolver 启动（BullMQ mention.resolve）
+T+6   Resolver:
+        a) 硬过滤：lifecycle=ACTIVE ∩ channel member ∩ permission ALLOW
+        b) Capability ranking: 0.6 * match + 0.25 * (1-load) + 0.15 * accept_rate_30d
+        c) 选 Backend Agent (top-1)
+        d) Redis Lua tryAcquireSlot(agent_id, lease_id=PENDING_DECISION)  # v0.4.3: lease 类型=pending_decision
+        e) 写 collaboration_requests.target_agent_id + slot_lease_id
+T+7   E4 → Runtime Gateway (WebSocket): 推 collaboration.request     # v0.4.3 新增
+        { type: 'collaboration.request', payload: {
+            collaboration_request_id, from_actor, context, required_capabilities, deadline_s
+        }}
+T+8   Agent 收到 collaboration.request:
+        - 校验 collaboration_request_id
+        - 推 status envelope: lifecycle=ACTIVE, activity=THINKING
+T+9   E7 收到 status → agents.activity='THINKING' + WS 推前端
+T+10  Agent 评估：
+        - capability / context_score / permission 三件套
+        - 推 execution.event { event_type: 'PROGRESS', payload: {content: '正在分析代码...'} }  # ⚠️ v0.4.3: 这是 thinking progress（不写 execution_events）— v0.4.3 改进：thinking 阶段用 collaboration.* 事件流（不进 execution_events 表）
+
+T+11  Agent 决定 ACCEPT → 推 collaboration.decision  # v0.4.3 关键：Execution 还没创建
+        { type: 'collaboration.decision', payload: {
+            collaboration_request_id,
+            decision: 'ACCEPT',
+            reason: '...',
+            analysis: { capability: true, context_score: 88, permission: true }
+        }}
+T+12  E4 收到 collaboration.decision:
+        a) BEGIN transaction:
+           - 写 decision_records (事实源，仅 E4 写)
+           - UPDATE collaboration_requests SET status='ACCEPTED', resolved_at=now()
+           - INSERT outbox_events (event_type='collaboration.accepted', payload={collab_id, agent_id, context_refs, ...})
+        b) COMMIT
+        c) E4 promotion：把 pending_decision lease 升级为 execution lease（详见 04 §3.4）
+T+13  E4 WS 推 collab.resolved 给发起人 + channel
+T+14  Outbox Worker 拾取 'collaboration.accepted':
+        a) 查 collab_request 状态（应该 ACCEPTED）
+        b) 幂等检查：UNIQUE(collaboration_request_id) on agent_executions 已存在 → skip
+        c) E7 内部 API: POST /internal/agent-executions
+           { collaboration_request_id, work_item_ref?, input, context_refs, idempotency_key }
+T+15  E7:
+        a) 校验 Agent.lifecycle=ACTIVE
+        b) BEGIN transaction:
+           - INSERT agent_executions (status=PENDING, UNIQUE(collaboration_request_id))  # v0.4.3 修复 SQL 顺序
+           - INSERT execution_attempts (attempt_no=1, status=STARTED, runtime_session_id=null)
+           - UPDATE agent_executions SET active_attempt_no=1, attempt_count=1
+           - INSERT outbox_events (event_type='execution.created', payload={execution_id, ...})
+        c) COMMIT
+        d) dispatch 给 Agent WS
+T+16  Agent 收到 execution.dispatch:
+        - 推 status envelope: activity=WORKING
+        - 写 execution_attempts.status='RUNNING', started_at=now()
+        - renewExecutionLease(execution_id)  # v0.4.3: lease 类型升级为 execution，定期续期
+T+17  Agent 调用 LLM:
+        - 推 execution.event { event_type: 'LLM_TICK', provider_event_id, seq=N }
+        - 推 execution.event { event_type: 'TOOL_CALL', ... }
+T+18  Agent 写出代码:
+        - 推 execution.event { event_type: 'ARTIFACT', payload: {kind: 'FILE', s3_key} }
+T+19  Agent 推 execution.result { status: 'SUCCEEDED', output, usage, artifacts }
+T+20  E7 收到 result:
+        a) BEGIN transaction:
+           - CAS UPDATE agent_executions SET status='SUCCEEDED', completed_at=now(),
+                 terminal_envelope_id=..., active_attempt_no=NULL
+             WHERE id=? AND status IN ('PENDING','RUNNING')
+           - UPDATE execution_attempts SET status='COMPLETED', completed_at=now()
+           - INSERT llm_calls
+           - INSERT outbox_events (event_type='execution.completed', payload={execution_id, status})
+        b) COMMIT
+T+21  E7 推 status envelope: activity=AVAILABLE
+T+22  Outbox Worker 拾取 'execution.completed':
+        a) 释放 E4 持有的 execution lease
+        b) 通知 E4
+T+23  E4 收到 execution.completed:
+        - 消息流写 AGENT_OUTPUT 投影消息（content.execution_ref=execution.id）
+T+24  E3 写 messages + seq 分配
+T+25  E3 WS 广播 message.created 给 channel 在线 member
+T+26  客户端渲染: 决策卡（v0.4.1 projection）+ Agent 输出卡
 ```
 
-## 2. Agent 内部状态机（v0.4.2）
+### 1.1 v0.4.3 关键修正
+
+| 错误（v0.4.2） | 修正（v0.4.3） |
+| --- | --- |
+| Resolver 选中后立即 create_execution（Execution 在 ACCEPT 前） | Resolver 选中后只 tryAcquireSlot(pending_decision lease) + 推 collaboration.request；Execution 在 ACCEPT 后才创建 |
+| E4 / E7 都写 decision_records（双事实源） | 仅 E4 写 decision_records（事实源） |
+| Agent 在 thinking 阶段就推 execution.event PROGRESS（写入 execution_events 表） | Thinking 阶段用 collaboration.* 事件流（不进 execution_events，避免和 attempt_id 强耦合） |
+| 状态变更后直接发 WS broadcast（半成功风险） | 状态变更 + outbox INSERT 同事务；outbox worker 投递下游 |
+| execution_attempts INSERT 在 agent_executions 之前（FK 错误） | agent_executions 先，execution_attempts 后 |
+| `MAX(seq)` resume cursor（gap 风险） | 改用 last_persisted_seq 严格 cursor（详见 03） |
+
+## 2. Agent 内部状态机（v0.4.3 修正）
 
 ```
                       ┌────────────────────────────┐
@@ -108,225 +145,321 @@ T+28    客户端渲染: 决策卡（v0.4.1 projection）+ Agent 输出卡
 
 **关键**：
 - activity 转换由 Runtime Gateway（E7）写入 DB + Redis presence
-- active_slots 是 Redis Lua atomic 持有（v0.4.2 修复 race）
+- active_slots 计数在 Redis Lua semaphore（v0.4.2 修复）
 - lifecycle 由 owner REST 控制，与 activity 解耦
 
-## 3. WS 协议（v0.4.2）
+## 3. WS 协议（v0.4.3 修正）
 
-### 3.1 Envelope
-
-```jsonc
-// 通用 envelope（v0.4.2 id 必填，用于去重）
-{ "v": 1, "type": "<type>", "id": "<uuid>", "ts": <epoch_ms>, "payload": {} }
-```
-
-### 3.2 E4 → E7 内部 API（不是 WS，是同步 HTTP）
-
-```http
-POST /internal/agent-executions
-Headers:
-  X-Internal-Token: <service token>
-  X-Idempotency-Key: <collab_request_id>
-Body:
-{
-  "collaboration_request_id": "...",
-  "work_item_ref": null | { "provider_key": "builtin", "work_item_id": "..." },
-  "input": {
-    "prompt": "...",
-    "params": {},
-    "original_message": { "channel_id": "...", "message_seq": 42 }
-  },
-  "context_refs": {
-    "channel_id": "...",
-    "memory_refs": ["mem:..."],
-    "recent_messages": ["msg:..."],
-    "permissions": { "can_execute": false, "can_review": false }
-  },
-  "deadline_s": 600
-}
-```
-
-**为什么内部 API 不是 WS**：E4 Orchestrator 是同步调用 E7 创建 Execution，不经过 Agent。Agent 收到 dispatch 是另一回事（通过 WS）。
-
-### 3.3 Runtime Gateway → Agent（WS push）
+### 3.1 完整 message type 清单
 
 ```jsonc
-{ "type": "dispatch", "id": "uuid-1", "ts": 1736380900000, "payload": {
-    "execution_id": "...",
-    "collaboration_request_id": "...",
-    "work_item_ref": null,
-    "input": { "prompt": "...", "params": {} },
-    "context": { "memory_refs": [], "recent_messages": [], "permissions": {} },
-    "deadline_s": 600,
-    "idempotency_key": "..."
-}}
-```
+// ─── 连接管理 ───
+{ "type": "hello",         "payload": { agent_id, agent_token, runtime_session_id, runtime_version, capabilities }}
+{ "type": "hello_ack",     "payload": { session_id, server_version, config }}
+{ "type": "hello_nack",    "payload": { code, message }}
+{ "type": "heartbeat",     "payload": {} }
 
-### 3.4 Agent → Runtime（WS push）
-
-```jsonc
-// 状态上报
-{ "type": "status", "id": "uuid-2", "ts": ..., "payload": {
-    "status": "THINKING|WORKING|WAITING_CONTEXT|AVAILABLE|OFFLINE|ERROR",
-    "reason": "rate_limit_exceeded",  // ERROR 时
-    "since": 1736380900
+// ─── E4 拥有（v0.4.3 新增 collaboration.request）───
+{ "type": "collaboration.request",  "payload": {  // ★ v0.4.3 新增
+    "collaboration_request_id",
+    "from_actor": { type, id },
+    "context_refs": { channel_id, message_seq, memory_refs, work_item_ref? },
+    "required_capabilities": ["coding"],
+    "deadline_s"
 }}
 
-// 决策（v0.4.1 与 execution 拆开）
-{ "type": "collaboration.decision", "id": "uuid-3", "ts": ..., "payload": {
-    "collaboration_request_id": "...",
+{ "type": "collaboration.decision", "payload": {
+    "collaboration_request_id",
     "decision": "ACCEPT|REJECT|NEED_CONTEXT|DELEGATE",
-    "reason": "...",
-    "needs": ["api spec"],
-    "analysis": { "capability": true, "context_score": 88, "permission": true }
+    "reason"?, "needs"?, "analysis": { capability, context_score, permission }
 }}
 
-// 流式事件
-{ "type": "event", "id": "uuid-4", "ts": ..., "payload": {
-    "execution_id": "...",
-    "attempt_no": 1,
+{ "type": "collaboration.cancelled", "payload": {
+    "collaboration_request_id", "reason"
+}}
+
+{ "type": "collaboration.resolved",   "payload": {   // server → client WS
+    "collaboration_request_id", "status", "target_execution_id"?, "scores"?, "resolved_at"
+}}
+
+// ─── E7 拥有（Execution 域）───
+{ "type": "execution.dispatch",   "payload": {
+    "execution_id", "collaboration_request_id"?, "work_item_ref"?,
+    "input": { prompt, params },
+    "context": { memory_refs, recent_messages, permissions },
+    "deadline_s", "idempotency_key"
+}}
+
+{ "type": "execution.event",        "payload": {
+    "execution_id", "attempt_no",
     "event_type": "STDOUT|PROGRESS|TOOL_CALL|LLM_TICK|ARTIFACT|ERROR",
-    "provider_event_id": "evt-uuid-4",   // v0.4.1 协议级幂等键
-    "seq": 1,
-    "payload": { "content": "..." }
+    "provider_event_id",   // 协议级幂等键
+    "seq",                  // contiguous cursor（v0.4.3 修复 MAX(seq) gap）
+    "payload": { content, meta }
 }}
 
-// 最终结果（v0.4.1 不携带 decision）
-{ "type": "result", "id": "uuid-5", "ts": ..., "payload": {
-    "execution_id": "...",
-    "attempt_no": 1,
+{ "type": "execution.result",       "payload": {
+    "execution_id", "attempt_no",
     "status": "SUCCEEDED|FAILED|CANCELLED",
-    "output": { "markdown": "...", "code": "..." },
-    "usage": { "tokens_in": 1500, "tokens_out": 300, "duration_ms": 6200 },
-    "artifacts": [ { "kind": "FILE", "name": "patch.diff", "s3_key": "..." } ]
+    "output": { markdown, code },
+    "usage": { tokens_in, tokens_out, duration_ms },
+    "artifacts": [{ kind, name, s3_key }]
 }}
 
-// 错误
-{ "type": "error", "id": "uuid-6", "ts": ..., "payload": {
-    "execution_id": "...",
-    "attempt_no": 1,
-    "code": "PROVIDER_5XX|PROVIDER_401|RATE_LIMIT|DEADLINE_EXCEEDED",
-    "message": "...",
-    "retry_after_s": 60
+{ "type": "execution.error",        "payload": {
+    "execution_id", "attempt_no",
+    "code": "PROVIDER_5XX|PROVIDER_401|RATE_LIMIT|SANDBOX_INIT_FAILED|DEADLINE_EXCEEDED",
+    "message", "retry_after_s"?
+}}
+
+{ "type": "execution.cancel",       "payload": {  // Runtime → Agent
+    "execution_id", "attempt_no",
+    "reason": "USER_CANCEL|LIFECYCLE_PAUSED|LIFECYCLE_DISABLED|DEADLINE_EXCEEDED|TIMEOUT_NO_RESUME"
+}}
+
+// ─── v0.4.3 反向 resume 协议（contiguous cursor）───
+{ "type": "execution.resume_request", "payload": { execution_id, attempt_no }}
+
+{ "type": "execution.resume_ack",     "payload": {
+    "execution_id", "attempt_no",
+    "last_persisted_seq",      // last_contiguous_seq（不是 MAX）
+    "snapshot": { execution_id, input, context, deadline_s }
+}}
+
+// ─── Agent 上报 lifecycle/activity ───
+{ "type": "status",       "payload": {
+    "status": "OFFLINE|AVAILABLE|THINKING|WORKING|WAITING_CONTEXT|ERROR",
+    "reason"?, "since"
 }}
 ```
 
-### 3.5 关键 idempotency 规则
+### 3.2 协议边界（v0.4.3 强制）
 
-| 消息 | 去重键 | DB 唯一约束 | 行为 |
-| --- | --- | --- | --- |
-| `event` | `provider_event_id` | `UNIQUE(attempt_id, provider_event_id)` | 重复忽略，不抛错 |
-| `result` / `error` | envelope `id` | `agent_executions.terminal_envelope_id` 字段 | 重复忽略 |
-| `dispatch` | `idempotency_key` (Runtime 侧生成) | Runtime 内部记录 | 重复忽略 |
+| 消息 | 拥有方 | 不允许携带 |
+| --- | --- | --- |
+| `collaboration.request` | E4（transport 经 E7 Gateway） | `execution_id` |
+| `collaboration.decision` | E4 | `execution_id` |
+| `collaboration.cancelled` | E4 | `execution_id` |
+| `execution.dispatch` | E7 | `decision` / `analysis` / `needs` |
+| `execution.event` | E7 | `decision` / `analysis` |
+| `execution.result` | E7 | `decision` / `reason` / `analysis` / `needs` |
+| `execution.error` | E7 | `decision` |
+| `execution.cancel` | E7 | — |
+| `execution.resume_request` | E7 | — |
+| `execution.resume_ack` | E7 | — |
 
-## 4. 数据流时序
+## 4. Transactional Outbox（P0-3 新增）
 
-### 4.1 E7 收到 `result` envelope 的处理
+### 4.1 模式
+
+任何"状态变更"+"下游事件"的组合必须**同事务**写入：
 
 ```python
-async def handle_result(envelope):
-    execution_id = envelope.payload.execution_id
-    envelope_id = envelope.id
+# 伪代码
+async def emit_event(aggregate_type, aggregate_id, event_type, payload):
+    async with db.transaction() as tx:
+        # 1. 状态变更
+        ...  # UPDATE / INSERT 业务表
 
-    # 1. CAS 状态转换（核心幂等）
-    affected = await db.execute("""
-        UPDATE agent_executions
-        SET status = $1,
-            completed_at = NOW(),
-            active_attempt_no = NULL,
-            terminal_envelope_id = $2
-        WHERE id = $3
-          AND status IN ('PENDING', 'RUNNING')
-        RETURNING agent_id, attempt_count
-    """, envelope.payload.status, envelope_id, execution_id)
+        # 2. 写 outbox
+        await tx.execute("""
+            INSERT INTO outbox_events
+            (aggregate_type, aggregate_id, event_type, payload, created_at)
+            VALUES ($1, $2, $3, $4, NOW())
+        """, aggregate_type, aggregate_id, event_type, payload)
 
-    if not affected:
-        # 重复或 stale（已 terminal）
-        log.info(f"Duplicate/stale result for {execution_id}, envelope={envelope_id}")
-        return  # 不抛错
+    # 事务外：worker 异步投递
+    # 但 PG 提供持久化保证
+```
 
-    row = affected[0]
-    agent_id = row.agent_id
+### 4.2 outbox_events 表
 
-    # 2. 写 audit
-    await audit_log('execution.completed', execution_id, envelope.payload.status)
+```sql
+CREATE TABLE outbox_events (
+  id              UUID PRIMARY KEY,
+  aggregate_type  TEXT NOT NULL,        -- 'collaboration' | 'execution' | 'work_item' | ...
+  aggregate_id    UUID NOT NULL,
+  event_type      TEXT NOT NULL,        -- 'collaboration.accepted' | 'execution.completed' | ...
+  payload         JSONB NOT NULL,
+  -- 幂等：同 (aggregate, event) 不能投递两次
+  idempotency_key TEXT UNIQUE,          -- 消费者侧去重
+  -- 投递状态
+  published_at    TIMESTAMPTZ,
+  attempt_count   INT NOT NULL DEFAULT 0,
+  next_attempt_at TIMESTAMPTZ DEFAULT NOW(),
+  last_error      TEXT,
+  created_at      TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX idx_outbox_unpublished ON outbox_events(next_attempt_at)
+  WHERE published_at IS NULL;
+```
 
-    # 3. 释放 slot（E4 持有的 lease，但 v0.4.2 用 tryAcquireSlot 的 lease_id 释放）
-    #    注意：slot 在 Resolver 阶段 reservation，由 E4 持有 lease_id
-    #    Execution 完成时 E4 收到 WS 推 → E4 releaseSlot
-    #    这里 E7 只更新 DB 状态
-    await emit('execution.completed', execution_id)  # WS fanout
+### 4.3 outbox worker
 
-    # 4. 写 llm_calls
-    if envelope.payload.usage:
-        await db.execute("""
-            INSERT INTO llm_calls (agent_id, execution_id, model, tokens_in, tokens_out, duration_ms, cost_usd)
-            VALUES (...)
+```python
+async def outbox_worker():
+    while True:
+        events = await db.query("""
+            SELECT * FROM outbox_events
+            WHERE published_at IS NULL
+              AND next_attempt_at <= NOW()
+            ORDER BY created_at
+            LIMIT 100
         """)
-
-    # 5. Activity 恢复（异步事件触发，Agent 推 status=AVAILABLE 才是真信号）
-    #    这里不主动写 agents.activity
+        for event in events:
+            try:
+                await dispatch_event(event)  # 按 aggregate_type 路由
+                await db.update("""
+                    UPDATE outbox_events SET published_at = NOW() WHERE id = $1
+                """, event.id)
+            except Exception as e:
+                # 指数退避
+                backoff = 2 ** event.attempt_count
+                await db.update("""
+                    UPDATE outbox_events
+                    SET attempt_count = attempt_count + 1,
+                        next_attempt_at = NOW() + ($1 || ' seconds')::INTERVAL,
+                        last_error = $2
+                    WHERE id = $3
+                """, str(backoff), str(e), event.id)
 ```
 
-### 4.2 E4 收到 `result` 后的消息流投影
+### 4.4 关键路径（v0.4.3）
+
+**ACCEPT 路径**：
 
 ```python
-async def on_execution_completed(execution_id):
-    execution = await get_execution(execution_id)
-    collab = await get_collaboration_request(execution.collaboration_request_id)
+async def handle_collab_decision_ACCEPT(collab_id, agent_id, analysis):
+    async with db.transaction() as tx:
+        # 1. 写 decision_records（仅 E4 写，事实源）
+        await tx.execute("""
+            INSERT INTO decision_records
+            (collaboration_request_id, agent_id, decision, reason, analysis, decided_at)
+            VALUES ($1, $2, 'ACCEPT', $3, $4, NOW())
+        """, collab_id, agent_id, ..., analysis)
 
-    if collab.context_refs.channel_id:
-        # 写 AGENT_OUTPUT 投影消息
-        await db.execute("""
-            INSERT INTO messages (channel_id, seq, sender_type, sender_id, content_type, content, mentions)
-            VALUES ($1, next_seq($1), 'AGENT', $2, 'AGENT_OUTPUT', $3, '[]')
-        """, collab.context_refs.channel_id, execution.agent_id, {
-            "execution_ref": execution.id,
-            "artifact_ids": [...]  # 从 execution_artifacts 关联
-        })
+        # 2. CAS collab status
+        affected = await tx.execute("""
+            UPDATE collaboration_requests
+            SET status='ACCEPTED', resolved_at=NOW(),
+                target_agent_id=$2
+            WHERE id=$1 AND status='PENDING'
+            RETURNING id
+        """, collab_id, agent_id)
 
-        # 写 DECISION 投影消息（如果是 decision-driven）
-        # 注：collab.decision 已写过 DECISION 投影
-        # Execution 完成是状态变更，不重复写
+        if not affected:
+            raise StaleStateError()
 
-        # WS 广播
-        await ws_broadcast(channel_id, 'message.created', {...})
+        # 3. 写 outbox
+        await tx.execute("""
+            INSERT INTO outbox_events
+            (aggregate_type, aggregate_id, event_type, payload, idempotency_key)
+            VALUES ('collaboration', $1, 'collaboration.accepted', $2, $3)
+        """, collab_id, {...}, f"collab-accepted-{collab_id}")
+
+    # 4. 事务外：upgrade pending_decision lease → execution lease
+    await promote_lease(agent_id, lease_id)
+
+    # 5. outbox worker 异步拾取
 ```
 
-## 5. 时序约束（关键 SLA）
+**Execution 完成路径**：
+
+```python
+async def handle_execution_result(execution_id, envelope_id, status):
+    async with db.transaction() as tx:
+        # 1. CAS terminal
+        affected = await tx.execute("""
+            UPDATE agent_executions
+            SET status = $2, completed_at = NOW(), active_attempt_no = NULL,
+                terminal_envelope_id = $3
+            WHERE id = $1 AND status IN ('PENDING', 'RUNNING')
+            RETURNING id
+        """, execution_id, status, envelope_id)
+
+        if not affected:
+            return  # 重复 / stale
+
+        # 2. update attempt
+        await tx.execute("""
+            UPDATE execution_attempts
+            SET status = 'COMPLETED', completed_at = NOW()
+            WHERE execution_id = $1 AND attempt_no = (SELECT active_attempt_no FROM agent_executions WHERE id = $1)
+        """, execution_id)
+
+        # 3. 写 outbox
+        await tx.execute("""
+            INSERT INTO outbox_events
+            (aggregate_type, aggregate_id, event_type, payload, idempotency_key)
+            VALUES ('execution', $1, 'execution.completed', $2, $3)
+        """, execution_id, {...}, f"exec-completed-{envelope_id}")
+
+    # 事务外：outbox worker → 释放 lease + 写 AGENT_OUTPUT 投影
+```
+
+### 4.5 解决的具体问题
+
+| 场景 | 旧（v0.4.2） | 新（v0.4.3 outbox） |
+| --- | --- | --- |
+| CAS SUCCEEDED 成功，进程 crash，emit 没执行 | 状态变 SUCCEEDED，slot 永远不释放 | 状态变 + outbox 已落；outbox worker 重启后投递 |
+| ACCEPT DB 写成功，HTTP 调用 E7 失败 | collab=ACCEPTED，execution 不存在 | collab=ACCEPTED + outbox 已落；worker 重发 HTTP，E7 幂等（UNIQUE(collaboration_request_id)） |
+| 消息广播丢失 | 用户看不到 | outbox worker 持续 retry，pub/sub 兜底 |
+| network partition 时 | 部分状态变更 | 全部 or 全部不（事务性） |
+
+## 5. Idempotency 关键约束
+
+```sql
+-- E4 → E7 create execution 幂等
+ALTER TABLE agent_executions
+  ADD CONSTRAINT uq_executions_collab UNIQUE (collaboration_request_id);
+
+-- Memory approval 幂等
+ALTER TABLE memory_items
+  ADD CONSTRAINT uq_memory_items_proposal UNIQUE (proposal_id);
+
+-- CollaborationRequest 同一 active binding 唯一
+-- 已在 v0.4.1 / v0.4.2 处理
+```
+
+## 6. 时序约束（关键 SLA）
 
 | 步骤 | P95 目标 | 关键路径 |
 | --- | --- | --- |
 | 消息 → 写 triggers + collab_request | < 50ms | PG 写 |
-| Resolver 选 Agent | < 500ms | Redis Lua atomic + capability 算分 |
-| E4 → E7 API | < 100ms | 内部 HTTP |
+| Resolver 选 Agent + tryAcquireSlot | < 500ms | Redis Lua + capability 算分 |
+| E4 推 `collaboration.request` WS | < 200ms | WS push |
+| Agent 推 `collaboration.decision` | 由 Agent 决定 | LLM 三件套判断 |
+| **ACCEPT → E4 写 decision + outbox + outbox worker 调 E7** | **< 300ms** | **PG 事务 + outbox 投递 + 内部 API** |
 | E7 dispatch 到 Agent | < 200ms | WS push |
-| Agent 推 status THINKING | < 100ms | WS 反向 |
-| Agent 推 collaboration.decision | < 1s | 业务逻辑（Capability 校验） |
-| Agent 推 result | 由 Agent 决定 | LLM 调用主导 |
-| E7 CAS + 消息流投影 | < 200ms | PG CAS + WS broadcast |
-| **端到端（用户发消息 → 看到结果）** | 由 LLM 决定 | 大头在 LLM latency |
+| Agent 推 result | 由 Agent 决定 | LLM 主导 |
+| E7 CAS + outbox | < 200ms | PG 事务 |
+| **outbox worker 投递 → 释放 lease + 消息流投影** | **< 500ms** | **outbox + 内部 API + WS 广播** |
+| **端到端** | **由 LLM 决定** | **大头在 LLM latency** |
 
-## 6. 关键不变量
+## 7. 关键不变量
 
-1. **execution_id 唯一**：每个 E4 → E7 API 调用创建一个新 execution_id
+1. **execution_id 唯一**：每个 `collaboration.accepted` outbox 事件对应一个 execution（UNIQUE constraint）
 2. **attempt_no 单调**：每个 execution 的 attempt_no 从 1 开始，严格 +1
 3. **provider_event_id 单 attempt 内唯一**：UNIQUE(attempt_id, provider_event_id) DB 强制
 4. **envelope.id 全局唯一**：Runtime 给每个 envelope 分配 UUID，DB 落 `terminal_envelope_id` 去重
-5. **CAS 状态转换**：任何终态变更都带 `WHERE status IN ('PENDING','RUNNING')`
-6. **active_slots 严格守恒**：`reservation_count - release_count = agents.active_slots`（Redis 持有）
+5. **CAS 状态转换**：所有终态变更都带 `WHERE status IN ('PENDING','RUNNING')`
+6. **outbox 事务性**：状态变更 + outbox INSERT 同事务（要么都有要么都无）
+7. **Decision-before-Execution**（v0.4.3 关键）：Execution 只在 collab.status=ACCEPTED 后由 outbox worker 创建
+8. **Decision 事实源唯一**：decision_records 仅 E4 写，E7 绝不允许写
 
-## 7. 失败处理
+## 8. 失败处理
 
 | 失败点 | 行为 | 重试 |
 | --- | --- | --- |
-| E4 → E7 内部 API 失败 | 写 collab_request.status=UNRESOLVED + 通知发起人 | 业务层决定 |
-| E7 dispatch 失败（Agent 离线） | PENDING 60s 超时 → 取下一个候选 | Resolver 路径 |
-| Agent 推 result 失败（WS 断） | 落 `agent_executions.status='RUNNING'`，等 Agent 重连 | resume_request 协议 |
+| E4 → E7 内部 API 失败 | outbox worker retry（指数退避） | 自动 |
+| E7 dispatch 失败（Agent 离线） | collab.timeout_s（默认 600s）触发 E4 取消 + 释放 lease | 超时 |
+| Agent 推 result 失败（WS 断） | 落 `agent_executions.status='RUNNING'`，等 Agent 重连 | resume_request |
 | Agent 推 status 失败 | 落 `agents.activity=OFFLINE`（90s 后由 heartbeat 扫） | 重新 dispatch |
-| E7 CAS 失败（status 已是终态） | 忽略，audit 记 "stale_terminal" | 不会重复释放 slot |
+| E7 CAS 失败（status 已是终态） | 忽略，audit 记 "stale_terminal" | 不会重复释放 lease |
+| outbox worker 投递失败 | attempt_count + 1，next_attempt_at 退避 | 自动 retry |
+| DB crash | outbox_events 在 PG → 事务保证；DB 恢复后 outbox worker 继续 | 启动时扫未投递 |
 
-## 8. E2E 验收点
+## 9. E2E 验收点
 
 ```
 e2e/01-single-agent-lifecycle/
@@ -334,28 +467,36 @@ e2e/01-single-agent-lifecycle/
     Given Agent B 在 #webhook-retry 频道
     When User 发 "@Backend Agent 看下重试逻辑"
     Then T+200ms 看到 DECISION 投影（ACCEPT）
-    And  T+1-30s 看到 AGENT_OUTPUT 投影（与 LLM 同步）
+    And  T+1-30s 看到 AGENT_OUTPUT 投影
     And  Agent activity 依次：AVAILABLE → THINKING → WORKING → AVAILABLE
     And  agent_executions.status 最终为 SUCCEEDED
-    And  active_slots 恢复为 0
+    And  decision_records 仅 E4 写（E7 绝不能写）
+    And  outbox_events 全量投递
 
-  test_002_reject.json
-    Given Agent B 离线
-    When User 发 "@Backend Agent 看下"
-    Then 60s 后 status=UNRESOLVED + 通知
+  test_002_execution_after_accept.json     # v0.4.3 新增
+    Given Resolver 选中 Agent
+    When Agent 推 collaboration.decision=REJECT
+    Then 不创建 execution（agent_executions 无新行）
+    And  lease 立即释放
 
-  test_003_idempotency.json
+  test_003_outbox_durability.json           # v0.4.3 新增
+    Given E4 写完 decision + outbox
+    When 进程 crash 在调 E7 之前
+    Then 重启后 outbox worker 自动调 E7 创建 execution
+    And  collab_request.status=ACCEPTED（不变）
+
+  test_004_idempotency.json
     When 重复推同一个 result envelope.id
     Then DB 状态不变，第二次 ignored
 
-  test_004_cas_protection.json
+  test_005_cas_protection.json
     When cancel + result 同时到
     Then 只一个 CAS 成功（affected_rows=1），另一个 ignored
 ```
 
-## 9. 与其他设计的关系
+## 10. 与其他设计的关系
 
-- 详见 [02-interrupt-and-cancel.md](./02-interrupt-and-cancel.md)（Cancel 路径）
-- 详见 [03-ws-connection-and-resume.md](./03-ws-connection-and-resume.md)（WS 协议细节）
-- 详见 [04-resolver-and-routing.md](./04-resolver-and-routing.md)（Resolver + Slot）
-- 详见 [08-error-and-retry.md](./08-error-and-retry.md)（ERROR 触发 + 重试）
+- 详见 [03-ws-connection-and-resume.md](./03-ws-connection-and-resume.md)（`collaboration.request` 协议细节）
+- 详见 [04-resolver-and-routing.md](./04-resolver-and-routing.md)（Slot reservation 不创建 execution）
+- 详见 [02-interrupt-and-cancel.md](./02-interrupt-and-cancel.md)（ACCEPTED 独立 lifecycle）
+- 详见 [08-error-and-retry.md](./08-error-and-retry.md)（retry 与永久失败降级）
