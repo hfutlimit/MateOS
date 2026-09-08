@@ -17,6 +17,19 @@
 > 6. **Agent lifecycle / activity 拆分**：lifecycle=ACTIVE/PAUSED/DISABLED，activity=OFFLINE/.../ERROR
 > 7. **删除 `can_execute` / `can_review` 字段**：Capability（能不能）+ Permission（允不允许）单一事实源
 > 8. **消息流改 projection**：`messages.content_type` 5 形态保留，DECISION/MEMORY_REQUEST 形态只引 `entity_ref`
+>
+> **v0.3 → v0.3.1 协议收口**（E4/E7 边界冻结）：
+> 9. **E4 / E7 协议彻底拆开**：`collaboration.*`（E4 拥有）vs `execution.*`（E7 拥有）；`execution.result` 不携带 decision；`collaboration.decision` 不携带 execution_id
+> 10. **execution_id 由 E4 Orchestrator → E7 API 产生**（不是 Agent 自报），消除 v0.4 的不可能时序
+> 11. **CollaborationRequest.status 收敛**为 `PENDING|ACCEPTED|REJECTED|NEED_CONTEXT|UNRESOLVED|CANCELLED`（去掉 EXECUTING/COMPLETED/FAILED，Execution 状态由 E7 维护）
+> 12. **Resolver 调度改用 lifecycle=ACTIVE + active_slots < max_concurrency**（不再用 activity；activity 仅做 UI derived）
+> 13. **Attempt ≠ WS session**：reconnect 不新建 attempt；新增 `execution.resume` 协议
+> 14. **Event 协议级幂等**：`provider_event_id` + UNIQUE(attempt_id, provider_event_id)
+> 15. **E8 简化**：`work_item_projections` 表删除；`work_items` 单表含 `search_text` / `provider_status` / `provider_meta`
+> 16. **ProviderKey 去硬编码**：`type ProviderKey = string` + `ProviderRegistry` 模式
+> 17. **DB UNIQUE 强制 active binding 唯一**：`work_item_bindings(project_id) WHERE is_active=true`
+> 18. **Provider 路由规则冻结**：CREATE 用 `activeBinding.provider_key`；UPDATE 用 `work_item.provider_key`
+> 19. **Jira Status Mapping 动态**：`listStatuses(binding)` 而非 Provider 级静态模板
 
 ---
 
@@ -142,31 +155,37 @@ CollaborationRequest
   ├─ target_agent_id?    # 显式指定时无 Resolver
   ├─ required_capabilities: ["coding", "review"]
   ├─ context_refs: { channel_id?, message_seq?, memory_refs: [...], work_item_id? }
-  ├─ status: PENDING | ACCEPTED | REJECTED | NEED_CONTEXT | EXECUTING | COMPLETED | FAILED
+  ├─ status: PENDING | ACCEPTED | REJECTED | NEED_CONTEXT | UNRESOLVED | CANCELLED   # v0.3.1 收敛
   ├─ deadline_s
   └─ idempotency_key
 
 ↓ Resolver（如未指定 target_agent_id）
-  ① 硬过滤：lifecycle=ACTIVE ∩ activity ∈ {AVAILABLE, THINKING} ∩ permission 允许
+  ① 硬过滤：lifecycle=ACTIVE ∩ active_slots < max_concurrency ∩ permission 允许    # v0.3.1 改
   ② Capability ranking：capability_match + load + accept_rate_30d
   ③ 产出 Top-N 候选
 
-↓ 派发到 Agent（Runtime 路径或 Built-in WorkItem 执行）
+↓ 派发到 Agent
   ① 写 decision_records
   ② WS 推 CollaborationRequest.resolved
-  ③ 决策 Accept → 创建 Execution（E7）| Reject / Need Context → 落 decision + 通知发起人
+  ③ 决策 Accept → Orchestrator 调 E7 API 创建 agent_executions  # v0.3.1 改
+    | Reject / Need Context → 落 decision + 通知发起人
 ```
 
-### 4.2 Decision 状态机
+### 4.2 Decision 状态机（v0.3.1 收敛）
 
 ```
 CollaborationRequest.status
-  PENDING ─┬─► ACCEPTED ──► 触发 Execution（E7，绑定 work_item_ref?）
-           ├─► REJECTED（reason 必填）
-           ├─► NEED_CONTEXT（needs[] 必填，阻塞等待补充）
-           └─► EXECUTING（Execution 已创建）
-                ├─► COMPLETED
-                └─► FAILED
+  PENDING ─┬─► ACCEPTED  ─► Orchestrator 调 E7 API 创建 agent_executions
+           ├─► REJECTED  （reason 必填）
+           ├─► NEED_CONTEXT （needs[] 必填，阻塞等待补充）
+           ├─► UNRESOLVED （全部候选超时）
+           └─► CANCELLED  （发起人 / 管理员 / lifecycle 变更触发）
+
+Execution 状态完全在 E7：
+  agent_executions.status ∈ {PENDING, RUNNING, SUCCEEDED, FAILED, CANCELLED, TIMEOUT}
+
+UI 渲染时如需「执行中」状态，由前端从 E7 API 拉取后做 projection（display_state）
+CollaborationRequest 不再镜像 Execution 状态——三条 lifecycle 真正独立
 ```
 
 `decision_records` 表（事实源）——所有 Decision 必带 `analysis{capability, context_score, permission}`，UI 决策卡片从 decision_records 投影生成（**不复制**）。
@@ -533,30 +552,56 @@ retry / reconnect / crash recovery / timeout / cancel / streaming / artifact 全
 
 ERROR 状态下 Agent **不进入 Resolver 候选**（lifecycle 仍是 ACTIVE，只是 activity 异常）。
 
-### 6.5 Connector 协议（v1）
+### 6.5 Connector 协议（v1.1 — v0.3.1 协议边界拆开）
 
 ```jsonc
 // 通用 envelope
-{ "v": 1, "type": "hello|heartbeat|status|dispatch|progress|result|error", "id": "uuid", "ts": 0, "payload": {} }
+{ "v": 1, "type": "hello|heartbeat|status|dispatch|event|result|error|resume", "id": "uuid", "ts": 0, "payload": {} }
 
-// dispatch
+// E7 拥有
 { "type": "dispatch", "payload": {
-    "execution_id": "...",                          // ← 新增（v0.4）
-    "collaboration_request_id": "...",              // ← 新增
-    "work_item_ref": {...}?,                        // ← optional
-    "context": { "memory_refs": [...], "recent_messages": [...], "permissions": {...} },
+    "execution_id": "...",
+    "collaboration_request_id": "..."?,     // optional，可无 WorkItem 触发
+    "work_item_ref": {"provider_key":"builtin", "work_item_id":"..."}?,   // optional
+    "input": { "prompt": "...", "params": {} },
+    "context": { "memory_refs": [], "recent_messages": [], "permissions": {} },
     "deadline_s": 600, "idempotency_key": "..."
 }}
 
-// result
+{ "type": "event", "payload": {
+    "execution_id": "...", "attempt_no": 1,
+    "event_type": "STDOUT|PROGRESS|TOOL_CALL|LLM_TICK|ARTIFACT|ERROR",
+    "provider_event_id": "evt-uuid-123",    // 协议级幂等键（v0.3.1 新增）
+    "seq": 42,                               // 单 attempt 内单调
+    "payload": { "content": "...", "meta": {} }
+}}
+
 { "type": "result", "payload": {
-    "execution_id": "...",
+    "execution_id": "...", "attempt_no": 1,
+    "status": "SUCCEEDED|FAILED|CANCELLED",   // 不携带 decision
+    "output": { "markdown": "...", "code": "..." },
+    "usage": { "tokens_in": 0, "tokens_out": 0, "duration_ms": 0 },
+    "artifacts": [ { "kind": "FILE", "name": "...", "s3_key": "..." } ]
+}}
+
+{ "type": "resume", "payload": {
+    "execution_id": "...", "last_event_seq": 42
+}}
+
+// E4 拥有（独立消息名空间，不重叠）
+{ "type": "collaboration.decision", "payload": {
+    "collaboration_request_id": "...",
     "decision": "ACCEPT|REJECT|NEED_CONTEXT|DELEGATE",
     "reason": "...", "needs": [...],
-    "analysis": { "capability": true, "context_score": 88, "permission": true },
-    "output": { "markdown": "...", "code": "...", "tokens_in": 0, "tokens_out": 0, "latency_ms": 0 }
+    "analysis": { "capability": true, "context_score": 88, "permission": true }
 }}
 ```
+
+设计原则：
+- Agent 无入站端口（NAT 穿透）；上下文注入走引用；Project 知识边界由服务端强制
+- **v0.3.1 协议边界**：`collaboration.*`（E4）vs `execution.*`（E7）严格分离
+- **v0.3.1 event 幂等**：`provider_event_id` + UNIQUE(attempt_id, provider_event_id) DB 保证
+- **v0.3.1 attempt ≠ WS session**：`execution.resume` 协议补发；reconnect 不新建 attempt
 
 设计原则：Agent 无入站端口（NAT 穿透）；上下文注入走引用；Project 知识边界由服务端强制。
 
@@ -601,59 +646,94 @@ ERROR 状态下 Agent **不进入 Resolver 候选**（lifecycle 仍是 ACTIVE，
 
 ## 9. Work Management 域
 
-### 9.1 Provider 抽象
+### 9.1 Provider 抽象（v0.3.1 改：去硬编码）
 
 ```ts
+// v0.3.1 改：ProviderKey = string（去硬编码）
+type ProviderKey = string;
+
 interface WorkManagementProvider {
-  key: 'builtin' | 'jira' | 'linear' | 'github_issues';   // future
+  readonly key: ProviderKey;
   getCapabilities(): ProviderCapabilities;
-  listWorkItems(query: WorkItemQuery): Promise<WorkItemPage>;
-  getWorkItem(ref: WorkItemRef): Promise<WorkItem>;
-  createWorkItem(input: WorkItemInput): Promise<WorkItem>;
-  updateWorkItem(ref: WorkItemRef, changes: WorkItemChanges): Promise<WorkItem>;
-  addComment(ref: WorkItemRef, comment: WorkCommentInput): Promise<WorkComment>;
-  getStatusMapping(): CanonicalStatusMapping[];        // provider status → canonical category
-  getSelfMetadata(): Promise<ProviderMetadata>;         // 用于 UI 渲染动态配置
+  getSelfMetadata(): Promise<ProviderMetadata>;
+  // v0.3.1 改：listStatuses 接受 binding（不是全局模板）
+  listStatuses(binding: WorkItemBinding): Promise<ProviderStatus[]>;
+  listWorkItems(query: WorkItemQuery, binding: WorkItemBinding): Promise<WorkItemPage>;
+  getWorkItem(ref: WorkItemRef, binding: WorkItemBinding): Promise<WorkItem>;
+  createWorkItem(input: WorkItemInput, binding: WorkItemBinding): Promise<WorkItem>;
+  updateWorkItem(ref: WorkItemRef, changes: WorkItemChanges, binding: WorkItemBinding): Promise<WorkItem>;
+  addComment(ref: WorkItemRef, comment: WorkCommentInput, binding: WorkItemBinding): Promise<WorkComment>;
+  listComments(ref: WorkItemRef, binding: WorkItemBinding): Promise<WorkComment[]>;
+  getStatusMapping(binding: WorkItemBinding): Promise<CanonicalStatusMapping[]>;
+}
+
+interface ProviderRegistry {
+  register(provider: WorkManagementProvider): void;
+  get(key: ProviderKey): WorkManagementProvider | undefined;
+  list(): ProviderMetadata[];
 }
 ```
 
-**业务层**：`workManagementProviderRegistry.get(binding.provider_key)` 拿到实例后调用，**永不分 provider 类型**。
+**业务层**：`workManagementProviderRegistry.get(...)` 拿到实例后调用，**永不分 provider 类型**。加 YouTrack / Azure Boards / Asana 时只在 bootstrap 注册新 Provider，**Work Management Core 零修改**。
 
 ### 9.2 Built-in Provider
 
-- Source of truth = `work_items` 表
+- Source of truth = `work_items` 单表（v0.3.1 删 work_item_projections）
+- work_items 自带 `provider_key` / `external_ref` / `external_url` / `provider_status` / `provider_meta` / `search_text`
+- Built-in 时 `provider_key='builtin'` / `external_ref=NULL`
 - 默认实现，V1 内置
-- WorkItem lifecycle：OPEN → IN_PROGRESS → IN_REVIEW → DONE → CLOSED
-- Project 默认绑定 builtin，无需配置
+- Project 默认 binding=builtin，无需配置
 
-### 9.3 Jira Provider（V1+ E9）
+### 9.3 路由规则（v0.3.1 冻结）
+
+```
+CREATE WorkItem:
+  provider = providerRegistry.get(project.activeBinding.provider_key)
+  → 必须有 active binding；否则 422 "no active Work Management Provider"
+
+UPDATE WorkItem (status / title / assignee / etc.):
+  provider = providerRegistry.get(work_item.provider_key)
+  → 永远用 work_item.provider_key，**不**看 active binding
+  → 切到 Jira 后旧 Built-in WorkItem 仍走 BuiltInProvider
+```
+
+### 9.4 DB Invariant（v0.3.1）
+
+```sql
+-- Project 同 active provider 唯一
+CREATE UNIQUE INDEX uq_project_active_work_provider
+  ON work_item_bindings(project_id)
+  WHERE is_active = true;
+```
+
+> 一个 Project 同一时刻只能有一个 active Work Management Provider。由 DB 强制，不靠 service code 守门。
+
+### 9.5 Jira Provider（V1+ E9）
 
 - Source of truth = Jira Cloud
-- MateOS 维护 `work_item_projections` 本地缓存
+- MateOS 维护 `work_items`（v0.3.1 单表）本地同步表示
 - 通过 webhook 接收 Jira 状态变化
 - 双绑去重：payload_hash 防重复同步
 - 冲突：CONFLICT + 通知 owner 仲裁
 
-### 9.4 Provider 切换语义
+### 9.6 Change Provider 语义
 
-**Change Provider**（仅影响新 WorkItem） + **Migrate Existing WorkItems**（独立 Wizard）：
+**Change Provider**（仅影响新 WorkItem） + **Migrate Existing WorkItems**（独立 Wizard，V2）：
 - 切换 provider_key 立即生效
 - 历史 WorkItem 迁移走向导，可选导出 CSV / 单向同步到新 Provider
 - V1 简化为仅 Change Provider；Migrate 留 V2
 
-### 9.5 状态映射（Status Mapping）
+### 9.7 Jira Status Mapping（v0.3.1 改：动态拉）
 
 ```
-Jira:        "To Do"      "In Progress"  "In Review"  "Done"  "Closed"
-             ↓             ↓              ↓            ↓       ↓
-Canonical:   TODO          IN_PROGRESS    IN_PROGRESS  DONE    DONE
-
-Linear:      "Backlog"     "In Progress"  "In Review"  "Done"  "Cancelled"
-             ↓             ↓              ↓            ↓       ↓
-Canonical:   TODO          IN_PROGRESS    IN_PROGRESS  DONE    CLOSED
+初始化 binding 时：
+  1. OAuth + GET /rest/api/3/project/{key}/statuses  // 实际 status 按 Issue Type 变
+  2. 写入 binding.settings.status_options
+  3. P11 UI 渲染动态选择
+  4. 用户选好映射后写 binding.settings.status_mapping
 ```
 
-provider status 字面值保留（不丢失信息），canonical category 用于跨 Provider 聚合与统计。
+> **不要在 JiraProvider 类里写死 TODO → ['To Do', 'Open'] 静态模板**。Atlassian 官方说状态按项目 + Issue Type 变。
 
 ---
 
