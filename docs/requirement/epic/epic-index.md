@@ -1,52 +1,76 @@
 # MateOS Epic 总览
 
-> 详细需求见同目录下 `E1-...md` ~ `E9-...md`。本文档提供全局索引与依赖关系。
+> 详细需求见同目录下 `E1-...md` ~ `E10-...md`。本文档提供全局索引与依赖关系。
+>
+> **v0.4 架构重切（2026-09-08）**：
+> - 删除 AgentBoard execution / WorkItem backend 切换 / 多个复合概念
+> - 新增 Work Management 域（独立）+ Agent Execution domain（durable，不只是 Connector）
+> - CollaborationRequest 提为一等实体（Trigger 多种来源汇聚）
+> - Capability × Permission 单一事实源（删 `can_execute` / `can_review`）
+> - Agent lifecycle × activity 拆分
+> - Permission effect 改 `REQUIRE_APPROVAL`
+> - 消息流改 projection（5 形态 UI 保留，事实源在 decision_records / memory_proposals / agent_executions）
+
+## Epic 清单（v0.4：10 个）
 
 | Epic | 标题 | 阶段 | 主依赖 | 文档 |
 | --- | --- | --- | --- | --- |
-| **E1** | User & Team Management | MVP（M1） | — | [E1-user-team-management.md](./E1-user-team-management.md) |
-| **E2** | Agent as First-Class Member | MVP（M3） | E1 | [E2-agent-first-class-member.md](./E2-agent-first-class-member.md) |
-| **E3** | Channel & Messaging | MVP（M2） | E1 | [E3-channel-messaging.md](./E3-channel-messaging.md) |
-| **E4** | Mention Resolver & Decision Engine | MVP（M4） | E2, E3, E6 | [E4-mention-resolver-decision.md](./E4-mention-resolver-decision.md) |
-| **E5** | Shared Memory & Knowledge Base | MVP（M5） | E1, E3, E6 | [E5-shared-memory.md](./E5-shared-memory.md) |
-| **E6** | Permission & Access Control | MVP（M4 同步） | E1 | [E6-permission-access-control.md](./E6-permission-access-control.md) |
-| **E7** | Agent Runtime & Connector Protocol | MVP（M3-M4） | E2 | [E7-agent-runtime-connector.md](./E7-agent-runtime-connector.md) |
-| **E8** | Observability & Operations | MVP（M6） | E1-E7 全部 | [E8-observability-operations.md](./E8-observability-operations.md) |
-| **E9** | External Integration Extensions | V1+ | E2, E4 | [E9-external-integration.md](./E9-external-integration.md) |
+| **E1** | Identity & Workspace | MVP（M1） | — | [E1-identity-workspace.md](./E1-identity-workspace.md) |
+| **E2** | Agent Registry | MVP（M3） | E1 | [E2-agent-registry.md](./E2-agent-registry.md) |
+| **E3** | Channel & Timeline | MVP（M2） | E1 | [E3-channel-timeline.md](./E3-channel-timeline.md) |
+| **E4** | Collaboration & Routing | MVP（M4） | E2, E3, E6 | [E4-collaboration-routing.md](./E4-collaboration-routing.md) |
+| **E5** | Shared Context & Memory | MVP（M5） | E1, E3, E6 | [E5-shared-memory.md](./E5-shared-memory.md) |
+| **E6** | Authorization & Approval | MVP（M4 同步） | E1 | [E6-authorization-approval.md](./E6-authorization-approval.md) |
+| **E7** | Agent Execution | MVP（M8） | E2, E4 | [E7-agent-execution.md](./E7-agent-execution.md) |
+| **E8** | Work Management Core | MVP（M6） | E1, E6 | [E8-work-management-core.md](./E8-work-management-core.md) |
+| **E9** | Work Management Integrations | V1+ | E8 | [E9-work-management-integrations.md](./E9-work-management-integrations.md) |
+| **E10** | Observability & Operations | MVP（M9） | 全部 | [E10-observability-operations.md](./E10-observability-operations.md) |
 
-## 实施顺序（M1-M6，对齐 SYSTEM_DESIGN §13）
+## 实施顺序（M1-M9，对齐 SYSTEM_DESIGN v0.3 §11）
 
 ```
-M1 ─► E1 (基础 + auth)
-M2 ─► E3 (消息 + WS 网关)
-M3 ─► E2 + E7 (Agent + Connector 心跳)
-M4 ─► E6 + E4 (权限 + Mention/Decision)
-M5 ─► E5 (Memory 人审门禁)
-M6 ─► E8 (打磨 + 监控)
-V1+ ─► E9 (外部集成)
+M1 ──► E1 (Identity & Workspace)
+M2 ──► E3 (Channel & Timeline)
+M3 ──► E2 (Agent Registry)
+M4 ──► E6 (Authorization) + E4 (Collaboration & Routing)
+M5 ──► E5 (Shared Memory)
+M6 ──► E8 (Work Management Core)
+M7 ──► (gap, optional refactor)
+M8 ──► E7 (Agent Execution)
+M9 ──► E10 (Observability)
+V1+ ─► E9 (Work Management Integrations - Jira)
 ```
 
 ## 依赖矩阵
 
-|        | E1 | E2 | E3 | E4 | E5 | E6 | E7 | E8 | E9 |
-| ------ | -- | -- | -- | -- | -- | -- | -- | -- | -- |
-| **E1** | — | 提供 owner_user_id | 提供 sender | — | 提供 owner | 提供 subject | — | 提供 actor | — |
-| **E2** |    | —  | 提供 Agent 成员 | 提供 Decision agent | — | 提供 can_execute / can_review | 提供 agent 实体 | — | 提供切换开关 |
-| **E3** |    |    | —  | 提供 message / mention 载体 | 提供 memory 消息流 | 提供 channel 范围 | — | — | — |
-| **E4** |    |    |    | —  | — | 决策依据含 permission | 派发任务给 Runtime | — | 协作 request 协议 |
-| **E5** |    |    |    |    | —  | write memory = request | — | — | 双向同步 |
-| **E6** |    |    |    |    |    | —  | — | 提供 audit actor | — |
-| **E7** |    |    |    |    |    |    | —  | 6 态 + ERROR 触发 | — |
-| **E8** |    |    |    |    |    |    |    | —  | — |
-| **E9** |    |    |    |    |    |    |    |    | —  |
+|        | E1 | E2 | E3 | E4 | E5 | E6 | E7 | E8 | E9 | E10 |
+| ------ | -- | -- | -- | -- | -- | -- | -- | -- | -- | -- |
+| **E1** | —  | 提供 owner_user_id / project | 提供 project + member | — | 提供 project | 提供 subject + scope | — | 提供 project | — | 提供 actor |
+| **E2** |    | — | 提供 Agent member | lifecycle+activity 过滤 | — | — | 提供 agent + activity | — | — | — |
+| **E3** |    |    | — | 消息载体 + Trigger 提取 | 记忆申请投影 | channel scope | execution 输出投影 | — | — | audit |
+| **E4** |    |    |    | — | — | permission 决策依据 | Accept → Execution | Trigger from WorkItem (V1+) | — | audit |
+| **E5** |    |    |    |    | — | write_memory = REQUIRE_APPROVAL | dispatch 注入 memory_refs | WorkItem 可选引用 memory | — | audit |
+| **E6** |    |    |    |    |    | — | — | — | — | — |
+| **E7** |    |    |    |    |    |    | — | work_item_ref optional | — | audit |
+| **E8** |    |    |    |    |    |    |    | — | Provider 抽象 | audit |
+| **E9** |    |    |    |    |    |    |    |    | — | — |
+| **E10** |    |    |    |    |    |    |    |    |    | — |
 
-## 与现有文档的对应
+## 核心原则（v0.4 冻结）
 
-| 文档 | 角色 |
-| --- | --- |
-| `../MateOS-总体需求文档.md`（PRD v0.3） | 全局需求与版本规划，**本目录是 PRD 各章的细化** |
-| `../../design/SYSTEM_DESIGN.md` v0.2 | 全局架构与数据模型，**本目录的 API/数据模型字段与之一致** |
-| `../../UI design/MateOS-UI-Design-System-v0.2.md` v0.4 | 全局 UI 规范，**本目录的 UI 章节引用其 §3-§7** |
+1. **三大独立 lifecycle**：
+   - **Collaboration**：`Trigger → CollaborationRequest → Decision → Execution (Accept 分支)`
+   - **WorkItem**：WorkItem lifecycle 独立
+   - **Agent Execution**：Execution/Attempt/Event/Artifact 独立
+   - 三者通过 ID 引用，**不共享同一份 `Task` 事实源**
+2. **Project = 协作/知识/工作边界**，不挂 Provider 字段
+3. **WorkItem 与 Execution 完全独立**：Execution 可无 WorkItem；WorkItem 可多 Execution
+4. **Provider 抽象**：`WorkManagementProvider` interface；业务层永不分 provider 类型
+5. **Capability × Permission 单一事实源**：Agent 表无 `can_execute` / `can_review`
+6. **lifecycle × activity 拆分**：`lifecycle` 由 owner 控制；`activity` 由系统/Runtime 更新
+7. **Permission effect 三态**：`ALLOW` / `DENY` / `REQUIRE_APPROVAL`
+8. **消息流是 projection**：5 形态 UI 保留，DECISION/AGENT_OUTPUT/MEMORY_REQUEST 形态只引 `entity_ref`
+9. **执行后端永久不切外部**：Agent Execution 永远是 MateOS 自研（v0.4 起永久 Non Goal，PRD §8）
 
 ## 文档结构（每篇 Epic）
 
@@ -63,4 +87,12 @@ V1+ ─► E9 (外部集成)
 
 ## 状态
 
-全部 9 篇 `Draft`，待评审。验收标准中凡有 `E2E：` 前缀的项都将被纳入 M6 之后的 e2e 套件。
+全部 10 篇 `Draft`，待评审。验收标准中凡有 `E2E：` 前缀的项都将被纳入 M9 之后的 e2e 套件。
+
+## 与现有文档的对应
+
+| 文档 | 角色 |
+| --- | --- |
+| `../MateOS-总体需求文档.md`（PRD v0.4） | 全局需求与版本规划 |
+| `../../design/SYSTEM_DESIGN.md` v0.3 | 全局架构与数据模型 |
+| `../../UI design/MateOS-UI-Design-System-v0.2.md` v0.5 | 全局 UI 规范 |
