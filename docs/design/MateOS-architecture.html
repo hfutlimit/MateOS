@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MateOS · 软件架构设计图</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../UI design/tokens.css">
+<style>
+/* ============================================================
+   MateOS 软件架构设计图 · 工程蓝图风格
+   色源 = tokens.css（本页不重定义任何颜色，派生色一律 color-mix(var())）
+   ============================================================ */
+:root{
+  --disp:"Chakra Petch",var(--font);
+  --tech:"IBM Plex Mono",var(--mono);
+  --ink:color-mix(in oklab,var(--text) 88%,transparent);
+  --hair:color-mix(in oklab,var(--border-strong) 90%,transparent);
+  --hair2:color-mix(in oklab,var(--border) 92%,transparent);
+  --tint:color-mix(in oklab,var(--primary) 7%,transparent);
+  --tint2:color-mix(in oklab,var(--primary) 14%,transparent);
+  --paper:color-mix(in oklab,var(--bg) 96%,var(--primary-50));
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:var(--font);color:var(--text-body);background:var(--surface);
+  -webkit-font-smoothing:antialiased;line-height:1.5;padding:0 0 60px;font-size:12px}
+.sheet{max-width:1560px;margin:22px auto;padding:0 22px}
+
+/* ---- 图纸外框 ---- */
+.frame{position:relative;background:var(--paper);border:1.5px solid var(--border-strong);border-radius:4px;padding:26px 26px 22px;
+  background-image:linear-gradient(var(--hair2) .5px,transparent .5px),linear-gradient(90deg,var(--hair2) .5px,transparent .5px);
+  background-size:26px 26px}
+.frame::before{content:"";position:absolute;inset:7px;border:1px solid var(--hair);border-radius:2px;pointer-events:none}
+.crop{position:absolute;width:11px;height:11px;pointer-events:none}
+.crop.tl{left:-6px;top:-6px;border-left:1.5px solid var(--primary);border-top:1.5px solid var(--primary)}
+.crop.tr{right:-6px;top:-6px;border-right:1.5px solid var(--primary);border-top:1.5px solid var(--primary)}
+.crop.bl{left:-6px;bottom:-6px;border-left:1.5px solid var(--primary);border-bottom:1.5px solid var(--primary)}
+.crop.br{right:-6px;bottom:-6px;border-right:1.5px solid var(--primary);border-bottom:1.5px solid var(--primary)}
+
+/* ---- 标题块 ---- */
+.hd{display:flex;align-items:flex-end;gap:18px;flex-wrap:wrap;padding:2px 4px 16px;border-bottom:1.5px solid var(--ink);margin-bottom:18px}
+.hd h1{font-family:var(--disp);font-size:31px;font-weight:700;letter-spacing:.012em;line-height:1;color:var(--text)}
+.hd h1 .sub{display:block;font-family:var(--font);font-size:11.5px;font-weight:400;letter-spacing:.14em;color:var(--text-3);margin-top:8px}
+.badges{display:flex;gap:6px;margin-left:auto;flex-wrap:wrap}
+.bdg{font-family:var(--tech);font-size:10px;font-weight:500;letter-spacing:.04em;border:1px solid var(--hair);border-radius:2px;padding:3px 7px;background:var(--bg);color:var(--text-2);white-space:nowrap}
+.bdg b{color:var(--primary);font-weight:600}
+
+/* ---- 图例 ---- */
+.legend{display:flex;gap:16px;flex-wrap:wrap;align-items:center;padding:0 4px 16px;font-family:var(--tech);font-size:10px;color:var(--text-2)}
+.legend i{display:inline-block;vertical-align:middle;margin-right:6px}
+.lg-solid i{width:22px;height:0;border-top:1.5px solid var(--ink)}
+.lg-dash i{width:22px;height:0;border-top:1.5px dashed color-mix(in oklab,var(--busy) 80%,transparent)}
+.lg-evt i{width:22px;height:0;border-top:1.5px dotted var(--waiting-dot)}
+.lg-box i{width:11px;height:11px;border:1.5px solid var(--primary);background:var(--tint)}
+.legend .note{margin-left:auto;font-family:var(--font);font-size:10.5px;color:var(--text-3)}
+
+/* ---- 布局 ---- */
+.cols{display:grid;grid-template-columns:minmax(0,2.42fr) minmax(330px,1fr);gap:18px;align-items:start}
+.stack{display:flex;flex-direction:column;gap:12px}
+
+/* ---- 层带 ---- */
+.band{border:1.5px solid var(--hair);border-radius:3px;background:color-mix(in oklab,var(--bg) 82%,transparent);overflow:hidden}
+.band-h{display:flex;align-items:center;gap:9px;padding:7px 11px;background:var(--tint);border-bottom:1px solid var(--hair)}
+.band-h .idx{font-family:var(--tech);font-size:9.5px;font-weight:600;color:var(--primary);border:1px solid color-mix(in oklab,var(--primary) 34%,transparent);border-radius:2px;padding:1px 5px;letter-spacing:.06em;background:var(--bg)}
+.band-h .nm{font-family:var(--disp);font-weight:700;font-size:13.5px;letter-spacing:.05em;color:var(--text)}
+.band-h .en{font-family:var(--tech);font-size:9.5px;letter-spacing:.1em;color:var(--text-3);text-transform:uppercase}
+.band-h .tip{margin-left:auto;font-size:10.5px;color:var(--text-3);font-family:var(--tech);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:46%;text-align:right}
+.band-b{padding:11px}
+
+/* 节点 */
+.node{border:1px solid var(--hair);border-radius:3px;background:var(--bg);padding:8px 10px;transition:border-color .16s,box-shadow .16s,transform .16s}
+.node:hover{border-color:color-mix(in oklab,var(--primary) 55%,transparent);box-shadow:0 3px 12px -6px color-mix(in oklab,var(--primary) 50%,transparent);transform:translateY(-1px)}
+.node .t{font-family:var(--disp);font-weight:600;font-size:12.5px;color:var(--text);display:flex;align-items:center;gap:7px;letter-spacing:.02em}
+.node .t .pill{margin-left:auto;font-family:var(--tech);font-size:8.5px;font-weight:600;letter-spacing:.05em;color:var(--text-3);border:1px solid var(--hair);border-radius:2px;padding:0 4px;white-space:nowrap}
+.node .d{font-size:11px;color:var(--text-2);margin-top:4px;line-height:1.5}
+.grid{display:grid;gap:8px}
+.g2{grid-template-columns:repeat(2,minmax(0,1fr))}
+.g3{grid-template-columns:repeat(3,minmax(0,1fr))}
+.g4{grid-template-columns:repeat(4,minmax(0,1fr))}
+
+/* 领域卡 */
+.dom{position:relative;border:1.5px solid var(--hair);border-radius:3px;background:var(--bg);padding:9px 11px 10px 15px;display:flex;flex-direction:column;gap:5px}
+.dom::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--ac,var(--primary))}
+.dom.ac-agent{--ac:var(--primary)}.dom.ac-collab{--ac:var(--busy)}.dom.ac-work{--ac:var(--free)}
+.dom.ac-know{--ac:var(--waiting-dot)}.dom.ac-obs{--ac:var(--offline)}.dom.ac-delivery{--ac:var(--thinking)}
+.dom .eh{display:flex;align-items:center;gap:7px}
+.dom .eid{font-family:var(--tech);font-size:9.5px;font-weight:600;letter-spacing:.05em;color:var(--ac);border:1px solid color-mix(in oklab,var(--ac) 40%,transparent);border-radius:2px;padding:1px 5px;background:color-mix(in oklab,var(--ac) 8%,transparent)}
+.dom .en{font-family:var(--disp);font-weight:700;font-size:12.5px;color:var(--text);letter-spacing:.01em}
+.dom .tag{margin-left:auto;font-family:var(--tech);font-size:8.5px;color:var(--text-3);border:1px dashed var(--hair);border-radius:2px;padding:0 4px;white-space:nowrap}
+.dom .tab{font-family:var(--tech);font-size:10px;color:var(--text-2);line-height:1.55;word-break:break-word}
+.dom .tab b{color:var(--text);font-weight:600}
+.dom .tab .k{color:var(--ac);font-weight:600}
+.dom .note{font-size:10.5px;color:var(--text-3);line-height:1.5;border-top:1px dashed var(--hair2);padding-top:5px;margin-top:auto}
+.dom .note em{font-style:normal;color:var(--error-text);font-weight:600}
+.dom .note s{text-decoration:line-through;opacity:.65}
+
+/* 组标题 */
+.grp{display:flex;align-items:center;gap:8px;margin:12px 0 7px}
+.grp:first-child{margin-top:0}
+.grp .gn{font-family:var(--disp);font-size:11px;font-weight:600;letter-spacing:.14em;color:var(--text-2);text-transform:uppercase;white-space:nowrap}
+.grp .gl{flex:1;height:1px;background:var(--hair)}
+
+/* 箭头连接 */
+.flow{display:flex;align-items:center;justify-content:center;gap:12px;height:24px;position:relative;color:var(--ink)}
+.flow::before{content:"";position:absolute;left:50%;top:0;bottom:0;width:1.5px;background:linear-gradient(var(--hair),var(--ink))}
+.flow span{position:relative;font-family:var(--tech);font-size:9.5px;letter-spacing:.05em;color:var(--text-3);background:var(--paper);padding:1px 8px;border-left:1.5px solid var(--hair);border-right:1.5px solid var(--hair)}
+.flow .ar{width:auto;background:var(--bg);border:1px solid var(--hair);border-radius:2px;padding:0 6px;color:var(--primary);font-weight:600}
+
+/* 右栏 */
+.rail{display:flex;flex-direction:column;gap:12px;position:sticky;top:14px}
+.panel{border:1.5px solid var(--hair);border-radius:3px;background:color-mix(in oklab,var(--bg) 86%,transparent)}
+.panel-h{padding:6px 10px;border-bottom:1px solid var(--hair);font-family:var(--disp);font-size:11.5px;font-weight:700;letter-spacing:.09em;color:var(--text);text-transform:uppercase;display:flex;align-items:center;gap:7px}
+.panel-h .q{margin-left:auto;font-family:var(--tech);font-size:9px;font-weight:400;letter-spacing:.04em;color:var(--text-3);text-transform:none}
+.panel-b{padding:9px 10px}
+
+/* lifecycle 表 */
+.lc{border:1px solid var(--hair);border-radius:3px;overflow:hidden;margin-bottom:9px;background:var(--bg)}
+.lc .h{display:flex;align-items:center;gap:7px;padding:5px 8px;background:color-mix(in oklab,var(--ac) 9%,var(--bg));border-bottom:1px solid var(--hair)}
+.lc .h b{font-family:var(--disp);font-size:11.5px;letter-spacing:.04em;color:var(--ac)}
+.lc .h .src{margin-left:auto;font-family:var(--tech);font-size:9px;color:var(--text-3)}
+.lc .r{padding:6px 8px;font-size:10.5px;color:var(--text-2);line-height:1.6}
+.lc .r .lab{font-family:var(--tech);font-size:9px;color:var(--text-3);letter-spacing:.05em}
+.st{display:inline-block;font-family:var(--tech);font-size:9px;font-weight:500;border:1px solid var(--hair);border-radius:2px;padding:0 4px;margin:1px 2px 1px 0;background:var(--surface);color:var(--text-2);white-space:nowrap}
+.st.on{border-color:color-mix(in oklab,var(--ac) 45%,transparent);color:var(--ac);background:color-mix(in oklab,var(--ac) 8%,transparent)}
+
+/* 不变量 */
+.inv{counter-reset:i;list-style:none;display:flex;flex-direction:column;gap:6px}
+.inv li{position:relative;padding-left:23px;font-size:11px;line-height:1.55;color:var(--text-2)}
+.inv li::before{counter-increment:i;content:counter(i,decimal-leading-zero);position:absolute;left:0;top:1px;font-family:var(--tech);font-size:9px;font-weight:600;color:var(--primary);border:1px solid var(--hair);border-radius:2px;padding:0 3px;background:var(--bg)}
+.inv li b{color:var(--text);font-weight:600}
+
+/* 链路 */
+.seq{display:flex;flex-direction:column;gap:0}
+.seq .s{display:grid;grid-template-columns:24px 1fr;gap:9px;align-items:start;padding:5px 0;position:relative}
+.seq .s .n{font-family:var(--tech);font-size:9px;font-weight:600;color:var(--primary);border:1px solid color-mix(in oklab,var(--primary) 35%,transparent);border-radius:2px;text-align:center;padding:1px 0;background:var(--bg);position:relative;z-index:1}
+.seq .s .b{font-size:11px;color:var(--text-2);line-height:1.55}
+.seq .s .b b{color:var(--text);font-weight:600}
+.seq .s .b code{font-family:var(--tech);font-size:10px;background:var(--surface-2);border:1px solid var(--hair2);border-radius:2px;padding:0 3px;color:var(--text-body)}
+.seq .s .b .own{font-family:var(--tech);font-size:8.5px;letter-spacing:.04em;border:1px solid var(--hair);border-radius:2px;padding:0 4px;margin-left:5px;color:var(--text-3)}
+.seq .s:not(:last-child)::after{content:"";position:absolute;left:11.5px;top:20px;bottom:-2px;width:1px;background:var(--hair)}
+.seq .brk{margin:4px 0 4px 33px;font-family:var(--tech);font-size:9.5px;color:var(--error-text);border-left:2px solid color-mix(in oklab,var(--error) 45%,transparent);padding-left:7px;line-height:1.5}
+
+/* outbox 事件 */
+.evt{display:flex;flex-wrap:wrap;gap:4px;margin-top:5px}
+.evt code{font-family:var(--tech);font-size:9px;border:1px dashed color-mix(in oklab,var(--waiting-dot) 50%,transparent);background:color-mix(in oklab,var(--waiting-bg) 55%,transparent);color:var(--waiting-text);border-radius:2px;padding:1px 5px}
+
+/* 里程碑 */
+.mile{display:flex;gap:3px;flex-wrap:wrap}
+.mile .m{flex:1;min-width:52px;border:1px solid var(--hair);border-radius:2px;background:var(--bg);padding:4px 5px;text-align:center;transition:.16s}
+.mile .m:hover{border-color:var(--primary)}
+.mile .m .k{font-family:var(--tech);font-size:9px;font-weight:600;color:var(--primary);letter-spacing:.04em}
+.mile .m .v{font-size:9.5px;color:var(--text-2);line-height:1.3;margin-top:2px}
+.mile .m.future{border-style:dashed;opacity:.78}
+.mile .m.future .k{color:var(--thinking)}
+
+/* 底部签名块 */
+.sign{display:flex;gap:16px;flex-wrap:wrap;align-items:flex-end;margin-top:18px;padding:12px 4px 0;border-top:1.5px solid var(--ink);font-family:var(--tech);font-size:10px;color:var(--text-3)}
+.sign .cell{border:1px solid var(--hair);background:var(--bg);padding:6px 10px;min-width:132px}
+.sign .cell .l{font-size:8.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--text-3)}
+.sign .cell .v{color:var(--text-body);font-size:11px;margin-top:2px}
+.sign .grow{margin-left:auto;text-align:right;font-family:var(--font);font-size:10.5px;line-height:1.6;color:var(--text-3);max-width:46%}
+
+@media (max-width:1180px){.cols{grid-template-columns:1fr}.rail{position:static}.g4{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:760px){.g2,.g3,.g4{grid-template-columns:1fr}.hd h1{font-size:24px}}
+</style>
+</head>
+<body>
+<div class="sheet">
+<div class="frame">
+  <span class="crop tl"></span><span class="crop tr"></span><span class="crop bl"></span><span class="crop br"></span>
+
+  <div class="hd">
+    <h1>MATEOS · 软件架构设计图
+      <span class="sub">SYSTEM DESIGN · MODULAR MONOLITH + DOMAIN WORKERS · 10 BOUNDED DOMAINS · v0.1 AUTONOMOUS DELIVERY</span>
+    </h1>
+    <div class="badges">
+      <span class="bdg">依据 <b>SYSTEM_DESIGN v0.3.2</b></span>
+      <span class="bdg">PRD <b>v0.4</b></span>
+      <span class="bdg">Epic <b>E1–E10</b></span>
+      <span class="bdg">Detailed <b>00–09</b></span>
+      <span class="bdg">Delivery <b>v0.1 (M10–M13)</b></span>
+      <span class="bdg">状态 <b>Draft</b></span>
+    </div>
+  </div>
+
+  <div class="legend">
+    <span class="lg-solid"><i></i>同步调用 / 数据流</span>
+    <span class="lg-dash"><i></i>异步 · 事件</span>
+    <span class="lg-evt"><i></i>Outbox 领域事件</span>
+    <span class="lg-box"><i></i>有状态节点</span>
+    <span class="note">DB = 唯一事实源；Redis 仅承载 scheduling state，不持久化 · BullMQ 只做 transport/scheduler</span>
+  </div>
+
+  <div class="cols">
+    <!-- ================= 左：分层堆叠 ================= -->
+    <div class="stack">
+
+      <section class="band">
+        <div class="band-h"><span class="idx">L1</span><span class="nm">客户端</span><span class="en">Client</span>
+          <span class="tip">Next.js SPA · TanStack Query 管 WS 缓存</span></div>
+        <div class="band-b grid g4">
+          <div class="node"><div class="t">Web / Desktop<span class="pill">NEXT.JS</span></div>
+            <div class="d">Channel × Topic 三栏 · Work 页面 · 审批中心 · Agent Card · Memory 文档</div></div>
+          <div class="node"><div class="t">REST<span class="pill">/api/v1</span></div>
+            <div class="d">CRUD / 查询 / 命令，zod DTO 由 <code>packages/contracts</code> 共享</div></div>
+          <div class="node"><div class="t">WSS<span class="pill">/ws</span></div>
+            <div class="d">timeline 广播 · execution 流 · presence；断线走 resume 协议</div></div>
+          <div class="node"><div class="t">投影渲染<span class="pill">PROJECTION</span></div>
+            <div class="d">5 形态消息卡只引 <code>entity_ref</code>；<code>display_state</code> 由 CR + Execution 计算</div></div>
+        </div>
+      </section>
+
+      <div class="flow"><span class="ar">HTTPS</span><span>鉴权 JWT · 限流 · 幂等 envelope.id</span></div>
+
+      <section class="band">
+        <div class="band-h"><span class="idx">L2</span><span class="nm">应用层</span><span class="en">NestJS Modular Monolith</span>
+          <span class="tip">MVP 不拆微服务；WS&gt;5k / 检索成热点 / 团队&gt;8 人再拆</span></div>
+        <div class="band-b grid g3">
+          <div class="node"><div class="t">API Modules<span class="pill">IN-PROC</span></div>
+            <div class="d">auth·iam / org·team·project / channel / mention / collaboration / permission / agent-registry / execution / work-management / ws gateway</div></div>
+          <div class="node"><div class="t">Permission Guard<span class="pill">E6</span></div>
+            <div class="d">7 键 × 3 态（ALLOW / DENY / REQUIRE_APPROVAL）+ 三层覆盖；Guard <b>只判</b> ALLOW / DENY</div></div>
+          <div class="node"><div class="t">WS Gateway + BullMQ<span class="pill">FANOUT</span></div>
+            <div class="d">事件分发 / 队列调度；<b>不做</b> Execution 事实源</div></div>
+        </div>
+      </section>
+
+      <div class="flow"><span class="ar">IN-PROC</span><span>模块边界：跨域调用走 service 接口，禁止跨域直接写表</span></div>
+
+      <section class="band">
+        <div class="band-h"><span class="idx">L3</span><span class="nm">领域层</span><span class="en">Bounded Domains E1–E10</span>
+          <span class="tip">每张表的唯一写入方在域内 · 跨域只以 ID 互引</span></div>
+        <div class="band-b">
+
+          <div class="grp"><span class="gn">Identity &amp; Space</span><span class="gl"></span></div>
+          <div class="grid g2">
+            <div class="dom ac-agent">
+              <div class="eh"><span class="eid">E1</span><span class="en">Identity &amp; Workspace</span><span class="tag">M1</span></div>
+              <div class="tab"><b>projects</b> · users · organizations · organization_members · teams · team_members · project_members</div>
+              <div class="note"><b>Project = 协作 / 知识 / 工作边界</b>；<s>integration_backend</s> <s>issue_tracker</s> 字段已删（Provider 归 E8/E9）</div>
+            </div>
+            <div class="dom ac-agent">
+              <div class="eh"><span class="eid">E2</span><span class="en">Agent Registry</span><span class="tag">M3</span></div>
+              <div class="tab"><b>agents</b> · credentials · agent_project_membership · agent_tokens</div>
+              <div class="note"><span class="k">lifecycle</span>(ACTIVE/PAUSED/DISABLED) × <span class="k">activity</span>(6 态) 双维度；Credential 与 Agent 分离；<s>can_execute</s> <s>can_review</s></div>
+            </div>
+          </div>
+
+          <div class="grp"><span class="gn">Collaboration &amp; Routing</span><span class="gl"></span></div>
+          <div class="grid g2">
+            <div class="dom ac-collab">
+              <div class="eh"><span class="eid">E3</span><span class="en">Channel &amp; Timeline</span><span class="tag">M2</span></div>
+              <div class="tab"><b>messages</b> · channels · channel_members · channel_seq_counters · attachments · read_cursors</div>
+              <div class="note">单层 reply；<b>projection</b> 5 形态（DECISION / MEMORY_REQUEST 只引 entity_ref）。v0.1 Topic = <span class="k">messages.topic_id</span> 聚类，<em>不新建 topics 表</em></div>
+            </div>
+            <div class="dom ac-collab">
+              <div class="eh"><span class="eid">E4</span><span class="en">Collaboration &amp; Routing</span><span class="tag">M4</span></div>
+              <div class="tab"><b>collaboration_requests</b> · <b>decision_records</b> · triggers · outbox_events · work_offers</div>
+              <div class="note">Trigger(MENTION/WORK_ITEM/API/AUTOMATION) → CR → Decision；Resolver = <span class="k">lifecycle=ACTIVE ∩ activity∈{AVAILABLE,THINKING}</span> + Redis Lua <span class="k">tryAcquireSlot</span>；60s 超时重路由</div>
+            </div>
+          </div>
+
+          <div class="grp"><span class="gn">Knowledge &amp; Control</span><span class="gl"></span></div>
+          <div class="grid g2">
+            <div class="dom ac-know">
+              <div class="eh"><span class="eid">E5</span><span class="en">Shared Context &amp; Memory</span><span class="tag">M5</span></div>
+              <div class="tab"><b>memory_items</b> · memory_proposals · memory_chunks · memory_review_actions</div>
+              <div class="note">Source 三件套强约束（channel / seq / time）；<span class="k">write_memory=REQUIRE_APPROVAL</span> 走人审门禁 → <em>不进 E6 Guard</em>，业务层 <span class="k">policy.evaluate()</span></div>
+            </div>
+            <div class="dom ac-know">
+              <div class="eh"><span class="eid">E6</span><span class="en">Authorization &amp; Approval</span><span class="tag">M4 同步</span></div>
+              <div class="tab"><b>permissions</b>（<span class="k">scope_type × scope_id × subject × perm_key</span> UNIQUE）</div>
+              <div class="note">Capability（能不能）× Permission（允不允许）单一事实源；Guard 不静默放行：REQUIRE_APPROVAL 视为 403</div>
+            </div>
+          </div>
+
+          <div class="grp"><span class="gn">Execution &amp; Work</span><span class="gl"></span></div>
+          <div class="grid g2">
+            <div class="dom ac-agent">
+              <div class="eh"><span class="eid">E7</span><span class="en">Agent Execution</span><span class="tag">M8</span></div>
+              <div class="tab"><b>agent_executions</b> · execution_attempts · execution_events · execution_artifacts · llm_calls</div>
+              <div class="note"><b>Execution 必须在 CR=ACCEPT 之后创建</b>，execution_id 由 E4→E7 API 产生（非 Agent 自报）；终态 CAS <span class="k">WHERE status IN (PENDING,RUNNING)</span> + outbox 同事务</div>
+            </div>
+            <div class="dom ac-work">
+              <div class="eh"><span class="eid">E8</span><span class="en">Work Management Core</span><span class="tag">M6</span></div>
+              <div class="tab"><b>work_items</b> · work_item_bindings · work_comments · work_relations · work_item_projections</div>
+              <div class="note"><span class="k">WorkManagementProvider</span> 接口 + Built-in 实现；Project × Provider 同一 active binding 唯一（DB UNIQUE）；业务层<em>永不分 provider 类型</em></div>
+            </div>
+          </div>
+
+          <div class="grid g2" style="margin-top:8px">
+            <div class="dom ac-work">
+              <div class="eh"><span class="eid">E9</span><span class="en">Work Mgmt Integrations</span><span class="tag">V1+</span></div>
+              <div class="tab"><b>work_management_connections</b> · work_sync_audit</div>
+              <div class="note">Jira / Linear Provider；Connection 为 <span class="k">Org / Owner 级</span>（多 Project 共享，不绑 Project）；webhook 30 天 refresh；状态动态 <span class="k">listStatuses(binding)</span></div>
+            </div>
+            <div class="dom ac-obs">
+              <div class="eh"><span class="eid">E10</span><span class="en">Observability &amp; Ops</span><span class="tag">M9</span></div>
+              <div class="tab"><b>audit_logs</b>(append-only) · notifications（v0.1 加 <span class="k">category=NEEDS_HUMAN</span> + urgency）</div>
+              <div class="note">OTel trace 贯穿 Trigger → Execution；「Needs You」页 = notifications 过滤视图，<em>不新建一级权限</em></div>
+            </div>
+          </div>
+
+          <div class="grp"><span class="gn">v0.1 Autonomous Delivery（新增 bounded domain）</span><span class="gl"></span></div>
+          <div class="dom ac-delivery">
+            <div class="eh"><span class="eid">DELIVERY</span><span class="en">Mission → Brief → WorkUnit DAG → Scheduler → Topic</span><span class="tag">M10–M13 · 可与 M1–M9 并行</span></div>
+            <div class="tab"><b>missions</b> · mission_work_item_refs · <b>briefs</b> · brief_revisions · <b>work_units</b> · work_unit_dependencies · project_policies · work_offers</div>
+            <div class="note">
+              <b>三条硬边界</b>：Mission <em>≠</em> WorkItem（只 ref，不改 status）· WorkUnit <em>≠</em> WorkItem <em>≠</em> Execution（状态机独立：PLANNED/READY/IN_PROGRESS/COMPLETED/BLOCKED/CANCELLED）· Handoff / Open-Claim 一律 <b>经 E4 创建 CR</b>，Agent 不得直写 collaboration_requests、不得直调 E7。
+              Autonomy Level 0–3 + Policy 走 <span class="k">policy.evaluate()</span> 业务层（<em>不经 E6 Guard</em>）
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <div class="flow"><span class="ar">OUTBOX</span><span>领域事件（同事务落库 → at-least-once 投递 → 消费幂等）</span></div>
+
+      <section class="band">
+        <div class="band-h"><span class="idx">L4</span><span class="nm">异步 Worker 进程</span><span class="en">Domain Workers</span>
+          <span class="tip">与单体共享代码包，独立进程部署</span></div>
+        <div class="band-b grid g4">
+          <div class="node"><div class="t">Orchestrator<span class="pill">E4</span></div>
+            <div class="d">Trigger → CR → Decision 状态机 · Resolver Top-N 评分 · slot reservation · 超时重路由 · Cancel 传播</div></div>
+          <div class="node"><div class="t">Outbox<span class="pill">RELAY</span></div>
+            <div class="d">拾取 outbox_events → 创建 CR / 释放 lease / 投影消息 / 写通知；envelope.id 全局去重保 exactly-once</div></div>
+          <div class="node"><div class="t">Memory<span class="pill">E5</span></div>
+            <div class="d">分块 / 向量索引 / 检索 / 审批门禁 / 溯源校验</div></div>
+          <div class="node"><div class="t">Work Sync<span class="pill">E8·E9</span></div>
+            <div class="d">WorkItem ↔ Provider 双向同步 · 状态映射 · 冲突检测 · webhook 刷新</div></div>
+        </div>
+      </section>
+
+      <div class="flow"><span class="ar">WSS 出站</span><span>Connector 协议 v1.1 · JWT(agent_token) · hello / heartbeat / dispatch / event / result / error / resume</span></div>
+
+      <section class="band">
+        <div class="band-h"><span class="idx">L5</span><span class="nm">运行时与外部世界</span><span class="en">Runtime &amp; External</span>
+          <span class="tip">执行后端永久自研 · 不切外部（PRD §8 Non-Goal）</span></div>
+        <div class="band-b grid g4">
+          <div class="node"><div class="t">Runtime Gateway<span class="pill">E7</span></div>
+            <div class="d">连接复用（Org/Owner 级）· 注册/心跳 · dispatch 下发 · 流式回传 → execution_events</div></div>
+          <div class="node"><div class="t">External Agent 进程<span class="pill">EXTERNAL</span></div>
+            <div class="d">Coding / Review / QA Agent；只上报 event 与 result，<em>不自报 execution_id</em></div></div>
+          <div class="node"><div class="t">LLM Provider Adapter<span class="pill">OPENAI-COMPAT</span></div>
+            <div class="d">5xx / 401 / 限频 → activity=ERROR；重试退避 + 降级；Credential 与 Agent 分离</div></div>
+          <div class="node"><div class="t">外部系统<span class="pill">V1+ / V3</span></div>
+            <div class="d">Jira · Linear（Provider）；Docker Sandbox（V3 预留，V1 不执行代码）</div></div>
+        </div>
+      </section>
+
+      <div class="flow"><span class="ar">PERSIST</span><span>单一事实源 · 调度态与对象存储分离</span></div>
+
+      <section class="band">
+        <div class="band-h"><span class="idx">L6</span><span class="nm">基础设施</span><span class="en">Infrastructure</span>
+          <span class="tip">Docker Compose → K8s · OTel + Prometheus + Grafana + Loki</span></div>
+        <div class="band-b grid g4">
+          <div class="node"><div class="t">PostgreSQL 16 + pgvector<span class="pill">SOURCE OF TRUTH</span></div>
+            <div class="d">关系 + JSONB + 全文 + 向量一库；Prisma schema 即文档</div></div>
+          <div class="node"><div class="t">Redis 7<span class="pill">SCHEDULING ONLY</span></div>
+            <div class="d">presence 90s · timeline 10min · unread 24h · perm 5min · <b>Lua slot semaphore（per-lease ZSET + renewExecutionLease）</b></div></div>
+          <div class="node"><div class="t">S3 / MinIO<span class="pill">BLOBS</span></div>
+            <div class="d">attachments + execution_artifacts（diff / file / log）</div></div>
+          <div class="node"><div class="t">Contracts &amp; Observability<span class="pill">PKG</span></div>
+            <div class="d">packages/contracts（DTO + zod 共享）· 全链路 trace · 配额与成本统计</div></div>
+        </div>
+      </section>
+
+    </div>
+
+    <!-- ================= 右：核心链路 / 边界 / 不变量 ================= -->
+    <aside class="rail">
+
+      <div class="panel">
+        <div class="panel-h">核心链路<span class="q">Trigger → Artifact</span></div>
+        <div class="panel-b">
+          <div class="seq">
+            <div class="s"><span class="n">1</span><span class="b"><b>Trigger 提取</b> mention / work-item / api / automation<span class="own">E3→E4</span></span></div>
+            <div class="s"><span class="n">2</span><span class="b"><b>CollaborationRequest</b> 落库 <code>status=PENDING</code><span class="own">E4</span></span></div>
+            <div class="s"><span class="n">3</span><span class="b"><b>Resolver</b> 过滤候选 → <code>tryAcquireSlot(pending_decision)</code> 提前预留<span class="own">E4+Redis</span></span></div>
+            <div class="s"><span class="n">4</span><span class="b"><b>Decision</b> ACCEPT / REJECT / NEED_CONTEXT / UNRESOLVED → <code>decision_records</code>；投影为 DECISION 消息卡<span class="own">E4→E3</span></span></div>
+            <div class="s"><span class="n">5</span><span class="b"><b>Execution 创建</b> 仅 ACCEPT 分支；slot lease promote 到 <code>execution</code><span class="own">E4→E7</span></span></div>
+            <div class="s"><span class="n">6</span><span class="b"><b>dispatch</b> 经 WSS 推给 Agent 进程<span class="own">E7</span></span></div>
+            <div class="s"><span class="n">7</span><span class="b"><b>流式事件</b> STDOUT / PROGRESS / TOOL_CALL / LLM_TICK / ARTIFACT / ERROR<span class="own">E7</span></span></div>
+            <div class="s"><span class="n">8</span><span class="b"><b>终态 CAS</b> + outbox 同事务；terminal <code>envelope.id</code> exactly-once<span class="own">E7</span></span></div>
+            <div class="s"><span class="n">9</span><span class="b"><b>释放 lease + 投影</b> AGENT_OUTPUT 消息；记忆写入须走 E5 人审<span class="own">Outbox→E3/E5</span></span></div>
+            <div class="brk">E4 <b>collaboration.*</b> 与 E7 <b>execution.*</b> 两个消息名空间严格分离：<code>execution.result</code> 不带 decision，<code>collaboration.decision</code> 不带 execution_id</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-h">三大独立 Lifecycle<span class="q">互不绑定 · 只以 ID 互引</span></div>
+        <div class="panel-b">
+          <div class="lc" style="--ac:var(--busy)">
+            <div class="h"><b>COLLABORATION</b><span class="src">collaboration_requests</span></div>
+            <div class="r"><span class="lab">状态</span><br><span class="st on">PENDING</span><span class="st on">ACCEPTED</span><span class="st on">REJECTED</span><span class="st on">NEED_CONTEXT</span><span class="st on">UNRESOLVED</span><span class="st on">CANCELLED</span>
+              <div style="margin-top:4px;color:var(--error-text)">不含 EXECUTING / COMPLETED / FAILED —— Execution 状态不得镜像进 CR</div></div>
+          </div>
+          <div class="lc" style="--ac:var(--free)">
+            <div class="h"><b>WORKITEM</b><span class="src">work_items</span></div>
+            <div class="r"><span class="st">OPEN</span><span class="st">IN_PROGRESS</span><span class="st">IN_REVIEW</span><span class="st">DONE</span><span class="st">CLOSED</span>
+              <div style="margin-top:4px">WorkItem 可无 Execution（人类编辑）；一个 WorkItem 可多 Execution</div></div>
+          </div>
+          <div class="lc" style="--ac:var(--primary)">
+            <div class="h"><b>EXECUTION</b><span class="src">agent_executions</span></div>
+            <div class="r"><span class="st">PENDING</span><span class="st">RUNNING</span><span class="st">SUCCEEDED</span><span class="st">FAILED</span><span class="st">CANCELLED</span><span class="st">TIMEOUT</span>
+              <div style="margin-top:4px">Attempt = logical 重试单位；<b>WS reconnect ≠ new attempt</b>。Execution 可无 WorkItem（<code>@backend 看下代码</code>）</div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-h">全局不变量<span class="q">detailed/00 · 8 条</span></div>
+        <div class="panel-b">
+          <ol class="inv">
+            <li><b>DB 是事实源</b>；Redis 只放 presence / pub-sub / slot 信号量，不持久化</li>
+            <li><b>WS reconnect ≠ new attempt</b>，attempt 才是 logical 重试单位</li>
+            <li><b>envelope.id 全局去重</b>，terminal 消息 exactly-once</li>
+            <li><b>CAS 状态转换</b>：终态变更 <code>WHERE status IN (PENDING,RUNNING)</code></li>
+            <li><b>ProviderKey = string + Registry</b>，零硬编码</li>
+            <li><b>Connection 复用</b> Org/Owner 级，多 Project 共享</li>
+            <li><b>Guard 不静默放行</b>：REQUIRE_APPROVAL 视为 403，业务层显式 <code>policy.evaluate()</code></li>
+            <li><b>Slot 提前 reservation</b>：Resolver 选中即 tryAcquireSlot，不等 ACCEPT</li>
+          </ol>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-h">Outbox 领域事件<span class="q">不直调下游 API</span></div>
+        <div class="panel-b">
+          <div class="d" style="font-size:10.5px;color:var(--text-2);line-height:1.6">v0.1 Delivery 新增（全部经 outbox 投递，消费侧幂等）：</div>
+          <div class="evt">
+            <code>mission.created</code><code>mission.grill_completed</code><code>mission.started</code><code>mission.replan_requested</code><code>mission.completed</code>
+            <code>work_unit.ready</code><code>work_unit.claimed</code><code>work_unit.completed</code><code>work_unit.blocked</code><code>work_unit.split</code><code>work_unit.merged</code>
+            <code>handoff.requested</code><code>brief.revision_created</code><code>policy.changed</code><code>topic.opened</code><code>topic.needs_human</code>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-h">Assignment 三态<span class="q">v0.1 · E4 扩展</span></div>
+        <div class="panel-b">
+          <div class="grid" style="gap:6px">
+            <div class="node" style="padding:7px 9px"><div class="t" style="font-size:11.5px">DIRECT<span class="pill">指定 Agent</span></div><div class="d">Resolver 不参与，target_agent_id 已定 → 直接 tryAcquireSlot</div></div>
+            <div class="node" style="padding:7px 9px"><div class="t" style="font-size:11.5px">ROUTED<span class="pill">评分路由</span></div><div class="d">capability 匹配 + Top-N 评分（score → active_load → id）</div></div>
+            <div class="node" style="padding:7px 9px"><div class="t" style="font-size:11.5px">OPEN_CLAIM<span class="pill">抢单</span></div><div class="d">发布 <code>work_offers</code> → Agent claim（CAS）→ 仍由 E4 建 CR；offer TTL 1h</div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-h">技术选型<span class="q">v0.3.2</span></div>
+        <div class="panel-b">
+          <div class="kv" style="display:grid;grid-template-columns:76px 1fr;gap:4px 8px;font-size:11px">
+            <span style="color:var(--text-3)">前端</span><span>Next.js + TS + antd 6</span>
+            <span style="color:var(--text-3)">后端</span><span>NestJS（Node 22 LTS）模块化单体</span>
+            <span style="color:var(--text-3)">ORM</span><span>Prisma（schema 即文档）</span>
+            <span style="color:var(--text-3)">数据</span><span>PostgreSQL 16 + pgvector / Redis 7</span>
+            <span style="color:var(--text-3)">对象</span><span>S3 / MinIO</span>
+            <span style="color:var(--text-3)">LLM</span><span>Provider Adapter（OpenAI-compatible）</span>
+            <span style="color:var(--text-3)">部署</span><span>Docker Compose → K8s</span>
+            <span style="color:var(--text-3)">观测</span><span>OTel + Prometheus + Grafana + Loki</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-h">实施顺序<span class="q">M1–M9 + Delivery M10–M13</span></div>
+        <div class="panel-b">
+          <div class="mile">
+            <div class="m"><div class="k">M1</div><div class="v">E1</div></div>
+            <div class="m"><div class="k">M2</div><div class="v">E3</div></div>
+            <div class="m"><div class="k">M3</div><div class="v">E2</div></div>
+            <div class="m"><div class="k">M4</div><div class="v">E6+E4</div></div>
+            <div class="m"><div class="k">M5</div><div class="v">E5</div></div>
+            <div class="m"><div class="k">M6</div><div class="v">E8</div></div>
+            <div class="m"><div class="k">M8</div><div class="v">E7</div></div>
+            <div class="m"><div class="k">M9</div><div class="v">E10</div></div>
+            <div class="m future"><div class="k">M10</div><div class="v">Mission</div></div>
+            <div class="m future"><div class="k">M11</div><div class="v">WU DAG</div></div>
+            <div class="m future"><div class="k">M12</div><div class="v">Policy</div></div>
+            <div class="m future"><div class="k">M13</div><div class="v">Topic</div></div>
+            <div class="m future"><div class="k">V1+</div><div class="v">E9 Jira</div></div>
+          </div>
+          <div style="font-size:10.5px;color:var(--text-3);margin-top:7px;line-height:1.6">M10–M13 与 M1–M9 <b style="color:var(--text-2)">无强依赖、可并行</b>；M10（Brief）须先于 M11（WorkUnit 输入）</div>
+        </div>
+      </div>
+
+    </aside>
+  </div>
+
+  <div class="sign">
+    <div class="cell"><div class="l">Drawing</div><div class="v">MateOS / ARCH-01</div></div>
+    <div class="cell"><div class="l">Scale</div><div class="v">System · Not to scale</div></div>
+    <div class="cell"><div class="l">Rev</div><div class="v">v0.3.2 + v0.1 delivery</div></div>
+    <div class="cell"><div class="l">Status</div><div class="v">Draft · 待评审</div></div>
+    <div class="grow">上游：docs/requirement/MateOS-总体需求文档.md（PRD v0.4）· docs/design/SYSTEM_DESIGN.md v0.3.2 · E1–E10 epic docs · docs/design/detailed/00–09 · detailed/autonomous-delivery/00–04<br>
+      执行后端永久自研（PRD §8 Non-Goal）· Work Management 与 Execution 完全解耦 · 色源 tokens.css</div>
+  </div>
+</div>
+</div>
+</body>
+</html>
