@@ -949,17 +949,80 @@ CREATE UNIQUE INDEX uq_project_active_work_provider
 | 用途 | Key | TTL |
 | --- | --- | --- |
 | Agent presence | `presence:{agent_id}` | 90s |
+| Slot lease（v0.7 ZSET） | `agent-capacity:{agent_id}:leases`（member=lease_id, score=expires_at） | 每条 lease 独立（90s / 300s） |
+| Slot 配置 / 重建闸 / fence | `agent-capacity:{agent_id}:config` / `:rebuilding` / `:fence` | config 24h；rebuilding 30s |
 | Channel 近期消息 | `timeline:{channel_id}` | 10min |
 | 未读计数 | `unread:{member_id}:{channel_id}` | 24h |
 | 权限矩阵 | `perm:{scope}:{subject}` | 5min |
 | Mention 排序特征 | `mfeat:{project}:{agent_id}` | 1h |
 | Mention 解析结果 | `mention:{id}` | 10min |
 | WorkItem 缓存 | `workitem:{provider}:{ref}` | 5min |
-| Provider token | `wmc:{provider}:{user_id}` | refresh |
+| Provider token | `wmc:{provider}:{org_id}:{owner_user_id}`（v0.4.2 起 Org 级） | refresh |
+
+> **纪律**：Redis 全部是**可重建缓存 / scheduling state**，不是事实源（G-1）。任何 Redis 数据丢失都必须能由 PostgreSQL 重建（slot 见 §4.2.1 的 rebuild 流程）。
 
 ---
 
-## 11. 实施顺序（v0.6：S1/S2/S3 竖切）
+## 11. UI Projection & Human Attention Model（v0.8 新增）
+
+### 11.1 原则
+
+> **Domain Entity ≠ UI Navigation Entity。**
+> 领域模型不参与导航设计；用户界面只暴露"发生了什么 / 需要我做什么 / 接下来会自动发生什么"。
+
+**Progressive Disclosure 三级**：
+
+| 级别 | 内容 | 默认 |
+| --- | --- | --- |
+| **Level 1 · Outcome** | `Working` / `Needs you` / `Completed` / `Problem` | 展开 |
+| **Level 2 · Explanation** | 为什么是这个 Agent / 为什么被阻塞 / 下一步自动做什么 | 一次点击 |
+| **Level 3 · Technical Trace** | Execution ID / Attempt / Event / Model / Tokens / Latency / Logs | **永不默认展开** |
+
+**不允许出现在 Level 1 的**：`Lease`、`fencing`、`provider_event_id`、`attempt_no`、`provider_key`、内部状态码（如 `PROVIDER_401`）等运行时概念。
+
+### 11.2 Human Attention（Needs You）投影
+
+```
+CollaborationRequest.NEED_CONTEXT / UNRESOLVED
+MemoryProposal.PENDING
+Execution 失败 / 不可达（送达失败、超阈值）
+Agent health = UNHEALTHY / Credential 失效
+WorkItem BLOCKED
+预算阈值（80% / 100%）
+        │  read projection（非事实源）
+        ▼
+Needs You（Decision / Information / Approval / Problems）
+```
+
+**AttentionItem（只读视图字段，非表）**：
+
+| 字段 | 说明 |
+| --- | --- |
+| `source_type` / `source_id` | 事实源定位（CR / Proposal / Execution / WorkItem / Agent / Budget） |
+| `project_id` / `agent_id?` | 归属与责任 Agent |
+| `title` | 用户语言标题（"Reviewer Agent needs your help"） |
+| `summary` | 发生了什么 |
+| `reason` | **为什么需要你** |
+| `blocked` | 阻塞了什么 |
+| `recommended_action?` | 建议做法（可空，但为空时必须有 `available_actions`） |
+| `available_actions[]` | 可执行动作（至少 1 个） |
+| `urgency` | `now` / `today` / `later` |
+| `created_at` | 用于排序 |
+
+**硬的约束**：
+
+1. **AttentionItem 不是业务事实源**：MVP **不需要** `attention_items` 表，直接查询/联合视图即可；后续性能不足再 materialize（仍需从事实源重建）。
+2. **UX invariant**：任何进入 Needs You 的事项**必须带至少一个可执行动作**；不允许只展示错误。
+3. **单入口**：Memory / Work / Permission 审批统一进 `Needs You → Approval`；MVP 不设独立 Approval Center。
+4. **就地操作回源**：在 Needs You 里操作后，状态迁移由**原模块**执行（Inbox 不做第二事实源，不直接写别人的表）。
+
+### 11.3 与三 lifecycle 的关系（不变）
+
+本模型**不改动** Collaboration / Work Management / Agent Execution 三个独立 lifecycle，也不引入第四个 lifecycle；它只是它们的**读侧投影与呈现规范**。
+
+---
+
+## 12. 实施顺序（v0.6：S1/S2/S3 竖切）
 
 > **唯一基线 = `docs/design/detailed/09-implementation-checklist.md`**。
 > **v0.6 拍板（D7）**：实施顺序 = **S1 → S2 → S3** 三刀竖切；下表的 M 编号退为**能力域标签**（用于指向各 detailed 分册），**不再表示实施顺序**。
@@ -990,7 +1053,7 @@ CREATE UNIQUE INDEX uq_project_active_work_provider
 
 ---
 
-## 12. 更新记录
+## 13. 更新记录
 
 | 版本 | 日期 | 变更 |
 | --- | --- | --- |
@@ -1001,3 +1064,4 @@ CREATE UNIQUE INDEX uq_project_active_work_provider
 | v0.5 | 2026-09-10 | **技术栈拍板 .NET**（ASP.NET Core + EF Core + outbox relay，BullMQ 移除，协议层中立）；**DDL 收口**：补 `agents.max_concurrency/health`、`agent_executions.active_attempt_no/terminal_envelope_id` + 幂等唯一索引、`execution_attempts` 状态 CHECK 与 dispatch/续传列、`work_items.binding_id/provider_*/search_text`，新增 `outbox_events` / `webhook_inbox` / `work_management_webhooks` 三表入清单与 DDL；§11 实施顺序与 detailed/09 对齐（M7=E7、M8=E10） |
 | v0.6 | 2026-09-10 | **D9 冻结**：ACCEPT 后由 E4 事务外直调 E7 创建 Execution，outbox 仅兜底重试（§11 同步）；**D7 拍板**：实施切法改 **S1/S2/S3 竖切**，M1–M9 退为能力域标签（§11 重写）；**S1 的 Agent 端 = stub**（新增 `detailed/10-agent-stub-and-sdk.md`，B1–B8 行为矩阵）；补 E6 审计触发点（E10 §3.1）与 E5 `policy.evaluate('propose_memory')` 调用点 |
 | v0.7 | 2026-09-10 | **§4.2.1 换成 per-lease ZSET + fencing**（Hash 版标废弃；含 rebuild 顺序与 `REBUILDING` 闸；E4 §4.2 同步）；**`dispatch_ack` 语义定型为 transport 收据**（去掉 `accepted=false` 与"dispatch 拒收→重路由"这条在 CR 状态机里无合法迁移的分支，改为送达失败 → 重试同一 attempt → Inbox）；**§4.3 Memory 门禁改 `propose_memory`**（此前误写 `write_memory`）；**§4.4 Provider 摘要同步正式接口**（`listStatuses(binding)` / `getStatusMapping(binding) → CanonicalStatusMapping[]`）；§4.1 候选过滤去掉 `active_slots` 表述 |
+| v0.8 | 2026-09-10 | **新增 §11 UI Projection & Human Attention Model**（Progressive Disclosure 三级；AttentionItem 为只读投影、非事实源；UX invariant"每条必须带可执行动作"；单入口 Needs You → Approval）；§10 缓存表补 slot ZSET/fence/rebuilding key 并把 `wmc` 修为 Org 级；§1–§10 三个 lifecycle 设计不变 |

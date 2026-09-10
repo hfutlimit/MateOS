@@ -2,12 +2,20 @@
 
 | 文档信息 | 内容 |
 | --- | --- |
-| 版本 | v0.6（v0.5 协议收口 + v0.4.2 capacity 原子化修订版，文件名保留 v0.2） |
-| 日期 | 2026-09-08 |
-| 上游 | `docs/requirement/MateOS-总体需求文档.md` (PRD v0.4)、SYSTEM_DESIGN v0.3.2、UI Design Guidelines v0.1 |
-| 配套原型 | **`P0-inbox.html` / `P0-fleet.html`（v0.6 新增，MVP 第一入口）** / `P3-agent-card.html` / `P4-project-dashboard.html` / `P5-channel-prototype.html` / `P5b-topic-channel.html` + 待做 Work / Approve / Settings |
+| 版本 | v0.7（Product/UX 收口版，文件名保留 v0.2） |
+| 日期 | 2026-09-10 |
+| 上游 | `docs/requirement/MateOS-总体需求文档.md`（PRD，含 User Promise / Journey / FR-10）、`docs/design/SYSTEM_DESIGN.md` §11 UI Projection & Human Attention |
+| 配套原型 | `P0-inbox.html`（**默认入口 Needs You**）/ `P0-team.html`（Team）/ `P-work.html`（Work + Work Detail）/ `P3-agent-card.html` / `P4-project-dashboard.html` / `P5-channel-prototype.html` / `P5b-topic-channel.html` |
 | 设计令牌 | `tokens.css`（**单一事实来源**） |
-| 状态 | Draft，**P3 / P4 / P5 原型需要按本版 + v0.4.2 收口回修**；P0 两页已按 v0.6 出图 |
+| 状态 | Draft，**v0.7 已按「Human attention first + Progressive disclosure」重做主流程页面** |
+
+> **v0.6 → v0.7 修订要点**（Product/UX 收口）：
+> 1. **设计原则重写**：从"成员优先"升级为 7 条，首条是 **Human attention first**。
+> 2. **入口反转**：默认入口从 Fleet 改为 **Needs You**；`Agent-centric ≠ Fleet-centric`。
+> 3. **导航冻结**：`Needs You / Channels / Work / Team`（+ Settings 收在头像菜单 / Project Settings）。
+> 4. **取消 P6 审批中心一级页面**：Memory / Work / Permission 审批统一进 `Needs You → Approval`。
+> 5. **Progressive disclosure 落地**：Level 1 Outcome → Level 2 Explanation → Level 3 Technical Trace，**Level 3 永不默认展开**。
+> 6. **去工程化**：`Fleet → Team`；卡片默认不再显示 lifecycle/activity/health/attempt/tokens/latency 等运行时概念。
 
 > **v0.5 → v0.6 修订要点**（v0.4.2 收口）：
 > 1. **删除"Busy → 自动 NEED_CONTEXT"行为**——v0.4.2 E4 引入 Redis atomic slot 调度后，Busy Agent 直接被 Resolver 跳过，**不再**产生"我很忙所以需要上下文"的伪造决策
@@ -20,12 +28,13 @@
 
 ## 1. 设计原则
 
-1. **成员优先，不是消息优先。**
-2. **Agent 的行为必须可解释。** 决策卡片从 `decision_records` 投影，不复制字段。
-3. **上下文常驻，不折叠。** 成员、记忆、待办是核心资产。
-4. **人类始终握有闸门。** Agent lifecycle / 记忆写入 / WorkItem 审批 / Agent execution 都有显式入口。
-5. **工程化密度。** 信息密度优先；动效只表达"进行中"。
-6. **Work Management 是独立域。** UI 永远不出现"execution backend 切换"等概念；Work 页面只与 WorkItem 交互，不展示 Execution 后端细节。
+1. **Human attention first.** 界面的第一目标是回答"有什么在等我"；其余信息按需展开。
+2. **Agent is a first-class teammate.** Agent 是成员，不是挂在工单上的执行器；但"成员"不等于"运维面板"。
+3. **Outcome before system events.** 先给结果与状态（Working / Needs you / Completed / Problem），系统事件默认折叠。
+4. **Progressive disclosure.** Level 1 Outcome → Level 2 Explanation → Level 3 Technical Trace；**Level 3 永不默认展开**。
+5. **Context follows work.** 上下文（成员 / 记忆 / 待办）跟着当前工作出现，不做独立的一级信息迷宫。
+6. **Human controls consequential actions.** 记忆写入 / WorkItem 审批 / 权限变更 / 执行取消都有显式入口与确认。
+7. **Internal runtime concepts stay hidden by default.** `CollaborationRequest / Execution / Attempt / Event / Lease / fencing / Provider` 不进 Level 1；Work Management 是独立域，UI 永不出现"execution backend 切换"。
 
 ---
 
@@ -155,20 +164,21 @@ v0.5 之前设计：当 Agent 处于 WORKING 状态收到新 mention，自动回
 
 ## 6. 页面清单（MVP 8 项 + 1 项 V1+）
 
-| 优先级 | 页面 | 原型 | v0.5 调整 |
+**导航（MVP 冻结）**：`Needs You / Channels / Work / Team`，Settings 收在头像菜单 / Project Settings。
+
+| 优先级 | 页面 | 原型 | v0.7 说明 |
 | --- | --- | --- | --- |
-| ★★★ | **P0 Inbox / Needs You** | **`P0-inbox.html`（v0.6 新增）** | **默认第二入口；五分类 + urgency 双编码 + 就地操作** |
-| ★★★ | **P0 Fleet** | **`P0-fleet.html`（v0.6 新增）** | **默认首页；lifecycle × activity × health 三维双编码 + 成本闸门** |
-| ★★★ | P5 Channel | v0.4 → 需回修（DECISION 改 entity_ref） | projection 模型 |
-| ★★ | P4 Project Dashboard | v0.4 → 需回修（Work Management 替换"外部协作"） | 删 AgentBoard |
-| ★★ | P3 Agent Card | v0.4 → 需回修（lifecycle badge + 删 can_execute） | 双维度状态 |
-| ★★ | **P-Work**（新） | 待做 | MVP Work 页面 |
-| ★★ | P6 审批中心 | 待做 | MVP（含 Memory + WorkItem 审批） |
-| ★ | P2 我的 Agents | 待做 | lifecycle 筛选 |
-| ★ | **P7 Memory 文档** | 待做 | MVP（v0.3 已升） |
+| ★★★ | **Needs You**（P0 Inbox） | `P0-inbox.html` | **默认入口**；四分类 `Decision / Information / Approval / Problems`；每条必带可执行动作 |
+| ★★★ | **Channels**（P5） | `P5-channel-prototype.html` + `P5b-topic-channel.html` | 用户语言三态（Taking this / Needs information / Completed）；系统事件折叠为 `▸ N activity events` |
+| ★★★ | **Team**（原 Fleet） | `P0-team.html` | Agent 列表（Working on / Next / Needs you）；runtime 细节在 Agent Detail → Advanced |
+| ★★ | **Work** | `P-work.html` | Work List（Work/Owner/Progress/Attention/Next）+ Agent-native Work Detail |
+| ★★ | Agent Detail（P3） | `P3-agent-card.html` | 用户层（当前工作 / 能力 / 进展）与诊断层（Advanced / Runtime）分离 |
+| ★★ | PO Delivery Dashboard（P4） | `P4-project-dashboard.html` | Needs You / Active Work / Blocked / Completed + Current Delivery + Team Activity + Recent Outcomes |
+| ~~P6 审批中心~~ | **取消一级页面** | —— | Memory / Work / Permission 审批统一进 `Needs You → Approval`；企业审计场景再考虑独立队列 |
 | ★ | P1 登录 / 注册 | 待做 | |
-| ★ | P8 团队与组织设置 | 待做 | |
-| V1+ | E9 Jira 集成设置 | 合并到 P4 Settings | |
+| ★ | P7 Memory 文档 | 待做 | **非一级入口**：从 Project / Channel / Work / Agent 上下文进入 |
+| ★ | Settings | 待做 | Project / Members / Work Management / Credentials / Policies |
+| V1+ | E9 Jira 集成设置 | Settings → Work Management | 不进 Dashboard 主区 |
 
 ---
 
@@ -202,13 +212,23 @@ v0.5 之前设计：当 Agent 处于 WORKING 状态收到新 mention，自动回
    - P4 「外部协作」卡改「Work Management」动态表单（Built-in + Jira V1+ 钩子）
    - P5 决策卡 / 记忆卡改 entity_ref 投影（不复制字段）
 2. **新增 P-Work 原型**（v0.5 新）
-3. **新增 P6 审批中心**（待做；v0.3 已升 MVP）
+3. ~~新增 P6 审批中心~~ **v0.7 取消一级页面**：审批统一进 `Needs You → Approval`（企业审计队列留待后续）
 4. 出组件切图与状态清单，交付前端
 5. tokens.css 同步 lifecycle × activity 状态色（v0.5 新增徽标样式）
 
 ---
 
 ## 10. 更新记录
+
+### v0.7（2026-09-10，Product/UX 收口）
+
+1. **设计原则重写为 7 条**，首条 `Human attention first`；新增 `Outcome before system events` / `Progressive disclosure` / `Internal runtime concepts stay hidden by default`。
+2. **入口反转**：默认入口 Fleet → **Needs You**（`Agent-centric ≠ Fleet-centric`）。
+3. **导航冻结**：`Needs You / Channels / Work / Team`（+ Settings）。
+4. **取消 P6 审批中心一级页面**：统一进 `Needs You → Approval`。
+5. **去工程化改名**：`P0-fleet.html` → **`P0-team.html`**；概览从 runtime 指标改为 `Needs You / Active Work / Available / Problems`；Agent 卡片默认只显示 `Working on / Next / Needs you`。
+6. **原型重做**：`P0-inbox.html`（四分类 + 每条带可执行动作 + Technical details 折叠）、`P5-channel-prototype.html`（三态用户语言 + `▸ N activity events` 折叠 + 记忆轻提示）、`P3-agent-card.html`（用户层 / Advanced 分层）、`P4-project-dashboard.html`（PO Delivery Dashboard，删除"外部协作 / 执行后端"）、新增 `P-work.html`（Work List + Agent-native Work Detail）。
+7. **删除**：原型中一切 `AgentBoard / execution backend / 能力匹配 · 上下文 88% · 权限检查` 的默认可见展示（移入 Level 3）。
 
 ### v0.5（2026-09-08，架构评审修订）
 

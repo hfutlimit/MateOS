@@ -21,11 +21,37 @@
 
 **MateOS 选第三者。** 这不只是一句定位，它有可执行的推论：
 
-- 默认首页是 **Fleet**（围绕 Agent 的态势）+ **Inbox**（围绕"需要我"），**不是** Work 列表也不是 Channel 列表
+- **Domain 主语 = Agent；用户入口 = Human Attention（Needs You）。**
+  这两件事不是一回事：**Agent-centric ≠ Fleet-centric**。领域围绕 Agent 组织，但默认入口是"有什么在等我"（Needs You），而不是"我的 Agent 此刻什么状态"（Fleet 态势图）。
+- 默认入口 **Needs You**（围绕"需要我"），第二入口 **Channels**（发生工作的对话），第三 **Work**（工作中的对象），第四 **Team**（成员与 Agent 详情）。
 - WorkItem 是必要组件，但它是 Agent 的**工作对象**，不是系统的组织轴心
 - 因此 Agent 是一等成员，而不是挂在工单上的执行器
 
-这条判据也给出了一条防退化规则：**任何时候 Work 列表成为首页，MateOS 就退化成工单系统了。**
+这条判据也给出两条防退化规则：
+
+- **任何时候 Work 列表成为首页，MateOS 就退化成工单系统了。**
+- **任何时候 UI 需要用户理解 Execution / Attempt / Lease / fencing 才能操作，MateOS 就退化成运维后台了。**
+
+### User-facing Vocabulary（内部模型 ↔ 用户语言）
+
+| Internal Model | 默认 UI 表达 | 默认可见性 |
+| --- | --- | --- |
+| CollaborationRequest | 不显示名称（用户只看到"Agent 接手了"） | 隐藏 |
+| Decision `ACCEPT` | Taking this / 已接手 | 消息流可见 |
+| Decision `NEED_CONTEXT` | Needs information | 消息流 + Needs You |
+| Decision `REJECT` | Can't take this（必带建议人选） | 消息流可见 |
+| Execution | Work / Activity（"正在做…"） | Level 1 只显示进度文案 |
+| ExecutionAttempt | 默认隐藏 | Level 3 |
+| ExecutionEvent | 默认隐藏（合并为 `▸ 8 activity events`） | Level 3 |
+| Agent activity `WORKING` | Working | Level 1 |
+| Agent `ERROR` / `UNHEALTHY` | Needs attention / Problem（带可执行动作） | Needs You |
+| Lease / fencing / provider_event_id | **永不展示** | 永不 |
+| Provider / external_ref / canonical status | Advanced details / Settings | Level 3 |
+
+**Invariant（与 I1–I10 同级）**：
+
+> **Domain Entity ≠ UI Navigation Entity。**
+> 数据库模型不得一对一生成页面；UI 分三级（Level 1 Outcome / Level 2 Explanation / Level 3 Technical Trace），**Level 3 永远不能默认展开**。
 
 ---
 

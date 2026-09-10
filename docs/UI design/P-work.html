@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MateOS · Work（P-Work）</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,500;12..96,600;12..96,700;12..96,800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="tokens.css">
+<style>
+/* ============================================================
+   P-Work · Work List + Agent-native Work Detail
+   v0.7：不做 Jira clone。
+   默认列 = Work / Owner / Progress / Attention / Next
+   （provider、external ref、canonical status 只出现在 Details）
+   Work Detail 的重点：谁在推进 / 到哪一步 / 下一步自动做什么 / 需不需要你
+   色源 = tokens.css
+   ============================================================ */
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{font-family:var(--font);font-size:13px;color:var(--text);height:100vh;display:flex;flex-direction:column;overflow:hidden;background:var(--bg)}
+button{font-family:inherit;font-size:12px;cursor:pointer;background:transparent;border:none;color:inherit}
+input{font-family:inherit}
+code{font-family:var(--mono);font-size:.92em;background:var(--surface-2);border-radius:4px;padding:1px 4px}
+::-webkit-scrollbar{width:9px;height:9px}
+::-webkit-scrollbar-thumb{background:color-mix(in oklab,var(--border-strong) 85%,transparent);border-radius:6px;border:2px solid transparent;background-clip:padding-box}
+::-webkit-scrollbar-track{background:transparent}
+
+.app{display:flex;flex-direction:column;height:100%;
+  --edge:0.5px solid color-mix(in oklab,var(--border) 90%,transparent);
+  --glass:color-mix(in oklab,var(--bg) 74%,transparent);
+  --font-display:"Bricolage Grotesque",var(--font)}
+
+.topbar{height:50px;flex:none;display:flex;align-items:center;gap:12px;padding:0 16px;border-bottom:var(--edge);background:var(--bg)}
+.brand{display:flex;align-items:center;gap:9px;font-family:var(--font-display);font-weight:700;font-size:16px;letter-spacing:-.02em}
+.brand .mk{width:24px;height:24px;border-radius:8px;display:grid;place-items:center;color:#fff;font-size:13px;font-weight:800;
+  background:linear-gradient(145deg,var(--primary),color-mix(in oklab,var(--primary) 62%,var(--thinking)))}
+.nav{display:flex;gap:2px;margin-left:10px}
+.nav a{display:flex;align-items:center;gap:6px;height:30px;padding:0 11px;border-radius:8px;color:var(--text-2);text-decoration:none;font-weight:500}
+.nav a:hover{background:var(--hover);color:var(--text)}
+.nav a[aria-current="page"]{background:var(--primary-50);color:var(--primary);font-weight:600}
+.nav .pill{min-width:16px;height:16px;padding:0 4px;border-radius:8px;background:var(--waiting);color:#fff;font-size:10px;font-weight:700;display:grid;place-items:center}
+.btn{height:30px;padding:0 12px;border-radius:8px;border:var(--edge);font-weight:500;color:var(--text-body);background:var(--bg)}
+.btn.primary{background:var(--primary);border-color:var(--primary);color:#fff;font-weight:600}
+.me{width:32px;height:32px;border-radius:10px;background:var(--primary-100);color:var(--primary);display:grid;place-items:center;font-weight:700;font-size:12px;font-family:var(--font-display);margin-left:auto}
+
+.shell{flex:1;display:flex;min-height:0}
+
+/* 列表 */
+.list{flex:1;min-width:0;display:flex;flex-direction:column}
+.lhead{display:flex;align-items:center;gap:10px;padding:16px 20px 10px;flex-wrap:wrap}
+.lhead h1{font-family:var(--font-display);font-size:17px;font-weight:700;letter-spacing:-.02em;margin-right:auto}
+.chip{height:26px;padding:0 10px;border-radius:13px;border:var(--edge);font-size:11.5px;color:var(--text-2);display:inline-flex;align-items:center;gap:6px}
+.chip[aria-pressed="true"]{background:var(--primary-50);border-color:var(--primary-100);color:var(--primary);font-weight:600}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+thead th{text-align:left;font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--text-3);font-weight:600;padding:8px 12px;border-bottom:var(--edge);background:var(--surface)}
+tbody td{padding:11px 12px;border-bottom:var(--edge);vertical-align:middle}
+tbody tr{cursor:pointer}
+tbody tr:hover{background:var(--hover)}
+tbody tr[aria-selected="true"]{background:var(--primary-50)}
+.wtitle{font-weight:600}
+.wsub{color:var(--text-3);font-size:11.5px;margin-top:3px}
+.owner{display:flex;align-items:center;gap:7px}
+.ava{width:22px;height:22px;border-radius:7px;background:var(--primary-50);color:var(--primary);display:grid;place-items:center;font-size:10px;font-weight:700;font-family:var(--font-display);flex:none}
+.pill{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;padding:3px 8px;border-radius:6px;border:0.5px solid transparent;white-space:nowrap}
+.pill .dot{width:6px;height:6px;border-radius:50%;background:currentColor}
+.pill.working{background:var(--busy-bg);color:var(--busy-text)}
+.pill.review{background:var(--thinking);color:#fff}
+.pill.blocked{background:var(--waiting-bg);color:var(--waiting-text)}
+.pill.queued{background:var(--surface-2);color:var(--text-2)}
+.pill.done{background:var(--free-bg);color:var(--free-text);border-color:var(--free-border)}
+.attn{color:var(--waiting-text);font-weight:600;font-size:12px}
+.attn.none{color:var(--text-3);font-weight:400}
+.nextc{color:var(--text-2)}
+
+/* 详情 */
+.detail{width:430px;flex:none;border-left:var(--edge);overflow:auto;min-height:0}
+.dh{padding:18px 20px 14px;border-bottom:var(--edge)}
+.dh .ref{color:var(--text-3);font-size:11.5px;font-family:var(--mono)}
+.dh h2{font-family:var(--font-display);font-size:19px;font-weight:700;letter-spacing:-.02em;margin-top:6px;line-height:1.3}
+.dh .meta{display:flex;align-items:center;gap:9px;margin-top:10px;flex-wrap:wrap;font-size:12px;color:var(--text-3)}
+.sec{padding:16px 20px;border-bottom:var(--edge)}
+.sec h3{font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--text-3);font-weight:600;margin-bottom:10px}
+.kv{display:grid;grid-template-columns:104px 1fr;gap:8px 12px;font-size:12.5px}
+.kv dt{color:var(--text-3)}
+.kv dd{color:var(--text-body)}
+.prog{list-style:none;font-size:12.5px}
+.prog li{position:relative;padding:0 0 12px 20px;margin-left:3px;border-left:1px solid var(--border)}
+.prog li:last-child{border-left-color:transparent;padding-bottom:0}
+.prog li::before{content:"";position:absolute;left:-4px;top:4px;width:7px;height:7px;border-radius:50%;background:var(--border-strong)}
+.prog li.ok::before{background:var(--free)}
+.prog li.cur::before{background:var(--busy);box-shadow:0 0 0 3px var(--busy-bg)}
+.prog li .t{color:var(--text-body)}
+.prog li .s{color:var(--text-3);font-size:11.5px;margin-top:2px}
+.attnbox{background:var(--waiting-bg);border:0.5px solid color-mix(in oklab,var(--waiting) 34%,transparent);border-radius:var(--radius-card);padding:12px}
+.attnbox .t{font-weight:600;color:var(--waiting-text);font-size:12.5px}
+.attnbox .d{font-size:12px;color:var(--text-body);margin-top:6px;line-height:1.6}
+.attnbox .a{display:flex;gap:7px;margin-top:10px;flex-wrap:wrap}
+.mini{height:27px;padding:0 10px;border-radius:7px;border:var(--edge);color:var(--text-2);font-size:11.5px;background:var(--bg)}
+.mini.primary{background:var(--primary);border-color:var(--primary);color:#fff;font-weight:600}
+details.tech{border:var(--edge);border-radius:var(--radius-card);background:var(--surface);margin-top:2px}
+details.tech>summary{cursor:pointer;list-style:none;padding:10px 12px;font-size:11.5px;color:var(--text-2);display:flex;align-items:center;gap:7px}
+details.tech>summary::-webkit-details-marker{display:none}
+details.tech>summary::before{content:"▸";color:var(--text-3)}
+details.tech[open]>summary::before{content:"▾"}
+details.tech .tb{padding:0 12px 12px;font-size:11.5px;color:var(--text-2);line-height:1.7}
+.sronly{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <header class="topbar">
+    <div class="brand"><span class="mk" aria-hidden="true">M</span>MateOS</div>
+    <nav class="nav" aria-label="主导航">
+      <a href="P0-inbox.html">Needs You <span class="pill">5</span></a>
+      <a href="P5-channel-prototype.html">Channels</a>
+      <a href="P-work.html" aria-current="page">Work</a>
+      <a href="P0-team.html">Team</a>
+    </nav>
+    <button class="btn primary">新建 Work</button>
+    <div class="me" title="Jason">J</div>
+  </header>
+
+  <div class="shell">
+
+    <section class="list" aria-label="Work 列表">
+      <div class="lhead">
+        <h1>Work · MateOS</h1>
+        <button class="chip" aria-pressed="true">全部</button>
+        <button class="chip">Needs you</button>
+        <button class="chip">Working</button>
+        <button class="chip">Blocked</button>
+        <button class="chip">Done</button>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th style="width:38%">Work</th>
+            <th style="width:20%">Owner</th>
+            <th style="width:14%">Progress</th>
+            <th style="width:14%">Attention</th>
+            <th style="width:14%">Next</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr aria-selected="true">
+            <td>
+              <div class="wtitle">LOGIN-142 · Fix login timeout</div>
+              <div class="wsub">来自 #backend 的讨论</div>
+            </td>
+            <td><span class="owner"><span class="ava" aria-hidden="true">BA</span>Backend Agent</span></td>
+            <td><span class="pill working"><span class="dot"></span>Working</span></td>
+            <td><span class="attn none">—</span></td>
+            <td class="nextc">准备实现方案</td>
+          </tr>
+          <tr>
+            <td>
+              <div class="wtitle">API-210 · 退款接口设计</div>
+              <div class="wsub">来自 PO 直接创建</div>
+            </td>
+            <td><span class="owner"><span class="ava" aria-hidden="true">AR</span>Architect Agent</span></td>
+            <td><span class="pill blocked"><span class="dot"></span>Blocked</span></td>
+            <td><span class="attn">Needs you</span></td>
+            <td class="nextc">需要 staging schema</td>
+          </tr>
+          <tr>
+            <td>
+              <div class="wtitle">CHECKOUT-QA · 结算回归</div>
+              <div class="wsub">来自 QA Agent 建议</div>
+            </td>
+            <td><span class="owner"><span class="ava" aria-hidden="true">QA</span>QA Agent</span></td>
+            <td><span class="pill review"><span class="dot"></span>Reviewing</span></td>
+            <td><span class="attn none">—</span></td>
+            <td class="nextc">完成回归报告</td>
+          </tr>
+          <tr>
+            <td>
+              <div class="wtitle">DOC-88 · 更新 API 文档</div>
+              <div class="wsub">来自 #design 的讨论</div>
+            </td>
+            <td><span class="owner"><span class="ava" aria-hidden="true">DO</span>Docs Agent</span></td>
+            <td><span class="pill queued"><span class="dot"></span>Queued</span></td>
+            <td><span class="attn none">—</span></td>
+            <td class="nextc">等 LOGIN-142 定稿</td>
+          </tr>
+          <tr>
+            <td>
+              <div class="wtitle">UI-102 · 导航改版</div>
+              <div class="wsub">来自 PO 直接创建</div>
+            </td>
+            <td><span class="owner"><span class="ava" aria-hidden="true">FE</span>Frontend Agent</span></td>
+            <td><span class="pill done"><span class="dot"></span>Completed</span></td>
+            <td><span class="attn none">—</span></td>
+            <td class="nextc">已交付，等待你的验收</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div style="padding:12px 20px;font-size:11.5px;color:var(--text-3);border-top:var(--edge);margin-top:auto">
+        Provider、外部编号、canonical status 等字段在 Work Detail → Details，不占列表主列（Work Management Provider 配置在 Project Settings）。
+      </div>
+    </section>
+
+    <aside class="detail" aria-label="Work 详情">
+      <div class="dh">
+        <div class="ref">LOGIN-142</div>
+        <h2>Fix login timeout</h2>
+        <div class="meta">
+          <span class="pill working"><span class="dot"></span>In Progress</span>
+          <span>Owner：Backend Agent</span>
+          <span>更新于 2 分钟前</span>
+        </div>
+      </div>
+
+      <section class="sec">
+        <h3>Current activity</h3>
+        <dl class="kv">
+          <dt>正在做</dt><dd>排查 session 超时路径（已缩小到两个可疑点）</dd>
+          <dt>下一步</dt><dd>准备实现方案（自动进行，不需要你触发）</dd>
+          <dt>需要你</dt><dd>暂时不需要</dd>
+        </dl>
+      </section>
+
+      <section class="sec">
+        <h3>Progress</h3>
+        <ul class="prog">
+          <li class="ok"><div class="t">需求已收到</div><div class="s">来自 #backend · Jason · 21:38</div></li>
+          <li class="ok"><div class="t">Backend Agent 已接手</div><div class="s">Taking this · 21:39</div></li>
+          <li class="ok"><div class="t">分析完成</div><div class="s">产出：两条路径对比 · 21:44</div></li>
+          <li class="cur"><div class="t">正在实现</div><div class="s">Working · 已开始 2 分钟</div></li>
+          <li><div class="t">提交评审</div><div class="s">预计自动触发 Reviewer Agent</div></li>
+        </ul>
+      </section>
+
+      <section class="sec">
+        <h3>Human attention</h3>
+        <div class="attnbox" style="background:var(--free-bg);border-color:var(--free-border)">
+          <div class="t" style="color:var(--free-text)">现在不需要你</div>
+          <div class="d">如果出现需要判断的地方，它会出现在 Needs You（不会只在 Channel 里刷过去）。</div>
+        </div>
+      </section>
+
+      <section class="sec">
+        <h3>Related</h3>
+        <dl class="kv">
+          <dt>对话</dt><dd>#backend · Topic「登录超时排查」</dd>
+          <dt>记忆</dt><dd>API 错误码约定 · 重试策略（待批准）</dd>
+          <dt>产出</dt><dd>API 方案对比.md</dd>
+        </dl>
+      </section>
+
+      <section class="sec">
+        <details class="tech">
+          <summary>Details / Activity</summary>
+          <div class="tb">
+            <dl class="kv">
+              <dt>Provider</dt><dd>Built-in（切换在 Project Settings → Work Management）</dd>
+              <dt>External ref</dt><dd>—（Built-in 无外部编号）</dd>
+              <dt>Canonical status</dt><dd>IN_PROGRESS → TODO / IN_PROGRESS / DONE</dd>
+              <dt>执行</dt><dd>Execution <code>8f2c…</code> · attempt 1 · 5 events</dd>
+              <dt>成本</dt><dd>$0.21 · 48s</dd>
+              <dt>Created by</dt><dd>Jason · 从 #backend 讨论升级</dd>
+            </dl>
+          </div>
+        </details>
+      </section>
+    </aside>
+
+  </div>
+</div>
+</body>
+</html>

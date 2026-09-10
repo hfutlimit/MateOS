@@ -46,6 +46,55 @@ MateOS 同时触及四个方向：Slack/Teams 类协作工具、Multi-Agent Fram
 
 > 人和 Agent 可以像团队成员一样沟通、协作、推进工作。
 
+### 1.2 User Promise
+
+> **把工作交给 AI 团队，MateOS 负责持续推进；只有需要人的判断、授权或补充信息时才打扰用户。**
+>
+> Give work to your AI team. MateOS keeps it moving and only asks for your attention when human judgment is needed.
+
+这条承诺是 UX、Needs You、通知、Agent handoff、Progressive Disclosure 的统一原则：**系统可以复杂，用户注意力必须被保护**。
+
+与之配套的唯一硬约束：
+
+> 用户永远不需要理解 CollaborationRequest / Execution / Attempt / Event / Lease / Provider / fencing 才能完成操作。
+> 界面应随系统能力增强而变得更简单，而不是把内部模型一对一翻译成页面（**Domain Entity ≠ UI Navigation Entity**）。
+
+### 1.3 Primary User Journeys
+
+产品的三条主路径。**不要从 Entity 开始讲产品，要从用户路径开始**：
+
+**Journey A — Ask the Team**
+
+```
+人在 Channel 提出需求
+  → @backend / @qa / @architecture
+  → MateOS 找到合适 Agent（不黑箱：命中候选与理由可见）
+  → Agent 接手（Taking this）
+  → 持续工作（人可随时看到进展，但不需要盯着）
+  → 结果回到原 Channel
+```
+
+**Journey B — Needs You**
+
+```
+Agent 工作中遇到需要人类判断的事
+  → 进入 Needs You
+  → 说明：发生了什么 / 为什么需要你 / 建议怎么做 / 影响什么 / 阻塞了什么
+  → 用户一键决策（批准 / 补充信息 / 改派 / 驳回）
+  → Agent 自动继续
+```
+
+**Journey C — Deliver Work**
+
+```
+WorkItem（PO 建 / 从对话升级）
+  → Agent 接手并成为 owner
+  → Execution（人只看 Progress 与 Next step）
+  → 产出（Artifact / 结果回帖）
+  → Review / QA（后续阶段）
+  → Work 向前推进
+```
+
 ---
 
 ## 2. 产品目标：解决 AI Coding 的三个核心问题
@@ -60,7 +109,23 @@ MateOS 同时触及四个方向：Slack/Teams 类协作工具、Multi-Agent Fram
 
 ### 2.3 AI Agent 缺少团队协作能力
 
-Agent 是一等成员，能够：接受任务、拒绝任务、请求更多上下文、委派任务给更合适的成员、与 Agent 协作、Review 其他 Agent 的工作。
+Agent 是一等成员。**V1 的协作能力边界**：
+
+```
+V1（MVP）：
+  - 接受工作（Accept）
+  - 拒绝工作（Reject，必带理由与建议人选）
+  - 请求更多上下文（Need Context）
+  - 产出结果（Result / Artifact）
+
+Future（V2+）：
+  - 委派给其它 Agent（Delegate routing）
+  - 自动 Review 链（Backend → Reviewer → QA）
+  - 依赖分析与多 Story 规划
+  - 无人值守的多 Agent 交付
+```
+
+> **口径统一**：`Delegate` 在 V1 只保留枚举位，**不在原型里假装已实现自动 Backend → Reviewer → QA 全链运行**；V1 的跨 Agent 接力由**人**发起（@ 另一个 Agent 或改派）。
 
 ### 2.4 AI 团队缺乏统一的项目管理（v0.4 新增）
 
@@ -248,8 +313,10 @@ Decision 三态（v0.4 与 v0.3 相同）：Accept / Reject / Need Context；Del
 | Mention 形式 | 行为 |
 | --- | --- |
 | `@指定成员` | 直接路由 |
-| `@能力组` | 走 Mention Resolver（lifecycle=ACTIVE ∩ activity≠OFFLINE/ERROR/WORKING） |
-| `@all` | 全部 lifecycle=ACTIVE 的 Agent；带成本预警 |
+| `@能力组` | 走 Mention Resolver（`lifecycle=ACTIVE ∩ team member ∩ 有效权限 ALLOW ∩ 有空闲 slot`） |
+| `@all` | 全部 `lifecycle=ACTIVE` 的 Agent；带成本预警 |
+
+> **v0.8 修正**：`activity` **不参与调度过滤**（activity 只做 UI 派生）；候选资格由 `lifecycle` + 成员资格 + 有效权限（Channel 覆盖 → Project 覆盖 → 默认矩阵）+ Redis slot 决定。健康度由 `health` 独立表达（`UNHEALTHY` 不进候选）。详见 SYSTEM_DESIGN §4.2.1 / §6.2 与 detailed/04 §2.1。
 
 **Resolver 不黑箱**（UI 必须展示命中候选 + 分数 + 决策依据 analysis{capability, context_score, permission}）。
 
@@ -291,9 +358,52 @@ WorkItem
 
 ### FR-9 Permission & Approval
 
-- 7 键：`read_message` / `write_message` / `write_memory` / `execute_code` / `create_pr` / `approve_memory` / `manage_channel`
+- **8 键**：`read_message` / `write_message` / **`propose_memory`** / `write_memory` / `execute_code` / `create_pr` / `approve_memory` / `manage_channel`
 - `check(subject, perm, scope) → ALLOW | DENY | REQUIRE_APPROVAL`
-- `REQUIRE_APPROVAL`（v0.4 起替换 `REQUEST`）走 E5 人审门禁或 E4 决策路径
+- `REQUIRE_APPROVAL`（v0.4 起替换 `REQUEST`）走人审门禁或决策路径
+- **申请与写入分离**（v0.8）：Agent 申请记忆只校验 `propose_memory`（默认 ALLOW）；`write_memory` 仅 service-to-service，不出现在 Agent 申请路径上
+- **没有覆盖行 ≠ 拒绝**：三层合并（Channel > Project > 默认矩阵），未命中覆盖即回落默认矩阵
+
+### FR-10 Human Attention / Needs You（v0.8 新增 · MVP 核心能力）
+
+**定义**：Needs You 是**只读 read projection**，把多个事实源里"需要人"的事项汇聚到唯一入口。**它不是新的 Domain Entity，也不是第二事实源。**
+
+```
+CollaborationRequest.NEED_CONTEXT / UNRESOLVED
+MemoryProposal.PENDING（待审批）
+Execution 失败 / 不可达
+Agent UNHEALTHY / Credential 失效
+WorkItem BLOCKED
+预算阈值（80% / 100%）
+        │
+        ▼
+   Needs You（四分类：Decision / Information / Approval / Problems）
+```
+
+每个 Item 至少包含：`发生了什么` / `为什么需要你` / `阻塞了什么` / `建议怎么做` / `可用动作[]` / `来源与上下文` / `urgency`。
+
+**UX invariant（硬性）**：
+
+> 任何进入 Needs You 的事项**必须给用户一个可执行动作**；不允许只展示系统错误。
+
+对照示例——**禁止**：
+
+```
+Execution #8f2c FAILED
+Attempt 2
+Provider 401
+```
+
+**必须**：
+
+```
+Reviewer Agent needs your help
+它的 AI Provider 凭据已过期，评审无法继续。
+推荐：重新连接凭据。   [重新连接] [改派其它 Agent]
+阻塞的工作：LOGIN-142
+```
+
+**收敛规则**：Memory 审批、Work 审批、Permission 审批**全部**进 `Needs You → Approval`；MVP **不设独立 Approval Center 一级页面**。信息架构为 `Needs You / Channels / Work / Team / Settings`。
 
 ---
 
@@ -303,6 +413,7 @@ WorkItem
 | --- | --- | --- | --- |
 | `read_message` | ALLOW | ALLOW | ALLOW（已加入 channel） |
 | `write_message` | ALLOW | ALLOW | ALLOW |
+| **`propose_memory`** | **ALLOW** | **ALLOW** | **ALLOW**（申请入口，v0.8 新增） |
 | `write_memory` | REQUIRE_APPROVAL | REQUIRE_APPROVAL | REQUIRE_APPROVAL |
 | `execute_code` | DENY | DENY | DENY（V1） |
 | `create_pr` | REQUIRE_APPROVAL | DENY | DENY |

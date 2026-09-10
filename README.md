@@ -1,106 +1,130 @@
 # MateOS
 
-> AI-native team operating system where humans and AI teammates collaborate through shared channels, memory, and autonomous workflows.
+> AI-native team operating system where humans and AI teammates collaborate through shared channels, memory, and work.
 
-MateOS 是一个面向软件开发团队的 AI 原生团队协作平台（V1 = AI Engineering Team Workspace）。人类成员与 AI Agent 成员在共享 Channel 中沟通、分配任务、沉淀记忆，决策可解释、知识可复用、人类始终握有闸门。
+MateOS 是一个面向软件开发团队的 AI 原生团队协作平台（V1 = AI Engineering Team Workspace）。人类成员与 AI Agent 成员在共享 Channel 中沟通、推进工作、沉淀记忆；人类始终握有闸门，且**只在需要判断、授权或补充信息时才被要求介入**。
 
-## 项目状态
+## Current Design Baseline
 
-| 维度 | 状态 |
+| 项 | 内容 |
 | --- | --- |
-| 阶段 | **需求与设计收口期**（尚未启动 M1 编码） |
-| 文档 | PRD v0.4 / SYSTEM_DESIGN v0.5（技术栈已拍板 .NET）/ UI Design System v0.6 / detailed 00–09 v0.5 |
-| 原型 | **P0 Fleet / P0 Inbox（v0.6 新增，S1 第一/第二入口）** / P3 Agent Card / P4 Project Dashboard / P5 + P5b Channel 主界面 |
-| 待做原型 | P1 登录注册 / P2 我的 Agents / P6 审批中心 / P7 Memory 文档 / P8 团队设置 |
+| Last updated | 2026-09-10 |
+| Product | **MateOS V1 = AI Engineering Team Workspace** |
+| Backend | ASP.NET Core / .NET 10 |
+| Frontend | Next.js + TypeScript |
+| Storage | PostgreSQL 16 + pgvector |
+| Async | PostgreSQL transactional outbox（`SKIP LOCKED` relay） |
+| Cache / Presence | Redis 7 |
+| Execution | MateOS Agent Runtime（自研，永久自洽） |
+| Implementation | **S1 → S2 → S3 vertical slices** |
+| Stage | 设计收口完成，可进入 S1 walking skeleton |
+
+> 本表是唯一需要维护的「技术基线」。**不要在此堆叠文档版本号**：PRD / SYSTEM_DESIGN / UI DS 的版本只在各自文件头与更新记录里维护；detailed / epic / 原型不单独发行版本号，用日期 + commit 追溯。避免出现「文件头 v0.5、changelog v0.7、commit v0.8」这类交叉版本噪音。
+
+## Product Promise
+
+> **把工作交给 AI 团队，MateOS 负责持续推进；只有需要人的判断、授权或补充信息时才打扰用户。**
+
+三条 Primary User Journey（完整定义见 PRD §1.2 / §1.3）：
+
+| Journey | 用户看到的一句话 |
+| --- | --- |
+| **Ask the Team** | 在 Channel 提出需求 → @Agent → 合适的 Agent 接手 → 持续工作 → 结果回到原 Channel |
+| **Needs You** | Agent 遇到需要人的判断 → 说明发生了什么 / 为什么需要你 / 建议怎么做 / 影响什么 → 你一键决策 → Agent 自动继续 |
+| **Deliver Work** | WorkItem → Agent 接手 → 执行 → 产出 → Work 向前推进 |
+
+**唯一的产品体验约束**：
+
+> 用户永远不需要理解 CollaborationRequest / Execution / Attempt / Event / Lease / Provider / fencing 才能完成操作。
+> 系统内部可以越来越专业；**界面应该随着系统能力增强反而越来越简单**。
+
+## 用户可见的信息架构（MVP 冻结）
+
+```
+MateOS
+├── Needs You        ← 默认入口：Decision / Information / Approval / Problems
+├── Channels         ← 消息流 + Topics
+├── Work             ← Work List + Agent-native Work Detail
+├── Team             ← Agent 列表 + Agent Detail（用户层 / 诊断层分离）
+└── Settings         ← Project / Members / Work Management / Credentials / Policies
+```
+
+- **Memory 不是一级入口**：从 Project / Channel / Work / Agent 上下文进入。
+- **没有独立的 Approval Center**：Memory / Work / Permission 审批统一收进 `Needs You → Approval`。
+- **Agent-centric ≠ Fleet-centric**：领域主语是 Agent，但用户入口由 Human Attention 驱动。
 
 ## Single Source of Truth
 
-- **Current Design 只有两处**：`docs/requirement/MateOS-总体需求文档.md`（PRD）+ `docs/design/SYSTEM_DESIGN.md`。其他一切（detailed / epic / 原型）都是它们的展开，**与之冲突时以这两份为准并回改子文档**。
-- `docs/design/detailed/00–09` = Current implementation spec。
-- `docs/design/future/` = **V2 愿景，不作 M1–M9 依据**（`autonomous-delivery/` 已于 2026-09-10 迁入）。
-- `docs/spec/domain-model-v0.3.md` = 领域模型（产品主语 = Agent；`Execution.work_item_ref` 可为 NULL）。
-- 评审/提案类文档放 `docs/review/`，只记录结论与待拍板项，不是 spec。
+- **Current Design 只有两处**：`docs/requirement/MateOS-总体需求文档.md`（PRD）+ `docs/design/SYSTEM_DESIGN.md`。其他一切（detailed / epic / 原型 / domain-model）都是它们的展开，**冲突时以这两份为准并回改子文档**。
+- `docs/design/detailed/00–10` = Current implementation spec。
+- `docs/design/future/` = **V2 愿景，不作 S1–S3 依据**（`autonomous-delivery/` 已迁入并冻结）。
+- `docs/spec/domain-model-v0.3.md` = 领域模型 + 不变量，并含 **User-facing Vocabulary**（内部模型 ↔ 用户语言）。
+- `docs/review/` = 评审结论与待拍板项，不是 spec。
 
 ## 文档结构
 
 ```
 docs/
 ├── requirement/
-│   ├── MateOS-总体需求文档.md        # PRD v0.4（单一事实源）
+│   ├── MateOS-总体需求文档.md        # PRD（单一事实源；含 User Promise / Journey / FR-10 Needs You）
 │   └── epic/                         # E1–E10 Epic（PRD 的展开）
 ├── design/
-│   ├── SYSTEM_DESIGN.md              # v0.5（单一事实源；技术栈已拍板 .NET）
-│   ├── MateOS-architecture.html      # 架构图（只读展示，随 SYSTEM_DESIGN 更新）
+│   ├── SYSTEM_DESIGN.md              # 单一事实源（含 UI Projection & Human Attention Model）
+│   ├── MateOS-architecture.html      # 架构图（只读展示）
 │   ├── detailed/                     # Current implementation spec
-│   │   ├── 00-overview.md … 10-agent-stub-and-sdk.md
-│   └── future/                       # V2 愿景，不作 M1–M9 依据
-│       └── autonomous-delivery/      # Mission / WorkUnit / Scheduler（保留但冻结）
+│   │   ├── 00-overview.md … 09-implementation-checklist.md
+│   │   └── 10-agent-stub-and-sdk.md  # S1 的 stub Agent + SDK 契约
+│   └── future/                       # V2 愿景，不作 S1–S3 依据
 ├── spec/
-│   └── domain-model-v0.3.md          # 领域模型 + 不变量（I1–I10）
+│   └── domain-model-v0.3.md          # 领域模型 + 不变量（I1–I10）+ 用户词表
 ├── review/                           # 评审结论与待拍板项
 └── UI design/
-    ├── MateOS-UI-Design-System-v0.2.md  # DS v0.6（文件名保留 v0.2）
+    ├── MateOS-UI-Design-System-v0.2.md  # DS（文件名保留 v0.2）
     ├── tokens.css                    # 设计令牌单一事实来源
-    ├── P3-agent-card.html            # 一等成员详情页
-    ├── P4-project-dashboard.html     # 项目工作台
-    ├── P5-channel-prototype.html     # Channel 主界面（4 栏 + 5 形态消息流）
-    └── P5b-topic-channel.html        # Topic 线程 + 共享上下文带
+    ├── P0-inbox.html                 # Needs You（默认入口）
+    ├── P0-team.html                  # Team（Agent 列表）
+    ├── P3-agent-card.html            # Agent Detail（用户层 / 诊断层）
+    ├── P4-project-dashboard.html     # PO Delivery Dashboard
+    ├── P5-channel-prototype.html     # Channel 主界面
+    ├── P5b-topic-channel.html        # Topic 线程
+    └── P-work.html                   # Work List + Work Detail
 ```
 
 ## 核心概念
 
 - **Organization → Team → Project → Channel → Member(Human|Agent)** — 五层实体模型
 - **Channel = communication boundary, Project = knowledge boundary** — 通信与知识边界分离
-- **6 态状态机**（PRD / SYSTEM_DESIGN / UI DS 单一事实来源）：`OFFLINE / AVAILABLE / THINKING / WORKING / WAITING_CONTEXT / ERROR`
-- **Mention Resolver** — `@成员 / @能力组 / @all` 三种提及形态，能力排序 + 命中结果前端可见
-- **Decision 状态机** — `Accept / Reject / Need Context`（MVP 三种），Delegate 留 V2
-- **Shared Memory 人审门禁** — Agent 申请 → 人类批准 → 进入共享记忆；每条记忆必带 Source 溯源（PRD FR-7 硬性要求）
-- **执行层永久自洽** — 只有 MateOS Runtime；与 AgentBoard 集成已永久移出 scope（PRD §8 Non Goals）。项目管理默认 Built-in，Jira 为 V1+ 可选 Provider（**不是**执行后端）。
-- **MateOS = Agent-centered Team OS** — 产品主语是 Agent：首页 = Fleet + Inbox；WorkItem 是 Agent 的工作对象，不是产品主干。
+- **Agent 三维状态**（内部概念，UI 用颜色 + 文字徽标双编码）：`lifecycle(ACTIVE/PAUSED/DISABLED) × activity(6 态) × health(HEALTHY/DEGRADED/UNHEALTHY)`
+- **Mention Resolver** — `@成员 / @能力组 / @all`；候选 = `lifecycle=ACTIVE ∩ 有空闲 slot ∩ 有效权限 ALLOW`（**activity 不参与调度**）
+- **Decision** — `Accept / Reject / Need Context`（MVP）。**Delegate 与自动 Review 链 = Future**，V1 不在原型里假装已实现
+- **Shared Memory 人审门禁** — Agent 申请（`propose_memory`）→ 人类批准（`approve_memory`）→ 入共享记忆；每条记忆必带 Source 溯源
+- **执行层永久自洽** — 只有 MateOS Runtime；与 AgentBoard 集成永久移出 scope（PRD §8）。Work Management 是**独立 Provider 域**（Built-in 默认；Jira = V1+ 可选），**不是执行后端**
+- **Human Attention 是 read projection** — Needs You 由 CR.NEED_CONTEXT / MemoryProposal.PENDING / Execution 失败 / Agent 异常 / WorkItem 阻塞 / 预算阈值汇聚而成，**不是新的事实源**
 
-## 技术选型（SYSTEM_DESIGN v0.5 · 2026-09-10 已拍板）
+## 技术选型
 
 - 前端：Next.js + TypeScript + antd 6 + Zustand + TanStack Query
 - 后端：**ASP.NET Core（.NET 10 LTS, C#）** — 模块化单体 + `BackgroundService` relay
-- ORM / 迁移：EF Core 10（Npgsql）+ 显式 SQL 迁移
+- ORM / 迁移：EF Core（Npgsql）+ 显式 SQL 迁移
 - 数据库：PostgreSQL 16 + pgvector
-- 缓存：Redis 7（presence / pub/sub / 限流）
-- 异步：**PostgreSQL transactional outbox + `SKIP LOCKED` relay**（BullMQ 已从 Current Design 移除）
-- 沙箱：Docker 容器（V3 启用，架构预留）
-- 部署：Docker Compose → K8s
-- 可观测：M1 起只做结构化日志 + trace_id + audit + `/metrics`；OTel + Prometheus + Grafana + Loki 推到 M8
+- 缓存：Redis 7（presence / pub/sub / 限流 / slot lease）
+- 异步：**PostgreSQL transactional outbox + `SKIP LOCKED` relay**（无独立 MQ）
+- 契约：OpenAPI 3.1 + JSON Schema（`contracts/`）为协议事实源，TS / C# 由此生成或校验
+- 可观测：S1 起只做结构化日志 + trace_id + audit + `/metrics`；OTel + Prometheus + Grafana + Loki 推后
+- 沙箱 / 部署：Docker（V3 启用）；Docker Compose → K8s
 
-> 协议层（Connector / REST / envelope）保持**技术中立**：只定义语义，不绑定实现语言，避免伪代码反向绑架架构。
+> 协议层（Connector / REST / envelope）保持**技术中立**：只定义语义，不绑定实现语言。
 
-## 实施顺序（MVP）
+## 实施顺序（S1 → S2 → S3）
 
-**v0.6 拍板（D7）：按 S1/S2/S3 三刀竖切实施**（`docs/design/detailed/09` 为基线；M1–M9 退为能力域标签，不再表示顺序）。
-
-| 刀 | 端到端验收 | 覆盖能力域 |
+| 刀 | 用户看到的价值 | 覆盖能力域 |
 | --- | --- | --- |
-| **S1** | Channel 里 `@backend 看下这段代码` → Agent 接受 → 执行 → 产出回帖，全程可审计 | E1/E3/E2/E7（transport + Execution 主干）/E4/E6 最小/E10 基础；Agent 端用 stub |
-| **S2** | Agent 申请记忆 → 人审批准 → 下次 dispatch 注入该记忆 | E5 + E6（propose/approve）+ P6 + Inbox |
-| **S3** | PO 建 WorkItem → @agent 执行 → 回帖并更新 WorkItem | E8 + Built-in Provider + Work 页面 + WorkItem↔Execution |
-| V1+ | Jira Provider 适配器 | E9 |
+| **S1 — Ask the Team** | 在 Channel 里 @Agent，Agent 接手、工作、把结果回到原 Channel | E1/E3/E2/E7（transport + Execution 主干）/E4/E6 最小/E10 基础；Agent 端用 **stub** |
+| **S2 — Shared Knowledge** | Agent 申请记忆 → 人审 → 之后的 Agent 自动用上这条知识 | E5 + E6（propose/approve）+ Needs You → Approval |
+| **S3 — Work Delivery** | 建 WorkItem → Agent 接手推进 → 产出与状态回流到 Work | E8 + Built-in Provider + Work 页面 + WorkItem↔Execution |
+| V1+ | Jira（Work Management Provider） | E9 |
 
-能力域标签（供查阅 detailed 分册用，非实施顺序）：M1=E1、M2=E3+WS+relay、M3a=E2、M3b=Connector、M4a=E6、M4b=E4、M5=E5、M6=E8、M7=E7 完整、M8=E10 完整、M9=集成压测。
-
-| 标签 | 交付 | Epic |
-| --- | --- | --- |
-| M1 | 工程骨架 + auth/JWT + Org/Team/Project/Member | E1 |
-| M2 | Channel + Message + seq + WS 网关 + outbox relay | E3 |
-| M3a | Agent + Credential + lifecycle/activity/health | E2 |
-| M3b | Connector transport（`collaboration.request` / dispatch / `dispatch_ack`） | E7 部分 |
-| M4a | Permission + Approval 三态（8 键） | E6 |
-| M4b | Trigger + CollaborationRequest + Resolver + Decision | E4 |
-| M5 | Memory 人审门禁 + 索引 | E5 |
-| M6 | WorkItem + Built-in Provider + Work 页面 | E8 |
-| M7 | Agent Execution domain 完整（attempts/events/artifacts/resume） | E7 |
-| M8 | Observability + Dashboard + 压测 | E10 |
-| M9 | 集成 + 端到端 | 全部 |
-| V1+ | Jira Provider 适配器 | E9 |
-
-> ⚠ 评审已建议改为 **S1/S2/S3 竖切**（@mention→产出 / 记忆闸门 / 工作推进），**尚未拍板**（见 `docs/review/`）。首个纵向闭环的 Agent 端提案见 detailed/09 §2.1。
+**M1–M9 仅作能力域映射标签，不是实施顺序**（明细见 `docs/design/detailed/09-implementation-checklist.md`）：M1=E1、M2=E3+WS+relay、M3a=E2、M3b=Connector、M4a=E6、M4b=E4、M5=E5、M6=E8、M7=E7 完整、M8=E10 完整、M9=集成压测。
 
 ## 工作约定
 
@@ -108,6 +132,7 @@ docs/
 - 文档与原型是同源物，跨文档修订必须一次性收敛（不留互相矛盾）
 - 评审流程：先看 `docs/requirement/` → 再看 `docs/design/` → 最后看 `docs/UI design/`
 - 凭据、API Key 等敏感信息走 `User → Credential → Agent Runtime` 分离模型，绝不回显明文
+- **任何文档 / 原型 / UI 改动前先自检**：用户是否需要理解 CollaborationRequest、Execution、Attempt、Event、Lease、Provider、fencing 才能完成操作？若答案是"需要"，UI 就设计错了
 
 ## License
 

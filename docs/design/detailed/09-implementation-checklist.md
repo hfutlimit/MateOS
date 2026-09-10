@@ -18,7 +18,7 @@
                  → Execution → event/result → AGENT_OUTPUT 回帖 → audit
              ↓（复用 S1 的 outbox / permission / WS / audit 底座）
         S2 「记忆闸门」
-        propose_memory → 人审（P6 / Inbox）→ memory_items → 检索 → dispatch 注入
+        propose_memory → 人审（Needs You → Approval）→ memory_items → 检索 → dispatch 注入
              ↓
         S3 「工作推进」
         WorkItem + Built-in Provider → Work 页面 → WorkItem ↔ Execution 关联
@@ -29,7 +29,7 @@
 | 刀 | 端到端验收（一句话） | 包含的既有能力域 | 显式排除 |
 | --- | --- | --- | --- |
 | **S1** | 在 Channel 里 `@backend 看下这段代码`，Agent 接受、执行、产出回到消息流，全程可审计 | E1 最小（Org/Team/Project/Channel/Member）、E3 Channel+Message 最小、E2 Agent+Credential、E7 Connector transport **+ Execution 域主干**、E4 Resolver+Decision、E6 最小（默认矩阵）、E10 基础（结构化日志 / trace_id / audit / metrics）；Agent 端用 **stub** | Memory 审批、Work Management、Jira、通知中心、Dashboard、@all 仲裁、1k 压测 |
-| **S2** | Agent 申请记忆 → 人类在 Inbox / 审批中心批准 → 下一次 dispatch 能注入这条记忆 | E5 全量 + E6 的 `propose_memory` / `approve_memory` + P6 审批中心 + Inbox 的 `memory.proposed` 分类 | Work Management、Jira |
+| **S2** | Agent 申请记忆 → 人类在 **Needs You → Approval** 批准 → 下一次 dispatch 能注入这条记忆 | E5 全量 + E6 的 `propose_memory` / `approve_memory` + Needs You 的 Approval 分类（v0.7：不再有独立审批中心页面） | Work Management、Jira |
 | **S3** | PO 建 WorkItem → @agent 执行 → 结果回帖并更新 WorkItem 状态 | E8 WorkItem 域 + Built-in Provider + Work 页面 + WorkItem ↔ Execution 关联（含独立 Execution 的 UI 出口） | Jira Provider（V1+）、Mission / WorkUnit（`future/`） |
 
 **能力域标签对照**：
