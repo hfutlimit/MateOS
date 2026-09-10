@@ -1,0 +1,18 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>MateOS.Domain</RootNamespace>
+  </PropertyGroup>
+
+  <!--
+    领域层引用 Contracts 只为复用「状态取值字面量」（ProtocolValues.cs）。
+    这些字面量与 DDL CHECK 约束同源，重复定义必然漂移，故方向固定为 Domain → Contracts，反向禁止。
+  -->
+  <ItemGroup>
+    <ProjectReference Include="../MateOS.Contracts/MateOS.Contracts.csproj" />
+  </ItemGroup>
+
+</Project>
