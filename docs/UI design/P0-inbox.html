@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MateOS · Inbox / Needs You 原型 P0-Inbox（MVP 第一入口）</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,500;12..96,600;12..96,700;12..96,800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="tokens.css">
+<style>
+/* ============================================================
+   P0-Inbox · 人类唯一入口：五分类聚合 + 就地操作
+   色源 = tokens.css（本文件不重定义 :root 颜色）
+   分类来源（187 §3.10）：collaboration NEED_CONTEXT/UNRESOLVED、
+   memory.proposed、execution FAILED / agent ERROR、
+   E4 超时重路由耗尽、work blocked / 预算预警
+   ============================================================ */
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{font-family:var(--font);font-size:13px;color:var(--text);height:100vh;display:flex;flex-direction:column;overflow:hidden;background:var(--bg)}
+button{font-family:inherit;font-size:12px;cursor:pointer;background:transparent;border:none;color:inherit}
+input{font-family:inherit}
+code{font-family:var(--mono);font-size:.92em;background:var(--surface-2);border-radius:4px;padding:1px 4px}
+::-webkit-scrollbar{width:9px;height:9px}
+::-webkit-scrollbar-thumb{background:color-mix(in oklab,var(--border-strong) 85%,transparent);border-radius:6px;border:2px solid transparent;background-clip:padding-box}
+::-webkit-scrollbar-track{background:transparent}
+
+.app{display:flex;flex-direction:column;height:100%;
+  --edge:0.5px solid color-mix(in oklab,var(--border) 90%,transparent);
+  --glass:color-mix(in oklab,var(--bg) 74%,transparent);
+  --font-display:"Bricolage Grotesque",var(--font)}
+
+/* topbar */
+.topbar{height:50px;flex:none;display:flex;align-items:center;gap:12px;padding:0 16px;border-bottom:var(--edge);background:var(--bg)}
+.brand{display:flex;align-items:center;gap:9px;font-family:var(--font-display);font-weight:700;font-size:16px;letter-spacing:-.02em}
+.brand .mk{width:24px;height:24px;border-radius:8px;display:grid;place-items:center;color:#fff;font-size:13px;font-weight:800;
+  background:linear-gradient(145deg,var(--primary),color-mix(in oklab,var(--primary) 62%,var(--thinking)))}
+.nav{display:flex;gap:2px;margin-left:10px}
+.nav a{display:flex;align-items:center;gap:6px;height:30px;padding:0 11px;border-radius:8px;color:var(--text-2);text-decoration:none;font-weight:500}
+.nav a:hover{background:var(--hover);color:var(--text)}
+.nav a[aria-current="page"]{background:var(--primary-50);color:var(--primary);font-weight:600}
+.nav .pill{min-width:16px;height:16px;padding:0 4px;border-radius:8px;background:var(--waiting);color:#fff;font-size:10px;font-weight:700;display:grid;place-items:center}
+.search{flex:1;max-width:380px;margin-left:auto;position:relative}
+.search input{width:100%;height:32px;border:var(--edge);border-radius:9px;background:var(--surface);padding:0 12px 0 32px;font-size:12.5px;outline:none}
+.search input:focus{border-color:color-mix(in oklab,var(--primary) 55%,transparent);box-shadow:0 0 0 3px color-mix(in oklab,var(--primary) 14%,transparent);background:var(--bg)}
+.search svg{position:absolute;left:10px;top:8px;color:var(--text-3)}
+.iconbtn{width:32px;height:32px;border-radius:9px;border:var(--edge);color:var(--text-2);display:grid;place-items:center;background:var(--bg)}
+.iconbtn:hover{color:var(--text);border-color:var(--border-strong)}
+.me{width:32px;height:32px;border-radius:10px;background:var(--primary-100);color:var(--primary);display:grid;place-items:center;font-weight:700;font-size:12px;font-family:var(--font-display)}
+
+.shell{flex:1;display:flex;min-height:0}
+
+/* left rail：五分类 */
+.rail{width:236px;flex:none;border-right:var(--edge);background:var(--surface);display:flex;flex-direction:column;min-height:0}
+.rail h2{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--text-3);font-weight:600;padding:14px 14px 8px}
+.cats{display:flex;flex-direction:column;gap:1px;padding:0 8px}
+.cat{display:flex;align-items:center;gap:9px;height:34px;padding:0 10px;border-radius:8px;color:var(--text-body);width:100%;text-align:left}
+.cat:hover{background:var(--hover)}
+.cat[aria-pressed="true"]{background:var(--primary-50);color:var(--primary);font-weight:600}
+.cat .ic{width:18px;display:grid;place-items:center;flex:none}
+.cat .tx{flex:1;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cat .n{min-width:20px;height:18px;padding:0 6px;border-radius:9px;background:var(--surface-2);color:var(--text-2);font-size:11px;font-weight:700;display:grid;place-items:center}
+.cat .n.hot{background:var(--waiting);color:#fff}
+.cat .n.err{background:var(--error);color:#fff}
+.rail .foot{margin-top:auto;padding:12px 14px;border-top:var(--edge);font-size:11.5px;color:var(--text-3);line-height:1.6}
+
+/* list */
+.list{width:400px;flex:none;border-right:var(--edge);display:flex;flex-direction:column;min-height:0}
+.list .head{height:44px;flex:none;display:flex;align-items:center;gap:8px;padding:0 14px;border-bottom:var(--edge)}
+.list .head h1{font-family:var(--font-display);font-size:15px;font-weight:700;letter-spacing:-.01em}
+.list .head .sub{color:var(--text-3);font-size:11.5px;margin-left:auto}
+.filters{display:flex;gap:6px;padding:8px 14px;border-bottom:var(--edge);flex-wrap:wrap}
+.chip{height:24px;padding:0 9px;border-radius:12px;border:var(--edge);font-size:11.5px;color:var(--text-2);display:flex;align-items:center;gap:5px}
+.chip[aria-pressed="true"]{background:var(--primary-50);border-color:var(--primary-100);color:var(--primary);font-weight:600}
+.items{flex:1;overflow:auto;min-height:0}
+.group{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);font-weight:600;padding:14px 14px 6px}
+.item{display:block;width:100%;text-align:left;padding:11px 14px;border-bottom:var(--edge);border-left:2px solid transparent;transition:.15s}
+.item:hover{background:var(--hover)}
+.item[aria-current="true"]{background:var(--primary-50);border-left-color:var(--primary)}
+.item .r1{display:flex;align-items:center;gap:8px}
+.item .title{font-weight:600;font-size:12.5px;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.item .meta{display:flex;align-items:center;gap:8px;color:var(--text-3);font-size:11.5px;margin-top:5px}
+.dot{width:7px;height:7px;border-radius:50%;flex:none}
+.snippet{color:var(--text-2);font-size:12px;margin-top:5px;line-height:1.5;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+
+/* urgency（双编码：色 + 文字徽标） */
+.urg{font-size:10.5px;font-weight:700;padding:2px 6px;border-radius:5px;border:0.5px solid transparent;white-space:nowrap}
+.urg.now{background:var(--error-bg);color:var(--error-text);border-color:var(--error-border)}
+.urg.today{background:var(--waiting-bg);color:var(--waiting-text);border-color:color-mix(in oklab,var(--waiting) 40%,transparent)}
+.urg.later{background:var(--surface-2);color:var(--text-2)}
+
+/* detail */
+.detail{flex:1;min-width:0;display:flex;flex-direction:column;overflow:auto}
+.detail .dhead{padding:18px 22px 14px;border-bottom:var(--edge)}
+.detail .crumbs{display:flex;align-items:center;gap:7px;color:var(--text-2);font-size:12px;margin-bottom:8px}
+.detail .crumbs b{color:var(--text);font-weight:600}
+.detail .crumbs .sep{color:var(--text-3)}
+.detail h3{font-family:var(--font-display);font-size:18px;font-weight:700;letter-spacing:-.02em;line-height:1.3}
+.detail .dmeta{display:flex;align-items:center;gap:10px;margin-top:10px;color:var(--text-3);font-size:12px;flex-wrap:wrap}
+.card{margin:16px 22px;border:var(--edge);border-radius:var(--radius-card);background:var(--bg)}
+.card .ch{padding:10px 14px;border-bottom:var(--edge);font-weight:600;font-size:12.5px;display:flex;align-items:center;gap:8px}
+.card .cb{padding:14px;font-size:12.5px;color:var(--text-body);line-height:1.65}
+.kv{display:grid;grid-template-columns:112px 1fr;gap:7px 12px}
+.kv dt{color:var(--text-3)}
+.kv dd{color:var(--text-body)}
+pre{margin-top:10px;background:var(--surface-2);border-radius:6px;padding:10px 12px;font-family:var(--mono);font-size:11.5px;color:var(--code-text);overflow:auto;white-space:pre-wrap}
+.actions{position:sticky;bottom:0;display:flex;gap:8px;padding:12px 22px;border-top:var(--edge);background:var(--glass);backdrop-filter:blur(8px);flex-wrap:wrap}
+.btn{height:32px;padding:0 14px;border-radius:8px;border:var(--edge);font-weight:500;color:var(--text-body);background:var(--bg)}
+.btn:hover{border-color:var(--border-strong)}
+.btn.primary{background:var(--primary);border-color:var(--primary);color:#fff;font-weight:600}
+.btn.primary:hover{background:color-mix(in oklab,var(--primary) 88%,#000)}
+.btn.danger{color:var(--error-text);border-color:var(--error-border);background:var(--error-bg)}
+.btn.ghost{border-color:transparent;color:var(--text-2)}
+.timeline{margin:0;padding:0 14px 8px;list-style:none}
+.timeline li{position:relative;padding:0 0 12px 18px;border-left:1px solid var(--border);margin-left:4px}
+.timeline li:last-child{border-left-color:transparent}
+.timeline li::before{content:"";position:absolute;left:-3.5px;top:4px;width:6px;height:6px;border-radius:50%;background:var(--border-strong)}
+.timeline li .t{font-size:11.5px;color:var(--text-3)}
+.timeline li .d{font-size:12.5px;color:var(--text-body);margin-top:2px}
+.sronly{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- topbar -->
+  <header class="topbar">
+    <div class="brand"><span class="mk" aria-hidden="true">M</span>MateOS</div>
+    <nav class="nav" aria-label="主导航">
+      <a href="P0-fleet.html">Fleet</a>
+      <a href="P0-inbox.html" aria-current="page">Inbox <span class="pill">7</span></a>
+      <a href="P5-channel-prototype.html">Channels</a>
+      <a href="P4-project-dashboard.html">Work</a>
+    </nav>
+    <div class="search">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.2-3.2"/></svg>
+      <label class="sronly" for="q">搜索 Inbox</label>
+      <input id="q" placeholder="搜索 Inbox（标题 / 来源 / Agent）">
+    </div>
+    <button class="iconbtn" title="通知" aria-label="通知中心">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M10 21a2 2 0 0 0 4 0"/></svg>
+    </button>
+    <div class="me" title="Jason（Project owner）">J</div>
+  </header>
+
+  <div class="shell">
+
+    <!-- 五分类 -->
+    <aside class="rail" aria-label="Inbox 分类">
+      <h2>Needs You</h2>
+      <div class="cats">
+        <button class="cat" aria-pressed="true">
+          <span class="ic" aria-hidden="true"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M4 21h16"/></svg></span>
+          <span class="tx">待我决策</span><span class="n hot">3</span>
+        </button>
+        <button class="cat">
+          <span class="ic" aria-hidden="true"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M5 4h10a3 3 0 0 1 3 3v13H8a3 3 0 0 0-3 3z"/><path d="M5 4v16"/></svg></span>
+          <span class="tx">记忆待批</span><span class="n">2</span>
+        </button>
+        <button class="cat">
+          <span class="ic" aria-hidden="true"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M12 9v5"/><circle cx="12" cy="17.5" r=".8" fill="currentColor"/><path d="M10.3 3.6 2.5 18a2 2 0 0 0 1.8 3h15.4a2 2 0 0 0 1.8-3L13.7 3.6a2 2 0 0 0-3.4 0Z"/></svg></span>
+          <span class="tx">执行失败 / Agent 异常</span><span class="n err">1</span>
+        </button>
+        <button class="cat">
+          <span class="ic" aria-hidden="true"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M8 2v4M16 2v4M3 10h18"/></svg></span>
+          <span class="tx">工作受阻 / 预算预警</span><span class="n">1</span>
+        </button>
+        <button class="cat">
+          <span class="ic" aria-hidden="true"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M4 7h9a4 4 0 0 1 0 8H8"/><path d="m11 12-3 3 3 3"/><path d="M20 17h-9"/></svg></span>
+          <span class="tx">路由未决 / 待补上下文</span><span class="n">0</span>
+        </button>
+        <button class="cat">
+          <span class="ic" aria-hidden="true"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M20 6 9 17l-5-5"/></svg></span>
+          <span class="tx">已处理（今日）</span><span class="n">12</span>
+        </button>
+      </div>
+      <div class="foot">
+        Inbox 是只读投影：操作会回源到 E4 / E5 / E7 / E8 执行状态迁移，Inbox 本身不做第二事实源。<br>
+        <span style="color:var(--text-2)">按 <code>J</code>/<code>K</code> 移动 · <code>Enter</code> 打开 · <code>A</code> 批准</span>
+      </div>
+    </aside>
+
+    <!-- 列表 -->
+    <section class="list" aria-label="Inbox 列表">
+      <div class="head">
+        <h1>Inbox</h1><span class="sub">7 条待处理 · 按 urgency 排序</span>
+      </div>
+      <div class="filters">
+        <button class="chip" aria-pressed="true">全部项目</button>
+        <button class="chip">只能我批（owner）</button>
+        <button class="chip" aria-pressed="true">未读</button>
+      </div>
+      <div class="items">
+
+        <p class="group">待我决策 · 3</p>
+
+        <button class="item" aria-current="true">
+          <span class="r1"><span class="title">Backend Agent 申请写入记忆：重试分级约定</span><span class="urg now">现在</span></span>
+          <span class="meta"><span class="dot" style="background:var(--waiting)"></span>E5 memory.proposed · MateOS / #design · 21:41</span>
+          <span class="snippet">建议改为分级指数退避 + 抖动，上限 5 次，仅重试 5xx / timeout。来源：#design seq 421。</span>
+        </button>
+
+        <button class="item">
+          <span class="r1"><span class="title">Architect Agent 缺上下文：需要 staging DB 的 schema</span><span class="urg today">今天</span></span>
+          <span class="meta"><span class="dot" style="background:var(--busy)"></span>E4 NEED_CONTEXT · MateOS / #backend · 20:02</span>
+          <span class="snippet">CollaborationRequest 处于 NEED_CONTEXT，补齐后自动重投同一 Agent（不产生新 CR）。</span>
+        </button>
+
+        <button class="item">
+          <span class="r1"><span class="title">QA Agent 提出的 3 个 bug 需要你定优先级</span><span class="urg later">本周</span></span>
+          <span class="meta"><span class="dot" style="background:var(--primary)"></span>E8 work.need_priority · MateOS / Work</span>
+          <span class="snippet">P0 登录态失效 / P1 附件超时 / P2 列表分页抖动。</span>
+        </button>
+
+        <p class="group">记忆待批 · 2</p>
+
+        <button class="item">
+          <span class="r1"><span class="title">「幂等键统一用 client_msg_id」待批准</span><span class="urg today">今天</span></span>
+          <span class="meta"><span class="dot" style="background:var(--waiting)"></span>E5 · MateOS / #design · 19:30</span>
+          <span class="snippet">批准后写入 memory_items（PROJECT 级），下次 dispatch 自动注入相关 Agent。</span>
+        </button>
+
+        <button class="item">
+          <span class="r1"><span class="title">「统一 retry 上限」与已有记忆重复？</span><span class="urg today">今天</span></span>
+          <span class="meta"><span class="dot" style="background:var(--waiting)"></span>E5 · MateOS / #design · 19:28</span>
+          <span class="snippet">系统检测到与 21:41 的提案语义接近，可合并后批准。</span>
+        </button>
+
+        <p class="group">执行失败 / Agent 异常 · 1</p>
+
+        <button class="item">
+          <span class="r1"><span class="title">Execution #8f2c 失败：Provider 401（Credential 过期）</span><span class="urg now">现在</span></span>
+          <span class="meta"><span class="dot" style="background:var(--error)"></span>E7 execution FAILED · Reviewer Agent · 21:12</span>
+          <span class="snippet">attempt 2 终态 FAILED；Agent health 已置 UNHEALTHY，不会进入新候选。</span>
+        </button>
+
+        <p class="group">工作受阻 / 预算预警 · 1</p>
+
+        <button class="item">
+          <span class="r1"><span class="title">Backend Agent 今日成本已达日限额 82%</span><span class="urg today">今天</span></span>
+          <span class="meta"><span class="dot" style="background:var(--waiting-dot)"></span>E10 budget.warning · $4.10 / $5.00</span>
+          <span class="snippet">触顶 100% 会自动置 lifecycle=PAUSED 并通知 owner，可先上调日限额。</span>
+        </button>
+
+      </div>
+    </section>
+
+    <!-- 详情 -->
+    <main class="detail" aria-label="选中项详情">
+      <div class="dhead">
+        <div class="crumbs">MateOS <span class="sep">/</span> #design <span class="sep">/</span> <b>seq 421</b></div>
+        <h3>Backend Agent 申请写入记忆：重试分级约定</h3>
+        <div class="dmeta">
+          <span class="urg now">现在</span>
+          <span>来源：memory_proposals <code>2f31…</code></span>
+          <span>类型：PROJECT</span>
+          <span>申请人：Backend Agent</span>
+          <span>21:41</span>
+        </div>
+      </div>
+
+      <section class="card">
+        <div class="ch">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" aria-hidden="true"><path d="M4 7h9a4 4 0 0 1 0 8H8"/><path d="m11 12-3 3 3 3"/><path d="M20 17h-9"/></svg>
+          待批准内容
+        </div>
+        <div class="cb">
+          配置在 <code>retry.yaml</code>，近 7 天失败率 4.2%，主要是 502 与 timeout。结合对账 Topic 的幂等约束，建议改为分级指数退避 + 抖动，上限 5 次，仅重试 5xx / timeout。
+          <pre>retry:
+  max_attempts: 5
+  base_delay: 1s
+  multiplier: 5
+  jitter: 0.2
+  retryable: [502, 503, 504, timeout]</pre>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="ch">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" aria-hidden="true"><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/><circle cx="12" cy="12" r="4"/></svg>
+          生效范围与权限
+        </div>
+        <div class="cb">
+          <dl class="kv">
+            <dt>scope</dt><dd>PROJECT（Project <code>MateOS</code> 全体成员可见）</dd>
+            <dt>审批权限</dt><dd><code>approve_memory</code> = ALLOW（你是 owner）</dd>
+            <dt>写入落点</dt><dd>memory_items + memory_chunks（tsv 索引），批准即入检索</dd>
+            <dt>后续影响</dt><dd>下一次 dispatch 会作为 <code>context.memory_refs</code> 注入相关 Agent</dd>
+            <dt>来源溯源</dt><dd>#design seq 421 · Topic「重试策略」· 不可编辑</dd>
+          </dl>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="ch">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+          事件时间线
+        </div>
+        <ul class="timeline">
+          <li><div class="t">21:41</div><div class="d">Agent 调 <code>propose_memory</code> → memory.proposal_created（policy.evaluate = ALLOW）</div></li>
+          <li><div class="t">21:41</div><div class="d">消息流写入 MEMORY_REQUEST 投影（只引 proposal_ref，不复制正文）</div></li>
+          <li><div class="t">21:42</div><div class="d">系统查到语义相近的既有提案（19:28），标记「可合并」</div></li>
+        </ul>
+      </section>
+
+      <div class="actions">
+        <button class="btn primary">批准并写入</button>
+        <button class="btn">编辑后批准</button>
+        <button class="btn">与 19:28 合并</button>
+        <button class="btn danger">驳回（需填原因）</button>
+        <button class="btn ghost">跳转到来源消息</button>
+      </div>
+    </main>
+
+  </div>
+</div>
+</body>
+</html>

@@ -5,45 +5,56 @@
 
 ## 0. 范围
 
-- 里程碑 M1-M9 + V1+ E9
-- 依赖图（v0.4.3 修正）
-- 实施顺序
-- DoD
-- 风险
+- **实施切法 S1 / S2 / S3（v0.6 拍板，D7）** + 能力域标签 M1–M9 / V1+ 对照
+- 每刀的阶段清单、DoD、风险
 
-## 1. 依赖图（v0.4.3 修正：去掉循环）
+## 1. 实施切法（v0.6 拍板：S1/S2/S3 竖切）
+
+> **M1–M9 退化为「能力域标签」**（用于指向各 detailed 分册），**不再表示实施顺序**。实施顺序 = 先跑通 S1 一条端到端闭环，再叠 S2、S3。
 
 ```
-        M1 (E1 Identity)
-        / | \
-       /  |  \
-      ↓   ↓   ↓
-     M2   M3a M4a
-   (E3 Channel) (E2 Agent) (E6 Perm)
-     ↓    ↓    ↓
-     ↓   M3b   ↓
-     ↓  (E7 Connector/Transport)
-     ↓    ↓    ↓
-     ↓   M4b (E4 Resolver)
-     ↓    ↓      ↓
-     ↓   M5 (E5 Memory)   ← E4 包含 M4a 依赖
-     ↓    ↓
-     ↓   M6 (E8 Work Management)  ← E4 包含 M4a
-     ↓    ↓
-     ↓   V1+: E9 (Jira Provider)
-     ↓
-     M7 (E7 Execution Domain)   ← M3b (transport) + M4b (resolver)
-     ↓
-     M8 (E10 Observability)    ← 基础设施从 M1 起就有
-     ↓
-     M9 (集成 + 压测)
+        S1 「一句话 → 产出」        ← 第一刀，必须最先跑通
+        @mention → CollaborationRequest → Resolver → Decision
+                 → Execution → event/result → AGENT_OUTPUT 回帖 → audit
+             ↓（复用 S1 的 outbox / permission / WS / audit 底座）
+        S2 「记忆闸门」
+        propose_memory → 人审（P6 / Inbox）→ memory_items → 检索 → dispatch 注入
+             ↓
+        S3 「工作推进」
+        WorkItem + Built-in Provider → Work 页面 → WorkItem ↔ Execution 关联
+             ↓
+        V1+: E9 Jira Provider
 ```
 
-**v0.4.3 关键修正**：
-- M3b（Connector 基础）是 transport 层（提供 `collaboration.request` 等）
-- M4b（E4 Resolver）依赖 M3b
-- M7（E7 Execution Domain）依赖 M3b + M4b
-- **不**再有"Resolver 调 create_execution → E4 / E7 协议混"循环
+| 刀 | 端到端验收（一句话） | 包含的既有能力域 | 显式排除 |
+| --- | --- | --- | --- |
+| **S1** | 在 Channel 里 `@backend 看下这段代码`，Agent 接受、执行、产出回到消息流，全程可审计 | E1 最小（Org/Team/Project/Channel/Member）、E3 Channel+Message 最小、E2 Agent+Credential、E7 Connector transport **+ Execution 域主干**、E4 Resolver+Decision、E6 最小（默认矩阵）、E10 基础（结构化日志 / trace_id / audit / metrics）；Agent 端用 **stub** | Memory 审批、Work Management、Jira、通知中心、Dashboard、@all 仲裁、1k 压测 |
+| **S2** | Agent 申请记忆 → 人类在 Inbox / 审批中心批准 → 下一次 dispatch 能注入这条记忆 | E5 全量 + E6 的 `propose_memory` / `approve_memory` + P6 审批中心 + Inbox 的 `memory.proposed` 分类 | Work Management、Jira |
+| **S3** | PO 建 WorkItem → @agent 执行 → 结果回帖并更新 WorkItem 状态 | E8 WorkItem 域 + Built-in Provider + Work 页面 + WorkItem ↔ Execution 关联（含独立 Execution 的 UI 出口） | Jira Provider（V1+）、Mission / WorkUnit（`future/`） |
+
+**能力域标签对照**：
+
+| 标签 | 能力域 | 落在哪一刀 |
+| --- | --- | --- |
+| M1 | E1 Identity | S1 |
+| M2 | E3 Channel + WS + outbox relay | S1 |
+| M3a | E2 Agent Registry | S1 |
+| M3b | E7 Connector transport | S1 |
+| M4a | E6 Permission（8 键 + 三态） | S1（默认矩阵最小集）/ S2（propose / approve 路由） |
+| M4b | E4 Collaboration & Resolver | S1 |
+| M5 | E5 Memory | S2 |
+| M6 | E8 Work Management | S3 |
+| M7 | E7 Execution 域完整（resume / retry / artifacts） | S1（主干）/ S3（与 WorkItem 关联） |
+| M8 | E10 Observability 完整（OTel/Prom/Grafana/Loki） | S1 之后按需 |
+| M9 | 集成 + 压测 | S3 之后 |
+
+**v0.6 关键**：
+
+- **S1 必须最先跑通**——跑不通 S1，S2/S3 都没有意义；写代码前不再新增设计文档。
+- 每刀自带 E10 基础（日志 / trace / audit / metrics），不再等 M8。
+- S1 的 Agent 端用 **stub**（完整实现 Connector 协议、产出为假），见 §2.1 与 [10-agent-stub-and-sdk.md](./10-agent-stub-and-sdk.md)。
+- 依赖关系（能力域内部）不变：M3b 是 transport 层 → M4b 依赖 M3b → Execution 域依赖 M3b + M4b；**不存在**「Resolver 调 create_execution → E4/E7 协议混」循环。
+- e2e 策略：S1 只跑 **主链路 ≤ 15 条**；76 条全量属 S3 之后的收尾，不阻塞 S1 验收。
 
 ## 2. E10 Observability 基础从 M1 起就有
 
@@ -63,14 +74,14 @@
 - 不等 M8 才补 tracing
 - 否则前面 6 个 milestone 写完后再补会非常痛苦
 
-## 2.1 首个纵向闭环的 Agent 端（v0.4.5 提案 · 待拍板）
+## 2.1 S1 的 Agent 端：stub（v0.6 已转正）
 
-M1 的验收不能卡在「Agent 进程从哪来」这个产品级问题上（V1 禁止 `execute_code`，PRD §8 Non Goals）。提案：
+**结论已拍板**：S1 用 stub Agent 作为测试替身，但必须**完整实现 Connector 协议**——产出内容是假的，协议行为是真的。
 
-- **M1 用 stub Agent 作为测试替身**，但必须**完整实现 Connector 协议**：`hello` / `heartbeat` / `collaboration.decision` / `execution.dispatch` / `execution.event`（带 `provider_event_id` + seq）/ `execution.result` / `execution.resume_request`+`resume_ack`。产出内容是假的，协议行为是真的。
+- 规范与行为矩阵见 **[10-agent-stub-and-sdk.md](./10-agent-stub-and-sdk.md)**（协议清单、正常/拒收/崩溃/断线/重复 dispatch 五类行为、S1 验收用例）。
 - 这样 Runtime Gateway、attempt 状态机、lease 取放与重建、event 幂等、resume 连续位点、outbox relay 全部被真实验证；换成真 Agent 时 Runtime 侧零改动。
 - **不建议**「人类在界面手写产出」当作闭环验收：那条路径绕过 dispatch / attempt / lease / resume，等于没验证 Execution 域。
-- 「真 Agent 由谁提供（fork 上游 / 用户自部署 / 其他）」仍是独立拍板项，不因 M1 用 stub 而被决定。
+- 「真 Agent 由谁提供（fork 上游 / 用户自部署 / 其他）」仍是独立开放项，不因用 stub 而被决定。
 
 ## 3. 关键设计决策点（实施前必须确认）
 
@@ -169,7 +180,13 @@ mateos/
 | 08 error-retry | 10 | 含 P1-4 max_attempts、P1-5 health |
 | **总计** | **76** | |
 
-## 6. 实施顺序
+## 6. 能力域清单（编号为域标签）
+
+> **v0.6**：下面的 M 编号是**能力域标签**，不是实施顺序。实施顺序按 §1 的 **S1 → S2 → S3** 组织：
+> **S1** 取本清单里 M1 / M2 / M3a / M3b / M4a（默认矩阵最小集）/ M4b / M7（主干）+ E10 基础；
+> **S2** 取 M5 + M4a（propose / approve 路由）；
+> **S3** 取 M6 + M7（WorkItem 关联）；
+> **S1 之后按需** 取 M8 / M9。
 
 ### 6.1 阶段 1（M1-M3）—— 骨架
 
@@ -310,9 +327,17 @@ V1+: E9 Jira Provider
   6. E2E
 ```
 
-## 7. 每个里程碑的"完成定义"（DoD）
+## 7. DoD
 
-（同 v0.4.2，case 数更新为 v0.4.3 后的 76 个）
+**v0.6 改**：DoD 以**刀**为单位，不再以 M 为单位。
+
+| 刀 | DoD（全部满足才算完成） |
+| --- | --- |
+| **S1** | 主链路 e2e ≤ 15 条全绿；`@mention → 产出回帖` 可重复跑通（含 stub Agent 的拒收 / 崩溃 / 重连分支）；audit + trace_id 贯穿；无人工在 DB 里手改状态 |
+| **S2** | propose → 人审 → 检索 → dispatch 注入闭环；跨 Project 零泄漏（含"同 Team 不同 Project"用例）；PERSONAL 记忆跨 Project 可被自己读到 |
+| **S3** | WorkItem CRUD + Built-in Provider + Work 页面；WorkItem ↔ Execution 双向可见；切 Provider 不丢历史 |
+
+76 条全量 e2e 属 S3 之后的收尾目标（v0.4.3 制定的 76 条清单仍然有效，只是不再作为任一单刀的阻塞条件）。
 
 ## 8. 风险与缓解
 

@@ -63,12 +63,15 @@ T+12  E4 收到 collaboration.decision:
            - INSERT outbox_events (event_type='collaboration.accepted', payload={collab_id, agent_id, context_refs, ...})
         b) COMMIT
         c) E4 promotion：把 pending_decision lease 升级为 execution lease（详见 04 §3.4）
-T+13  E4 WS 推 collab.resolved 给发起人 + channel
-T+14  Outbox Worker 拾取 'collaboration.accepted':
-        a) 查 collab_request 状态（应该 ACCEPTED）
-        b) 幂等检查：UNIQUE(collaboration_request_id) on agent_executions 已存在 → skip
-        c) E7 内部 API: POST /internal/agent-executions
-           { collaboration_request_id, work_item_ref?, input, context_refs, idempotency_key }
+T+13  E4 事务外**同步**调 E7 创建 Execution（**D9 冻结口径：E4 直调 + outbox 兜底**）
+        E7 内部 API: POST /internal/agent-executions
+          { collaboration_request_id, work_item_ref?, input, context_refs, idempotency_key }
+        - execution_id 由 E7 生成，E7 回写 collaboration_requests.target_execution_id
+        - 调用失败**不**回滚 CR（CR 已是 ACCEPTED 终态），由 T+14b 兜底
+T+14  E4 WS 推 collab.resolved 给发起人 + channel
+T+14b Outbox Worker 拾取 'collaboration.accepted'（**仅兜底**）：
+        a) 查 agent_executions WHERE collaboration_request_id=? → 已存在则 no-op（幂等）
+        b) 不存在（T+13 失败/进程崩溃）才重发 POST /internal/agent-executions，退避重试直至成功或 DEAD
 T+15  E7:
         a) 校验 Agent.lifecycle=ACTIVE
         b) BEGIN transaction:

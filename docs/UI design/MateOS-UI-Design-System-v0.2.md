@@ -5,9 +5,9 @@
 | 版本 | v0.6（v0.5 协议收口 + v0.4.2 capacity 原子化修订版，文件名保留 v0.2） |
 | 日期 | 2026-09-08 |
 | 上游 | `docs/requirement/MateOS-总体需求文档.md` (PRD v0.4)、SYSTEM_DESIGN v0.3.2、UI Design Guidelines v0.1 |
-| 配套原型 | `P3-agent-card.html` / `P4-project-dashboard.html` / `P5-channel-prototype.html` + 待做 Work / Approve / Settings |
+| 配套原型 | **`P0-inbox.html` / `P0-fleet.html`（v0.6 新增，MVP 第一入口）** / `P3-agent-card.html` / `P4-project-dashboard.html` / `P5-channel-prototype.html` / `P5b-topic-channel.html` + 待做 Work / Approve / Settings |
 | 设计令牌 | `tokens.css`（**单一事实来源**） |
-| 状态 | Draft，**P3 / P4 / P5 原型需要按本版 + v0.4.2 收口回修** |
+| 状态 | Draft，**P3 / P4 / P5 原型需要按本版 + v0.4.2 收口回修**；P0 两页已按 v0.6 出图 |
 
 > **v0.5 → v0.6 修订要点**（v0.4.2 收口）：
 > 1. **删除"Busy → 自动 NEED_CONTEXT"行为**——v0.4.2 E4 引入 Redis atomic slot 调度后，Busy Agent 直接被 Resolver 跳过，**不再**产生"我很忙所以需要上下文"的伪造决策
@@ -157,6 +157,8 @@ v0.5 之前设计：当 Agent 处于 WORKING 状态收到新 mention，自动回
 
 | 优先级 | 页面 | 原型 | v0.5 调整 |
 | --- | --- | --- | --- |
+| ★★★ | **P0 Inbox / Needs You** | **`P0-inbox.html`（v0.6 新增）** | **默认第二入口；五分类 + urgency 双编码 + 就地操作** |
+| ★★★ | **P0 Fleet** | **`P0-fleet.html`（v0.6 新增）** | **默认首页；lifecycle × activity × health 三维双编码 + 成本闸门** |
 | ★★★ | P5 Channel | v0.4 → 需回修（DECISION 改 entity_ref） | projection 模型 |
 | ★★ | P4 Project Dashboard | v0.4 → 需回修（Work Management 替换"外部协作"） | 删 AgentBoard |
 | ★★ | P3 Agent Card | v0.4 → 需回修（lifecycle badge + 删 can_execute） | 双维度状态 |

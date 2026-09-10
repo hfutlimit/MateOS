@@ -10,8 +10,8 @@ MateOS 是一个面向软件开发团队的 AI 原生团队协作平台（V1 = A
 | --- | --- |
 | 阶段 | **需求与设计收口期**（尚未启动 M1 编码） |
 | 文档 | PRD v0.4 / SYSTEM_DESIGN v0.5（技术栈已拍板 .NET）/ UI Design System v0.6 / detailed 00–09 v0.5 |
-| 原型 | P3 Agent Card / P4 Project Dashboard / P5 + P5b Channel 主界面（评审修订 v0.4 全部落地） |
-| 待做原型 | P0-Inbox / P0-Fleet（**M1 前必须出**）/ P1 登录注册 / P2 我的 Agents / P6 审批中心 / P7 Memory 文档 / P8 团队设置 |
+| 原型 | **P0 Fleet / P0 Inbox（v0.6 新增，S1 第一/第二入口）** / P3 Agent Card / P4 Project Dashboard / P5 + P5b Channel 主界面 |
+| 待做原型 | P1 登录注册 / P2 我的 Agents / P6 审批中心 / P7 Memory 文档 / P8 团队设置 |
 
 ## Single Source of Truth
 
@@ -32,7 +32,7 @@ docs/
 │   ├── SYSTEM_DESIGN.md              # v0.5（单一事实源；技术栈已拍板 .NET）
 │   ├── MateOS-architecture.html      # 架构图（只读展示，随 SYSTEM_DESIGN 更新）
 │   ├── detailed/                     # Current implementation spec
-│   │   ├── 00-overview.md … 09-implementation-checklist.md
+│   │   ├── 00-overview.md … 10-agent-stub-and-sdk.md
 │   └── future/                       # V2 愿景，不作 M1–M9 依据
 │       └── autonomous-delivery/      # Mission / WorkUnit / Scheduler（保留但冻结）
 ├── spec/
@@ -74,9 +74,18 @@ docs/
 
 ## 实施顺序（MVP）
 
-以 `docs/design/detailed/09-implementation-checklist.md` 的 **M1–M9** 为 Current 基线（本 README 早期的 M1–M6 已作废）。
+**v0.6 拍板（D7）：按 S1/S2/S3 三刀竖切实施**（`docs/design/detailed/09` 为基线；M1–M9 退为能力域标签，不再表示顺序）。
 
-| 阶段 | 交付 | Epic |
+| 刀 | 端到端验收 | 覆盖能力域 |
+| --- | --- | --- |
+| **S1** | Channel 里 `@backend 看下这段代码` → Agent 接受 → 执行 → 产出回帖，全程可审计 | E1/E3/E2/E7（transport + Execution 主干）/E4/E6 最小/E10 基础；Agent 端用 stub |
+| **S2** | Agent 申请记忆 → 人审批准 → 下次 dispatch 注入该记忆 | E5 + E6（propose/approve）+ P6 + Inbox |
+| **S3** | PO 建 WorkItem → @agent 执行 → 回帖并更新 WorkItem | E8 + Built-in Provider + Work 页面 + WorkItem↔Execution |
+| V1+ | Jira Provider 适配器 | E9 |
+
+能力域标签（供查阅 detailed 分册用，非实施顺序）：M1=E1、M2=E3+WS+relay、M3a=E2、M3b=Connector、M4a=E6、M4b=E4、M5=E5、M6=E8、M7=E7 完整、M8=E10 完整、M9=集成压测。
+
+| 标签 | 交付 | Epic |
 | --- | --- | --- |
 | M1 | 工程骨架 + auth/JWT + Org/Team/Project/Member | E1 |
 | M2 | Channel + Message + seq + WS 网关 + outbox relay | E3 |

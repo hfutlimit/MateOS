@@ -167,6 +167,9 @@ memory_items
    { type, title, content, source_type:'CHANNEL_MESSAGE', source_channel_id, source_message_seq }
 3. 服务端：
    a) 校验 type（Agent 只能 PROJECT / DECISION / KNOWLEDGE）
+   a2) **`policy.evaluate('propose_memory', subject, scope)`** —— v0.6 补（此前缺调用点）：默认 ALLOW 直接通过；
+       命中 REQUIRE_APPROVAL 时仍创建 proposal 并附 `approval_route`，由 P6 走人工审批；
+       **不允许**用 `write_memory` 代替（那是 service-to-service 键，默认 REQUIRE_APPROVAL，Guard 会直接 403）
    b) 校验 Source 三件套
    c) 写入 memory_proposals status=PROPOSED
 4. WS 推 memory.proposal_created 给 project owner

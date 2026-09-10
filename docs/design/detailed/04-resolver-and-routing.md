@@ -87,9 +87,10 @@ async def resolve(trigger_id: UUID):
     await notify(trigger.from_actor, '未找到可用 Agent')
 ```
 
-**关键变化（v0.4.3）**：
+**关键变化**：
 - ❌ v0.4.2：在 Resolver 调 `create_execution()` — **Execution 提前到 ACCEPT 之前**
-- ✅ v0.4.3：Resolver 只到 `tryAcquireSlot(pending_decision)` + 推 `collaboration.request` — **Execution 在 ACCEPT 后由 outbox worker 创建**
+- ✅ v0.4.3：Resolver 只到 `tryAcquireSlot(pending_decision)` + 推 `collaboration.request` —— Resolver **不创建** Execution
+- ✅ **v0.6（D9 冻结）**：ACCEPT 后由 **E4 事务外同步直调 E7** 创建 Execution（`POST /internal/agent-executions`），`outbox_events('collaboration.accepted')` **仅作兜底重试**；`execution_id` 由 E7 生成后回写 CR。同一口径见 `detailed/01` §1.1 T+13/T+14b 与 AgentBoard id=187 §1.1
 
 ## 2. Capability Ranking
 

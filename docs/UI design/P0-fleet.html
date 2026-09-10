@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MateOS · Fleet 原型 P0-Fleet（Agent 主权首页）</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,500;12..96,600;12..96,700;12..96,800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="tokens.css">
+<style>
+/* ============================================================
+   P0-Fleet · 产品主语 = Agent：卡片墙 + 双编码状态 + 成本闸门
+   色源 = tokens.css。双编码 = 颜色 + 文字徽标（DS §3.1 / 评审 U2）
+   lifecycle（ACTIVE/PAUSED/DISABLED）与 activity（6 态）正交，
+   health（HEALTHY/DEGRADED/UNHEALTHY）独立第三维。
+   ============================================================ */
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{font-family:var(--font);font-size:13px;color:var(--text);height:100vh;display:flex;flex-direction:column;overflow:hidden;background:var(--bg)}
+button{font-family:inherit;font-size:12px;cursor:pointer;background:transparent;border:none;color:inherit}
+input{font-family:inherit}
+code{font-family:var(--mono);font-size:.92em;background:var(--surface-2);border-radius:4px;padding:1px 4px}
+::-webkit-scrollbar{width:9px;height:9px}
+::-webkit-scrollbar-thumb{background:color-mix(in oklab,var(--border-strong) 85%,transparent);border-radius:6px;border:2px solid transparent;background-clip:padding-box}
+::-webkit-scrollbar-track{background:transparent}
+
+.app{display:flex;flex-direction:column;height:100%;
+  --edge:0.5px solid color-mix(in oklab,var(--border) 90%,transparent);
+  --glass:color-mix(in oklab,var(--bg) 74%,transparent);
+  --font-display:"Bricolage Grotesque",var(--font)}
+
+/* topbar */
+.topbar{height:50px;flex:none;display:flex;align-items:center;gap:12px;padding:0 16px;border-bottom:var(--edge);background:var(--bg)}
+.brand{display:flex;align-items:center;gap:9px;font-family:var(--font-display);font-weight:700;font-size:16px;letter-spacing:-.02em}
+.brand .mk{width:24px;height:24px;border-radius:8px;display:grid;place-items:center;color:#fff;font-size:13px;font-weight:800;
+  background:linear-gradient(145deg,var(--primary),color-mix(in oklab,var(--primary) 62%,var(--thinking)))}
+.nav{display:flex;gap:2px;margin-left:10px}
+.nav a{display:flex;align-items:center;gap:6px;height:30px;padding:0 11px;border-radius:8px;color:var(--text-2);text-decoration:none;font-weight:500}
+.nav a:hover{background:var(--hover);color:var(--text)}
+.nav a[aria-current="page"]{background:var(--primary-50);color:var(--primary);font-weight:600}
+.nav .pill{min-width:16px;height:16px;padding:0 4px;border-radius:8px;background:var(--waiting);color:#fff;font-size:10px;font-weight:700;display:grid;place-items:center}
+.search{flex:1;max-width:340px;margin-left:auto;position:relative}
+.search input{width:100%;height:32px;border:var(--edge);border-radius:9px;background:var(--surface);padding:0 12px 0 32px;font-size:12.5px;outline:none}
+.search input:focus{border-color:color-mix(in oklab,var(--primary) 55%,transparent);box-shadow:0 0 0 3px color-mix(in oklab,var(--primary) 14%,transparent);background:var(--bg)}
+.search svg{position:absolute;left:10px;top:8px;color:var(--text-3)}
+.iconbtn{width:32px;height:32px;border-radius:9px;border:var(--edge);color:var(--text-2);display:grid;place-items:center;background:var(--bg)}
+.me{width:32px;height:32px;border-radius:10px;background:var(--primary-100);color:var(--primary);display:grid;place-items:center;font-weight:700;font-size:12px;font-family:var(--font-display)}
+.btn{height:30px;padding:0 12px;border-radius:8px;border:var(--edge);font-weight:500;color:var(--text-body);background:var(--bg)}
+.btn:hover{border-color:var(--border-strong)}
+.btn.primary{background:var(--primary);border-color:var(--primary);color:#fff;font-weight:600}
+
+.wrap{flex:1;display:flex;min-height:0}
+.main{flex:1;min-width:0;display:flex;flex-direction:column;overflow:auto}
+
+/* 顶部汇总条 */
+.summary{display:flex;gap:10px;padding:16px 20px 4px;flex-wrap:wrap}
+.stat{flex:1;min-width:170px;border:var(--edge);border-radius:var(--radius-card);padding:12px 14px;background:var(--surface)}
+.stat .l{font-size:11.5px;color:var(--text-3);display:flex;align-items:center;gap:6px}
+.stat .v{font-family:var(--font-display);font-size:22px;font-weight:700;letter-spacing:-.02em;margin-top:6px}
+.stat .s{font-size:11.5px;color:var(--text-2);margin-top:4px}
+.meter{height:6px;border-radius:3px;background:var(--surface-2);margin-top:9px;overflow:hidden}
+.meter i{display:block;height:100%;border-radius:3px;background:var(--free)}
+.meter i.warn{background:var(--waiting)}
+.meter i.bad{background:var(--error)}
+
+/* 工具行 */
+.tools{display:flex;align-items:center;gap:8px;padding:16px 20px 8px;flex-wrap:wrap}
+.tools h1{font-family:var(--font-display);font-size:17px;font-weight:700;letter-spacing:-.02em;margin-right:auto}
+.chip{height:26px;padding:0 10px;border-radius:13px;border:var(--edge);font-size:11.5px;color:var(--text-2);display:inline-flex;align-items:center;gap:6px}
+.chip[aria-pressed="true"]{background:var(--primary-50);border-color:var(--primary-100);color:var(--primary);font-weight:600}
+
+/* 卡片墙 */
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(304px,1fr));gap:12px;padding:8px 20px 24px}
+.agent{border:var(--edge);border-radius:var(--radius-card);background:var(--bg);display:flex;flex-direction:column;transition:.16s}
+.agent:hover{border-color:var(--border-strong);box-shadow:0 6px 20px -12px rgba(0,0,0,.18)}
+.agent .ah{display:flex;align-items:flex-start;gap:10px;padding:13px 14px 10px}
+.ava{width:34px;height:34px;border-radius:10px;flex:none;display:grid;place-items:center;font-weight:700;font-family:var(--font-display);font-size:13px;
+  background:var(--primary-50);color:var(--primary)}
+.agent .who{min-width:0;flex:1}
+.agent .nm{font-weight:600;font-size:13.5px;display:flex;align-items:center;gap:7px}
+.agent .role{color:var(--text-3);font-size:11.5px;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.badges{display:flex;align-items:center;gap:5px;flex-wrap:wrap}
+.badge{font-size:10.5px;font-weight:700;padding:2px 6px;border-radius:5px;border:0.5px solid transparent;white-space:nowrap}
+/* activity（双编码：圆点 + 文字） */
+.act{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--text-2)}
+.act .dot{width:7px;height:7px;border-radius:50%;flex:none}
+.act.free .dot{background:var(--free)} .act.free{color:var(--free-text)}
+.act.busy .dot{background:var(--busy)} .act.busy{color:var(--busy-text)}
+.act.think .dot{background:var(--thinking)} .act.think{color:var(--thinking)}
+.act.wait .dot{background:var(--waiting-dot)} .act.wait{color:var(--waiting-text)}
+.act.err .dot{background:var(--error)} .act.err{color:var(--error-text)}
+.act.off .dot{background:var(--offline)} .act.off{color:var(--text-2)}
+/* lifecycle */
+.lc{background:var(--surface-2);color:var(--text-2)}
+.lc.active{background:var(--free-bg);color:var(--free-text);border-color:var(--free-border)}
+.lc.paused{background:var(--waiting-bg);color:var(--waiting-text)}
+.lc.disabled{background:var(--error-bg);color:var(--error-text);border-color:var(--error-border)}
+/* health */
+.hl.healthy{background:var(--free-bg);color:var(--free-text)}
+.hl.degraded{background:var(--waiting-bg);color:var(--waiting-text)}
+.hl.unhealthy{background:var(--error-bg);color:var(--error-text);border-color:var(--error-border)}
+
+.agent .ab{padding:0 14px 12px;display:grid;grid-template-columns:1fr 1fr;gap:9px 12px;font-size:11.5px}
+.agent .ab .k{color:var(--text-3)}
+.agent .ab .v{color:var(--text-body);font-weight:500}
+.agent .last{margin:0 14px 12px;padding:9px 11px;border-radius:6px;background:var(--surface);border-left:2px solid var(--primary-100);
+  font-size:11.5px;color:var(--text-2);line-height:1.55;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.agent .af{display:flex;gap:6px;padding:10px 14px;border-top:var(--edge);margin-top:auto;flex-wrap:wrap}
+.mini{height:26px;padding:0 10px;border-radius:7px;border:var(--edge);color:var(--text-2);font-size:11.5px}
+.mini:hover{color:var(--text);border-color:var(--border-strong)}
+.mini.warn{color:var(--waiting-text);border-color:color-mix(in oklab,var(--waiting) 40%,transparent);background:var(--waiting-bg)}
+
+/* 右栏：异常与告警 */
+.side{width:308px;flex:none;border-left:var(--edge);background:var(--surface);display:flex;flex-direction:column;min-height:0;overflow:auto}
+.side h2{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--text-3);font-weight:600;padding:14px 14px 8px}
+.alert{margin:0 10px 8px;border:var(--edge);border-radius:var(--radius-card);background:var(--bg);padding:11px 12px}
+.alert .r1{display:flex;align-items:center;gap:7px;margin-bottom:6px}
+.alert .tt{font-weight:600;font-size:12.5px;flex:1}
+.alert .ds{font-size:11.5px;color:var(--text-2);line-height:1.6}
+.alert .go{margin-top:8px;display:inline-flex;align-items:center;gap:5px;color:var(--primary);font-size:11.5px;font-weight:600}
+.side .note{margin:auto 14px 14px;font-size:11.5px;color:var(--text-3);line-height:1.6;border-top:var(--edge);padding-top:12px}
+.sronly{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <header class="topbar">
+    <div class="brand"><span class="mk" aria-hidden="true">M</span>MateOS</div>
+    <nav class="nav" aria-label="主导航">
+      <a href="P0-fleet.html" aria-current="page">Fleet</a>
+      <a href="P0-inbox.html">Inbox <span class="pill">7</span></a>
+      <a href="P5-channel-prototype.html">Channels</a>
+      <a href="P4-project-dashboard.html">Work</a>
+    </nav>
+    <div class="search">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.2-3.2"/></svg>
+      <label class="sronly" for="qf">搜索 Agent</label>
+      <input id="qf" placeholder="搜索 Agent / 能力 / 角色">
+    </div>
+    <button class="btn">新建 Agent</button>
+    <div class="me" title="Jason">J</div>
+  </header>
+
+  <div class="wrap">
+    <main class="main" aria-label="Fleet">
+
+      <section class="summary" aria-label="今日概览">
+        <div class="stat">
+          <div class="l"><span class="act busy"><span class="dot"></span>在途 Execution</span></div>
+          <div class="v">2</div>
+          <div class="s">1 RUNNING · 1 PENDING</div>
+        </div>
+        <div class="stat">
+          <div class="l"><span class="act free"><span class="dot"></span>空闲 slot</span></div>
+          <div class="v">3 / 7</div>
+          <div class="s">5 个 ACTIVE Agent</div>
+        </div>
+        <div class="stat">
+          <div class="l"><span class="act wait"><span class="dot"></span>今日成本</span></div>
+          <div class="v">$8.40</div>
+          <div class="s">日限额合计 $19.00 · 1 个 Agent 已 82%</div>
+          <div class="meter"><i class="warn" style="width:44%"></i></div>
+        </div>
+        <div class="stat">
+          <div class="l"><span class="act err"><span class="dot"></span>需处理异常</span></div>
+          <div class="v">2</div>
+          <div class="s">1 个 UNHEALTHY · 1 个预算预警</div>
+        </div>
+      </section>
+
+      <div class="tools">
+        <h1>Fleet</h1>
+        <button class="chip" aria-pressed="true">全部</button>
+        <button class="chip">可用</button>
+        <button class="chip">工作中</button>
+        <button class="chip">异常</button>
+        <button class="chip">已暂停</button>
+        <button class="btn">全部暂停</button>
+      </div>
+
+      <section class="grid" aria-label="Agent 卡片墙">
+
+        <article class="agent">
+          <div class="ah">
+            <div class="ava" aria-hidden="true">BA</div>
+            <div class="who">
+              <div class="nm">Backend Agent
+                <span class="badge lc active">ACTIVE</span><span class="badge hl degraded">DEGRADED</span>
+              </div>
+              <div class="role">后端实现 · NestJS/Postgres · 最近一次降权：1 次 5xx</div>
+            </div>
+          </div>
+          <div class="ab">
+            <div><div class="k">activity</div><div class="v"><span class="act busy"><span class="dot"></span>WORKING</span></div></div>
+            <div><div class="k">slot</div><div class="v">2 / 3</div></div>
+            <div><div class="k">今日成本</div><div class="v">$4.10 / $5.00</div></div>
+            <div><div class="k">近 30 天接受率</div><div class="v">86%</div></div>
+          </div>
+          <div class="meter" style="margin:0 14px 12px"><i class="warn" style="width:82%"></i></div>
+          <div class="last">正在执行 <code>#8f2c</code>：为 retry 策略补 e2e（attempt 1，已产出 5 个事件）</div>
+          <div class="af">
+            <button class="mini">查看执行</button>
+            <button class="mini">暂停</button>
+            <button class="mini warn">上调日限额</button>
+          </div>
+        </article>
+
+        <article class="agent">
+          <div class="ah">
+            <div class="ava" aria-hidden="true">RV</div>
+            <div class="who">
+              <div class="nm">Reviewer Agent
+                <span class="badge lc active">ACTIVE</span><span class="badge hl unhealthy">UNHEALTHY</span>
+              </div>
+              <div class="role">代码评审 · 401 auth_failed：Credential 需更新</div>
+            </div>
+          </div>
+          <div class="ab">
+            <div><div class="k">activity</div><div class="v"><span class="act err"><span class="dot"></span>ERROR</span></div></div>
+            <div><div class="k">slot</div><div class="v">0 / 2</div></div>
+            <div><div class="k">今日成本</div><div class="v">$1.20 / $4.00</div></div>
+            <div><div class="k">最近失败</div><div class="v">Execution #8f2c</div></div>
+          </div>
+          <div class="last">Execution #8f2c 终态 FAILED：<code>PROVIDER_401</code>；已自动剔除候选，不会接新任务</div>
+          <div class="af">
+            <button class="mini">更新 Credential</button>
+            <button class="mini">查看失败详情</button>
+            <button class="mini warn">标记已恢复</button>
+          </div>
+        </article>
+
+        <article class="agent">
+          <div class="ah">
+            <div class="ava" aria-hidden="true">AR</div>
+            <div class="who">
+              <div class="nm">Architect Agent
+                <span class="badge lc active">ACTIVE</span><span class="badge hl healthy">HEALTHY</span>
+              </div>
+              <div class="role">架构设计 · 可被 @architect 直接指派</div>
+            </div>
+          </div>
+          <div class="ab">
+            <div><div class="k">activity</div><div class="v"><span class="act wait"><span class="dot"></span>WAITING_CONTEXT</span></div></div>
+            <div><div class="k">slot</div><div class="v">1 / 1</div></div>
+            <div><div class="k">今日成本</div><div class="v">$2.30 / $5.00</div></div>
+            <div><div class="k">近 30 天接受率</div><div class="v">92%</div></div>
+          </div>
+          <div class="last">CR <code>c71a</code> 处于 NEED_CONTEXT：等 staging schema（补齐后自动重投，不产生新 CR）</div>
+          <div class="af">
+            <button class="mini">补齐上下文</button>
+            <button class="mini">查看 CR</button>
+            <button class="mini">暂停</button>
+          </div>
+        </article>
+
+        <article class="agent">
+          <div class="ah">
+            <div class="ava" aria-hidden="true">QA</div>
+            <div class="who">
+              <div class="nm">QA Agent
+                <span class="badge lc active">ACTIVE</span><span class="badge hl healthy">HEALTHY</span>
+              </div>
+              <div class="role">测试与验收 · 可领取 QA 任务</div>
+            </div>
+          </div>
+          <div class="ab">
+            <div><div class="k">activity</div><div class="v"><span class="act free"><span class="dot"></span>AVAILABLE</span></div></div>
+            <div><div class="k">slot</div><div class="v">0 / 1</div></div>
+            <div><div class="k">今日成本</div><div class="v">$0.80 / $3.00</div></div>
+            <div><div class="k">近 30 天接受率</div><div class="v">78%</div></div>
+          </div>
+          <div class="last">空闲中。上一项产出：3 个 bug 已进 Inbox 待你定优先级。</div>
+          <div class="af">
+            <button class="mini">发起任务</button>
+            <button class="mini">暂停</button>
+            <button class="mini">查看产出</button>
+          </div>
+        </article>
+
+        <article class="agent">
+          <div class="ah">
+            <div class="ava" aria-hidden="true">DO</div>
+            <div class="who">
+              <div class="nm">Docs Agent
+                <span class="badge lc paused">PAUSED</span><span class="badge hl healthy">HEALTHY</span>
+              </div>
+              <div class="role">文档维护 · 由你手动暂停（不影响历史产出）</div>
+            </div>
+          </div>
+          <div class="ab">
+            <div><div class="k">activity</div><div class="v"><span class="act off"><span class="dot"></span>OFFLINE</span></div></div>
+            <div><div class="k">slot</div><div class="v">— / 1</div></div>
+            <div><div class="k">今日成本</div><div class="v">$0.00 / $2.00</div></div>
+            <div><div class="k">近 30 天接受率</div><div class="v">90%</div></div>
+          </div>
+          <div class="last">暂停中：不进候选、不占 slot、UI 不可被 @（lifecycle ≠ ACTIVE）。</div>
+          <div class="af">
+            <button class="mini">恢复</button>
+            <button class="mini">查看历史产出</button>
+          </div>
+        </article>
+
+        <article class="agent">
+          <div class="ah">
+            <div class="ava" aria-hidden="true">+</div>
+            <div class="who">
+              <div class="nm">新建 Agent</div>
+              <div class="role">绑定 Credential → 声明 capabilities → 选择可访问 Project</div>
+            </div>
+          </div>
+          <div class="last" style="border-left-color:var(--border)">Agent 是 teammate：work_item_ref 为空也能被 @（对话即工作）。</div>
+          <div class="af"><button class="mini">开始创建</button></div>
+        </article>
+
+      </section>
+    </main>
+
+    <aside class="side" aria-label="异常与告警">
+      <h2>需要你处理</h2>
+
+      <div class="alert">
+        <div class="r1">
+          <span class="badge hl unhealthy">UNHEALTHY</span><span class="tt">Reviewer Agent 凭据失效</span>
+        </div>
+        <div class="ds">1 次 401 即置 UNHEALTHY，且<b>不会</b>因 WS 重连自动恢复；更新 Credential 后需显式标记已恢复。</div>
+        <a class="go" href="P0-inbox.html">去 Inbox 处理 →</a>
+      </div>
+
+      <div class="alert">
+        <div class="r1">
+          <span class="badge hl degraded">82%</span><span class="tt">Backend Agent 逼近日限额</span>
+        </div>
+        <div class="ds">触顶 100% 会自动置 <code>lifecycle=PAUSED</code> 并通知 owner（E10 预算闸门）。</div>
+        <a class="go" href="#">上调限额 →</a>
+      </div>
+
+      <div class="alert">
+        <div class="r1">
+          <span class="badge lc paused">阻塞</span><span class="tt">1 个 WorkItem 等待人类输入</span>
+        </div>
+        <div class="ds">QA Agent 的 3 个 bug 需要你定优先级后才继续。</div>
+        <a class="go" href="P4-project-dashboard.html">去 Work 处理 →</a>
+      </div>
+
+      <h2>双编码说明（DS §3.1）</h2>
+      <div class="alert" style="background:var(--surface)">
+        <div class="ds">
+          <b>lifecycle</b> 决定能不能上线：<code>ACTIVE / PAUSED / DISABLED</code><br>
+          <b>activity</b> 只表达在线时在做什么（6 态，只影响 UI）<br>
+          <b>health</b> 独立第三维：<code>HEALTHY / DEGRADED / UNHEALTHY</code><br>
+          三者都不以颜色单独表达，必须带文字徽标，避免 18 种颜色组合无法辨认。
+        </div>
+      </div>
+
+      <div class="note">
+        Fleet 是默认首页（产品主语 = Agent）。所有操作回源到 E2/E4/E7/E10，本页不写业务表。
+      </div>
+    </aside>
+  </div>
+</div>
+</body>
+</html>

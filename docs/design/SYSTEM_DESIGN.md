@@ -938,11 +938,19 @@ CREATE UNIQUE INDEX uq_project_active_work_provider
 
 ---
 
-## 11. 实施顺序（v0.5：与 detailed/09 对齐）
+## 11. 实施顺序（v0.6：S1/S2/S3 竖切）
 
-> **唯一基线 = `docs/design/detailed/09-implementation-checklist.md`**。本节此前把 E6 排在 M7、E7 排在 M8，与 detailed/09 的依赖图（M4a=E6、M7=E7 Execution 完整）冲突，v0.5 已对齐。
+> **唯一基线 = `docs/design/detailed/09-implementation-checklist.md`**。
+> **v0.6 拍板（D7）**：实施顺序 = **S1 → S2 → S3** 三刀竖切；下表的 M 编号退为**能力域标签**（用于指向各 detailed 分册），**不再表示实施顺序**。
+>
+> - **S1 一句话 → 产出**：`@mention` → CollaborationRequest → Resolver → Decision → Execution → event/result → 回帖（Agent 端用 stub，见 detailed/10）
+> - **S2 记忆闸门**：`propose_memory` → 人审 → memory_items → 检索 → dispatch 注入
+> - **S3 工作推进**：WorkItem + Built-in Provider + Work 页面 + WorkItem ↔ Execution 关联
+> - 之后：V1+ E9 Jira、1k 压测与完整可观测（M8/M9 内容）
 
-| 阶段 | 交付 | 对应 Epic |
+**能力域标签对照（不是顺序）**：
+
+| 标签 | 交付 | 对应 Epic |
 | --- | --- | --- |
 | M1 | monorepo + auth/JWT + Org/Team/Project/Member | E1 |
 | M2 | Channel + Message + seq + WS 网关 + outbox relay | E3 |
@@ -970,3 +978,4 @@ CREATE UNIQUE INDEX uq_project_active_work_provider
 | v0.3 | 2026-09-08 | 架构评审推倒：删除 AgentBoard execution / 新增 Agent Execution domain（agent_executions + attempts + events + artifacts）/ 新增 Work Management 域（Provider 抽象 + Built-in + bindings + projections）/ CollaborationRequest 一等实体 / Permission effect 改 REQUIRE_APPROVAL / Agent lifecycle+activity 拆分 / 删除 can_execute/can_review / 移除 projects.integration_backend 与 issue_tracker / Trigger 多源汇聚 / Project 不再挂 Provider 字段 |
 | v0.4.5 | 2026-09-10 | **正文回修**（此前只改摘要未改正文）：CR 状态收敛 6 态；Resolver 改 `lifecycle ∩ slot ∩ 有效权限`，§6.4 ERROR 不再挡候选；`work_item_projections` 架构图/表清单/DDL 三处删除；Connector 协议改 `execution.resume_request`/`resume_ack`；`execution_events` 加 `provider_event_id + attempt_id NOT NULL + UNIQUE`；`work_management_connections` 改 `(org_id, owner_user_id)`；`getSelfMetadata` 补"只返回 capability"；权限 7 键 → 8 键（DDL + 默认矩阵 + §3.1）；§8 协议汇总区分消息级/执行级 resume |
 | v0.5 | 2026-09-10 | **技术栈拍板 .NET**（ASP.NET Core + EF Core + outbox relay，BullMQ 移除，协议层中立）；**DDL 收口**：补 `agents.max_concurrency/health`、`agent_executions.active_attempt_no/terminal_envelope_id` + 幂等唯一索引、`execution_attempts` 状态 CHECK 与 dispatch/续传列、`work_items.binding_id/provider_*/search_text`，新增 `outbox_events` / `webhook_inbox` / `work_management_webhooks` 三表入清单与 DDL；§11 实施顺序与 detailed/09 对齐（M7=E7、M8=E10） |
+| v0.6 | 2026-09-10 | **D9 冻结**：ACCEPT 后由 E4 事务外直调 E7 创建 Execution，outbox 仅兜底重试（§11 同步）；**D7 拍板**：实施切法改 **S1/S2/S3 竖切**，M1–M9 退为能力域标签（§11 重写）；**S1 的 Agent 端 = stub**（新增 `detailed/10-agent-stub-and-sdk.md`，B1–B8 行为矩阵）；补 E6 审计触发点（E10 §3.1）与 E5 `policy.evaluate('propose_memory')` 调用点 |
