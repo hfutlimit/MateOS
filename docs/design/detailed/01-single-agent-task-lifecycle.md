@@ -79,8 +79,9 @@ T+15  E7:
         c) COMMIT
         d) dispatch 给 Agent WS
 T+16  Agent 收到 execution.dispatch:
-        - 推 status envelope: activity=WORKING
-        - 写 execution_attempts.status='RUNNING', started_at=now()
+        - 立即回 execution.dispatch_ack { execution_id, attempt_no, accepted: true }  # v0.5：ACK 是独立协议消息
+        - 推 status envelope: activity=WORKING                                # activity 仅供 UI，不承载 ACK
+        - 写 execution_attempts.status='RUNNING', started_at=now()             # STARTED → RUNNING 只在收到 dispatch 后
         - renewExecutionLease(execution_id)  # v0.4.3: lease 类型升级为 execution，定期续期
 T+17  Agent 调用 LLM:
         - 推 execution.event { event_type: 'LLM_TICK', provider_event_id, seq=N }
@@ -94,6 +95,7 @@ T+20  E7 收到 result:
                  terminal_envelope_id=..., active_attempt_no=NULL
              WHERE id=? AND status IN ('PENDING','RUNNING')
            - UPDATE execution_attempts SET status='COMPLETED', completed_at=now()
+             WHERE execution_id=? AND attempt_no=? AND status='RUNNING'   # v0.5：必须带 attempt 条件（见 §4.4）
            - INSERT llm_calls
            - INSERT outbox_events (event_type='execution.completed', payload={execution_id, status})
         b) COMMIT
@@ -274,7 +276,10 @@ async def emit_event(aggregate_type, aggregate_id, event_type, payload):
 
 ### 4.2 outbox_events 表
 
+> **权威 DDL 在 `SYSTEM_DESIGN` §5.2**（v0.5 收口，含 `status ∈ {PENDING, PUBLISHED, DEAD}` 与 relay 索引）。本节仅列本流程用到的字段。
+
 ```sql
+-- 摘录（完整定义见 SYSTEM_DESIGN §5.2）
 CREATE TABLE outbox_events (
   id              UUID PRIMARY KEY,
   aggregate_type  TEXT NOT NULL,        -- 'collaboration' | 'execution' | 'work_item' | ...
@@ -283,15 +288,17 @@ CREATE TABLE outbox_events (
   payload         JSONB NOT NULL,
   -- 幂等：同 (aggregate, event) 不能投递两次
   idempotency_key TEXT UNIQUE,          -- 消费者侧去重
-  -- 投递状态
-  published_at    TIMESTAMPTZ,
+  -- 投递状态（v0.5：DEAD 需要落表，否则超阈值无法表达）
+  status          TEXT NOT NULL DEFAULT 'PENDING'
+                  CHECK (status IN ('PENDING','PUBLISHED','DEAD')),
   attempt_count   INT NOT NULL DEFAULT 0,
-  next_attempt_at TIMESTAMPTZ DEFAULT NOW(),
+  next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   last_error      TEXT,
+  published_at    TIMESTAMPTZ,
   created_at      TIMESTAMPTZ DEFAULT now()
 );
-CREATE INDEX idx_outbox_unpublished ON outbox_events(next_attempt_at)
-  WHERE published_at IS NULL;
+-- relay 领取：WHERE status='PENDING' AND next_attempt_at <= now() ORDER BY ... FOR UPDATE SKIP LOCKED
+CREATE INDEX idx_outbox_ready ON outbox_events(next_attempt_at) WHERE status = 'PENDING';
 ```
 
 ### 4.3 outbox worker
@@ -395,7 +402,14 @@ async def handle_execution_result(execution_id, attempt_no, envelope_id, status)
             return  # 重复 / stale / attempt 已切换
 
         # 2. 结束该 attempt（用入参 attempt_no，不再反查）
-        attempt_status = {'SUCCEEDED': 'COMPLETED'}.get(status, status)
+        # v0.5：attempt 枚举只有 STARTED/RUNNING/COMPLETED/FAILED/INTERRUPTED（SYSTEM_DESIGN §5.2），
+        # 不能把 Execution 的 TIMEOUT / CANCELLED 直接写进 attempt.status
+        attempt_status = {
+            'SUCCEEDED': 'COMPLETED',
+            'FAILED':    'FAILED',
+            'CANCELLED': 'INTERRUPTED',
+            'TIMEOUT':   'INTERRUPTED',
+        }[status]
         await tx.execute("""
             UPDATE execution_attempts
             SET status = $3, completed_at = NOW()

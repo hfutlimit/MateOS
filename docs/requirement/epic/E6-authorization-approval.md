@@ -27,7 +27,7 @@ Permission Model 是 MateOS 安全核心。v0.4 + v0.4.2 关键变化：
 - **v0.4.2 改** `policy.evaluate()` 业务层显式调用（不带"放行"含义）
 - 三层合并：Channel > Project > 默认
 - Redis 缓存 + `perm.changed` pub/sub 失效
-- NestJS Guard `@RequirePermission('perm_key')`：**只决 ALLOW/DENY**，REQUIRE_APPROVAL 直接拒绝（默认 deny-by-default）
+- ASP.NET Core Authorization filter `[RequirePermission('perm_key')]`（v0.5 技术栈）：**只决 ALLOW/DENY**，REQUIRE_APPROVAL 直接拒绝（默认 deny-by-default）
 - 业务层显式走审批路径：
   - `write_memory` → E5 调 `memory_proposals` 创建 + P6 审批
   - `create_pr` → E4 调 `collaboration_requests` 创建（V3+ 启用）

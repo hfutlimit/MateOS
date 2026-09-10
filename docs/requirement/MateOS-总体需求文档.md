@@ -279,7 +279,7 @@ WorkItem
 ```
 
 - **Built-in Provider 是默认实现**——WorkItem 数据落 MateOS `work_items` 表
-- **Jira Provider 是替代实现**——Jira 是 source of truth，MateOS 维护本地 projection（`work_item_projections`）
+- **Jira Provider 是替代实现**——Jira 是 source of truth，MateOS 维护本地同步表示（**v0.5：落在 `work_items` 单表，`work_item_projections` 已删除**）
 - Provider 抽象（`WorkManagementProvider` interface）让业务层不感知具体实现
 - 切换 Provider 是两个动作：**Change Provider**（仅影响新 WorkItem）+ **Migrate Existing WorkItems**（独立 Wizard）
 

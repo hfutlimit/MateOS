@@ -167,10 +167,13 @@ async def jira_webhook(request):
     # 必须验签名（JWT library），不是保存一个 token 做字符串比较。
     # 没有 X-Hub-Signature（那是 GitHub 的协议），也没有 webhook.secret 概念。
     token = request.headers.get('Authorization', '').removeprefix('Bearer ').strip()
+    # client secret 是 **app / connection 级**，不是 webhook 注册行的字段
+    # （SYSTEM_DESIGN §5.2：work_management_connections.client_secret_encrypted）
+    client_secret = await get_app_client_secret(webhook.connection_id)
     try:
         claims = jwt.decode(
             token,
-            key=webhook.client_secret,        # 注册 app 的 client secret
+            key=client_secret,
             algorithms=['HS256'],
             issuer='atlassian',               # 按 Atlassian 文档校验 iss / aud / exp
             leeway=30,
@@ -220,25 +223,26 @@ worker 侧（消费 `webhook_inbox`，同一份 outbox/relay 语义）：
 
 ```python
 async def process_webhook_inbox(batch_size=50):
-    rows = await db.query("""
-        SELECT * FROM webhook_inbox
-        WHERE status='PENDING'
-        ORDER BY received_at
-        LIMIT $1
-        FOR UPDATE SKIP LOCKED
-    """, batch_size)
-    for row in rows:
-        try:
-            await process_jira_inbound(row.webhook_id, row.binding_id, row.payload)
-            await db.execute("UPDATE webhook_inbox SET status='PROCESSED', processed_at=NOW() WHERE id=$1", row.id)
-        except Exception as e:
-            await db.execute("""
-                UPDATE webhook_inbox
-                SET attempt_count = attempt_count + 1,
-                    last_error = $2,
-                    status = CASE WHEN attempt_count + 1 >= 8 THEN 'DEAD' ELSE 'PENDING' END
-                WHERE id = $1
-            """, row.id, str(e))
+    async with db.transaction() as tx:          # v0.5：SKIP LOCKED 必须在事务内，行锁才有效
+        rows = await tx.query("""
+            SELECT * FROM webhook_inbox
+            WHERE status='PENDING'
+            ORDER BY received_at
+            LIMIT $1
+            FOR UPDATE SKIP LOCKED
+        """, batch_size)
+        for row in rows:
+            try:
+                await process_jira_inbound(row.webhook_id, row.binding_id, row.payload)
+                await tx.execute("UPDATE webhook_inbox SET status='PROCESSED', processed_at=NOW() WHERE id=$1", row.id)
+            except Exception as e:
+                await tx.execute("""
+                    UPDATE webhook_inbox
+                    SET attempt_count = attempt_count + 1,
+                        last_error = $2,
+                        status = CASE WHEN attempt_count + 1 >= 8 THEN 'DEAD' ELSE 'PENDING' END
+                    WHERE id = $1
+                """, row.id, str(e))
 ```
 
 **v0.4.4 修正说明**：照旧写法实现会**拒绝全部合法回调**——`X-Atlassian-Webhook-Identifier` 每次投递都变，拿它去查本地注册记录必然 404；`X-Hub-Signature` 与 `webhook.secret` 在 Jira OAuth 2.0 webhook 上根本不存在，鉴权分支会 401。注册订阅时 Jira 返回的 `webhookRegistrationResult[]` 需落库保存（订阅 ID + `client_secret`），并保存 `expirationDateTime` 以便到期前刷新（官方 `PUT /rest/api/3/webhook/refresh`）。
@@ -308,7 +312,8 @@ CREATE TABLE work_management_webhooks (
   last_refreshed_at     TIMESTAMPTZ,
   refresh_status        TEXT,                 -- 'OK' | 'FAILED' | 'DISABLED'
   last_error            TEXT,
-  created_at            TIMESTAMPTZ DEFAULT now()
+  created_at            TIMESTAMPTZ DEFAULT now(),
+  UNIQUE (external_webhook_id)         -- v0.5：订阅 ID 唯一（回调按 matchedWebhookIds 定位）
 );
 CREATE INDEX idx_webhook_external ON work_management_webhooks(external_webhook_id);
 CREATE INDEX idx_webhook_expires ON work_management_webhooks(expires_at)

@@ -186,7 +186,7 @@ v0.5 之前设计：当 Agent 处于 WORKING 状态收到新 mention，自动回
 | `decision_records` | 决策详情页（事实源） |
 | `agent_executions` | Agent Card 当前工作区块 + WorkItem 详情关联 |
 | `work_items` | Work 页面主表（Built-in） |
-| `work_item_projections` | Work 页面（Provider=Jira 时） |
+| `work_items`（Provider=Jira 时亦为本地同步表示） | Work 页面（v0.5：projections 表已删） |
 | `work_item_bindings` | Project Settings（Work Management） |
 | `memory_proposals` | 记忆卡投影 |
 | `permissions` (effect=REQUIRE_APPROVAL) | 申请 → 走 E5 / E6 审批中心 |

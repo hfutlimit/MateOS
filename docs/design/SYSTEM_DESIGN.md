@@ -1,11 +1,12 @@
-# MateOS 系统架构设计（SYSTEM_DESIGN v0.3）
+# MateOS 系统架构设计（SYSTEM_DESIGN v0.5）
 
 | 文档信息 | 内容 |
 | --- | --- |
 | 上游文档 | docs/requirement/MateOS-总体需求文档.md（PRD v0.4） |
 | 文档状态 | Draft |
-| 版本 | v0.3 |
-| 日期 | 2026-09-08 |
+| 版本 | **v0.5** |
+| 日期 | 2026-09-10 |
+| 本版要点 | v0.4.5 正文回修（8 处硬冲突）+ v0.5 技术栈拍板 .NET / capacity rebuild fencing / webhook durable inbox / dispatch_ack / outbox_events 与 DDL 收口 —— 明细见文末「更新记录」，历史推理见 `docs/review/` |
 | 前提 | **MateOS 为独立自洽系统**：Agent Execution 域自研（永久不切到任何外部执行后端）；Work Management 是独立域（Built-in + Jira Provider 抽象，与 Execution 完全解耦） |
 
 > **v0.2 → v0.3 变更摘要**（架构评审后推倒重来）：
@@ -44,6 +45,14 @@
 > 29. **`JiraProvider.getSelfMetadata()` 删除静态 status 模板**：只返回 capability 描述；status mapping 通过 `listStatuses(binding)` 动态拉
 > 30. **Webhook 注册 + 定期 refresh**（E9 新增）：Jira Cloud 动态 webhook 30 天过期；scheduler 在 webhook_expires_at < now+7d 时调官方 `PUT /rest/api/3/webhook/refresh`
 > 31. **删除"Busy → 自动 NEED_CONTEXT"行为**（UI DS v0.6）：v0.4.2 修复 Resolver 后 Busy Agent 直接被跳过，不再产生"我很忙"伪造决策
+>
+> **v0.4.5 → v0.5 变更摘要**（= 正文回修 + 决策落地，明细见 §12 更新记录）：
+> 32. **正文回修 8 处硬冲突**：CR 状态收敛 6 态 / Resolver 改 `lifecycle ∩ slot ∩ 有效权限`（activity 不参与）/ `work_item_projections` 三处删除 / Connector 改 `resume_request`+`resume_ack` / `execution_events` 幂等 DDL / `work_management_connections` 改 `(org_id, owner_user_id)` / `getSelfMetadata` 口径（删模板不删方法）/ `messages` 去分区（E3）；权限由 7 键改 **8 键**（新增 `propose_memory`）
+> 33. **技术栈拍板（2026-09-10，owner 裁决）**：后台 = **ASP.NET Core（.NET 10）**；异步 = **PostgreSQL transactional outbox + `SKIP LOCKED` relay**，**BullMQ 移出 Current Design**；协议层保持技术中立
+> 34. **`outbox_events` 收口**：从 detailed 的重复定义上移到本文件 §5.2，补 `status ∈ {PENDING, PUBLISHED, DEAD}` 与 relay 领取索引；延迟重试/超时统一走 `next_attempt_at`（取代 MQ delayed job）
+> 35. **DDL 补列**：`agents.max_concurrency / health`、`agent_executions.active_attempt_no / terminal_envelope_id`、`execution_attempts.status CHECK + dispatch_sent_at / dispatch_acked_at / last_persisted_seq`、`work_items.binding_id / provider_* / search_text`
+> 36. **`execution.dispatch_ack` 独立成协议消息**：`status` 回归纯 activity，ACK 与 UI 状态解耦（`03` §2 / §7.2）
+> 37. **Jira webhook 收口**：`webhook_inbox` durable inbox（去重与持久化同事务）+ Bearer **JWT 验签**（app client secret，挂 connection 级）
 
 ---
 
@@ -58,7 +67,7 @@
 └───────────────┬─────────────────────┬───────────────┘
                 │ HTTPS /api/v1        │ WSS /ws
 ┌───────────────▼─────────────────────▼───────────────┐
-│  Application 层（NestJS Modular Monolith）           │
+│  Application 层（ASP.NET Core Modular Monolith）     │
 │  auth │ org/team/project │ channel │ mention │ memory│
 │  collaboration │ permission │ agent-registry       │
 │  execution │ work-management │ runtime              │
@@ -347,8 +356,11 @@ JiraProvider（V1+ E9）
 | work_item_bindings | Project × WorkItemProvider 关联 | E8 |
 | work_comments | WorkItem 评论 | E8 |
 | work_relations | WorkItem 关系（blocks / relates_to） | E8 |
-| work_management_connections | Provider 连接信息（OAuth token 等） | E8 |
+| work_management_connections | Provider 连接信息（Org 级 OAuth token + client secret） | E8 |
+| work_management_webhooks | Jira 动态订阅注册（v0.4.3 独立表） | E8/E9 |
+| webhook_inbox | Provider webhook 收件箱（去重 + 持久化） | **E9 v0.5 新增** |
 | work_sync_audit | Provider 同步审计 | E8 |
+| **outbox_events** | **异步/跨模块副作用的唯一出口（relay 消费）** | **E7 v0.4 · v0.5 收口** |
 | audit_logs | 全量审计 | E10 |
 | notifications | 通知 | E10 |
 | llm_calls | LLM 调用统计 | E7 |
@@ -380,11 +392,16 @@ CREATE TABLE agents (
   activity        TEXT NOT NULL DEFAULT 'OFFLINE'
                   CHECK (activity IN ('OFFLINE','AVAILABLE','THINKING','WORKING','WAITING_CONTEXT','ERROR')),
   activity_reason TEXT,
+  -- v0.5 补（原 DDL 缺失，但 detailed/04 §3.6、08 §4.2 的 SQL 依赖这两列）
+  max_concurrency INT NOT NULL DEFAULT 1,               -- durable config；active_slots 归 Redis
+  health          TEXT NOT NULL DEFAULT 'HEALTHY'
+                  CHECK (health IN ('HEALTHY','DEGRADED','UNHEALTHY')),
   daily_limit_usd NUMERIC(10,2) DEFAULT 5.00,
   monthly_budget_usd NUMERIC(10,2) DEFAULT 50.00,
   created_at      TIMESTAMPTZ DEFAULT now()
 );
 CREATE INDEX idx_agents_lifecycle_activity ON agents(lifecycle, activity);
+CREATE INDEX idx_agents_health ON agents(health) WHERE health <> 'HEALTHY';
 
 -- collaboration_requests（v0.4 新增一等实体）
 CREATE TABLE collaboration_requests (
@@ -419,6 +436,9 @@ CREATE TABLE agent_executions (
   input               JSONB NOT NULL,                   -- request input snapshot
   context_refs        JSONB NOT NULL DEFAULT '{}',
   attempt_count       INT NOT NULL DEFAULT 0,
+  -- v0.5 补（原 DDL 缺失，但 detailed/01 §4.4、04 §3.6、08 §3 的 CAS 与 rebuild 全部依赖）
+  active_attempt_no   INT,                              -- 当前 attempt；终态置 NULL
+  terminal_envelope_id UUID,                            -- 终态 envelope 去重（变更 #24）
   started_at          TIMESTAMPTZ,
   completed_at        TIMESTAMPTZ,
   failure_code        TEXT,
@@ -428,14 +448,24 @@ CREATE TABLE agent_executions (
 );
 CREATE INDEX idx_executions_agent ON agent_executions(agent_id, created_at DESC);
 CREATE INDEX idx_executions_status ON agent_executions(status, created_at DESC);
+-- 在途 Execution 恢复用（04 §3.6 启动 rebuild）
+CREATE INDEX idx_executions_active_attempt ON agent_executions(agent_id, status)
+  WHERE status IN ('PENDING','RUNNING') AND active_attempt_no IS NOT NULL;
+-- E4 → E7 创建幂等（detailed/01 §5）
+CREATE UNIQUE INDEX uq_executions_collab ON agent_executions(collaboration_request_id)
+  WHERE collaboration_request_id IS NOT NULL;
 
--- execution_attempts
+-- execution_attempts（v0.5：枚举收敛 + 补 dispatch/续传列）
 CREATE TABLE execution_attempts (
   id              UUID PRIMARY KEY,
   execution_id    UUID NOT NULL REFERENCES agent_executions(id) ON DELETE CASCADE,
   attempt_no      INT NOT NULL,
   runtime_session_id TEXT,
-  status          TEXT NOT NULL,
+  -- v0.5：三处口径（STARTED / RUNNING / INTERRUPTED）合并为唯一枚举
+  status          TEXT NOT NULL CHECK (status IN ('STARTED','RUNNING','COMPLETED','FAILED','INTERRUPTED')),
+  dispatch_sent_at    TIMESTAMPTZ,       -- Runtime 推 dispatch 的时刻
+  dispatch_acked_at   TIMESTAMPTZ,       -- 收到 execution.dispatch_ack 的时刻（03 §7）
+  last_persisted_seq  BIGINT,            -- resume 连续位点（03 §3.2）
   started_at      TIMESTAMPTZ,
   completed_at    TIMESTAMPTZ,
   error           TEXT,
@@ -469,10 +499,11 @@ CREATE TABLE execution_artifacts (
   created_at    TIMESTAMPTZ DEFAULT now()
 );
 
--- work_items（Built-in Provider）
+-- work_items（单表：Built-in 时即事实源；Jira 时是本地同步表示，v0.5 取代 work_item_projections）
 CREATE TABLE work_items (
   id                  UUID PRIMARY KEY,
   project_id          UUID NOT NULL REFERENCES projects(id),
+  binding_id          UUID NOT NULL REFERENCES work_item_bindings(id),   -- v0.4.3 必填（§9.3 路由按它走）
   type                TEXT NOT NULL CHECK (type IN ('TASK','STORY','BUG','EPIC')),
   title               TEXT NOT NULL,
   description         TEXT,
@@ -483,11 +514,26 @@ CREATE TABLE work_items (
   assignee_type       TEXT CHECK (assignee_type IN ('HUMAN','AGENT')),
   assignee_id         UUID,
   due_at              TIMESTAMPTZ,
+  -- Provider 维度（v0.5 补：§9.2 声明"自带这些列"，原 DDL 缺失）
+  provider_key        TEXT NOT NULL,                     -- 'builtin' | 'jira'
+  external_ref        TEXT,                              -- Built-in 时 NULL；Jira 时 'PROJ-123'
+  external_url        TEXT,
+  provider_status     TEXT,                              -- 原始 status 字面值
+  provider_meta       JSONB,
+  raw_payload         JSONB,                             -- 最近一次 Provider DTO（审计/回放）
+  search_text         TEXT NOT NULL DEFAULT '',          -- 检索用（tsv 索引）
+  last_sync_at        TIMESTAMPTZ,
+  last_sync_status    TEXT CHECK (last_sync_status IN ('OK','FAILED','CONFLICT')),
   created_by_type     TEXT NOT NULL,
   created_by_id       UUID NOT NULL,
   created_at          TIMESTAMPTZ DEFAULT now(),
   updated_at          TIMESTAMPTZ DEFAULT now()
 );
+-- 外部引用唯一（Built-in 行 external_ref 为 NULL，不受约束）
+CREATE UNIQUE INDEX uq_work_items_external ON work_items(provider_key, external_ref)
+  WHERE external_ref IS NOT NULL;
+CREATE INDEX idx_work_items_project_updated ON work_items(project_id, updated_at DESC);
+CREATE INDEX idx_work_items_search ON work_items USING GIN (to_tsvector('simple', search_text));
 
 -- v0.4.5：work_item_projections 已删除（变更 #15 / v0.3.1 起）
 -- Jira 等 Provider 的本地同步表示直接落在 work_items 单表，相关列：
@@ -520,8 +566,68 @@ CREATE TABLE work_management_connections (
   refresh_token_encrypted BYTEA,
   expires_at      TIMESTAMPTZ,
   meta            JSONB,
+  -- v0.5：app 级 client secret（Jira OAuth 2.0 动态 webhook 的 Bearer JWT 用它验签）
+  -- 注意：它属于「app/connection」维度，**不**挂在 webhook 注册行上
+  client_secret_encrypted BYTEA,
   created_at      TIMESTAMPTZ DEFAULT now()
 );
+CREATE INDEX idx_wmc_org_provider ON work_management_connections(org_id, provider_key);
+
+-- work_management_webhooks（v0.4.3 从 Connection 拆出为独立表）
+CREATE TABLE work_management_webhooks (
+  id                  UUID PRIMARY KEY,
+  binding_id          UUID NOT NULL REFERENCES work_item_bindings(id) ON DELETE CASCADE,
+  connection_id       UUID NOT NULL REFERENCES work_management_connections(id),
+  external_webhook_id TEXT NOT NULL,       -- Jira 返回的动态订阅 ID（匹配 payload.matchedWebhookIds）
+  filter_jql          TEXT,
+  filter_events       JSONB,
+  expires_at          TIMESTAMPTZ NOT NULL,
+  last_refreshed_at   TIMESTAMPTZ,
+  refresh_status      TEXT CHECK (refresh_status IN ('OK','FAILED','DISABLED')),
+  last_error          TEXT,
+  created_at          TIMESTAMPTZ DEFAULT now(),
+  UNIQUE (external_webhook_id)
+);
+
+-- webhook_inbox（v0.5：收件箱，去重与持久化同一事务）
+CREATE TABLE webhook_inbox (
+  id            BIGSERIAL PRIMARY KEY,
+  provider_key  TEXT NOT NULL,
+  delivery_id   TEXT NOT NULL,             -- X-Atlassian-Webhook-Identifier（仅标识单次投递）
+  webhook_id    UUID NOT NULL REFERENCES work_management_webhooks(id),
+  binding_id    UUID NOT NULL REFERENCES work_item_bindings(id),
+  payload       JSONB NOT NULL,
+  status        TEXT NOT NULL DEFAULT 'PENDING'
+                CHECK (status IN ('PENDING','PROCESSED','DEAD')),
+  attempt_count INT NOT NULL DEFAULT 0,
+  last_error    TEXT,
+  received_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  processed_at  TIMESTAMPTZ,
+  UNIQUE (provider_key, delivery_id)
+);
+CREATE INDEX idx_webhook_inbox_pending ON webhook_inbox(status, received_at) WHERE status = 'PENDING';
+
+-- outbox_events（v0.5：全部异步与跨模块副作用的唯一出口；原 BullMQ 的替代）
+CREATE TABLE outbox_events (
+  id              UUID PRIMARY KEY,
+  aggregate_type  TEXT NOT NULL,          -- 'collaboration' | 'execution' | 'work_item' | ...
+  aggregate_id    UUID NOT NULL,
+  event_type      TEXT NOT NULL,          -- 'execution.completed' | 'execution.retry' | 'collab.timeout' | ...
+  payload         JSONB NOT NULL,
+  idempotency_key TEXT UNIQUE,            -- 消费者侧去重
+  status          TEXT NOT NULL DEFAULT 'PENDING'
+                  CHECK (status IN ('PENDING','PUBLISHED','DEAD')),
+  attempt_count   INT NOT NULL DEFAULT 0,
+  next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now(),   -- 延迟重试/超时的承载（relay 到期领取）
+  last_error      TEXT,
+  published_at    TIMESTAMPTZ,
+  created_at      TIMESTAMPTZ DEFAULT now()
+);
+-- relay 领取：SELECT ... WHERE status='PENDING' AND next_attempt_at <= now()
+--             ORDER BY next_attempt_at FOR UPDATE SKIP LOCKED
+CREATE INDEX idx_outbox_ready ON outbox_events(next_attempt_at) WHERE status = 'PENDING';
+CREATE INDEX idx_outbox_aggregate ON outbox_events(aggregate_type, aggregate_id);
+CREATE INDEX idx_outbox_dead ON outbox_events(created_at DESC) WHERE status = 'DEAD';
 
 -- permissions（v0.4 effect 改三态）
 CREATE TABLE permissions (
@@ -710,6 +816,8 @@ retry / reconnect / crash recovery / timeout / cancel / streaming / artifact 全
 | --- | --- |
 | Client ↔ API | REST `/api/v1` + JWT |
 | Client ↔ Gateway | WSS + JSON envelope |
+| Client ↔ Gateway · 消息级续传 | `resume(last_seq)`（E3 §5.3，消息 seq 游标）—— **与 execution 级 resume 不同名空间** |
+| Agent ↔ Runtime · 执行级续传 | `execution.resume_request` / `execution.resume_ack`（E7，attempt 内连续位点） |
 | 内部异步 | PostgreSQL `outbox_events` + `SKIP LOCKED` relay（BackgroundService），**无独立 MQ** |
 | 内部广播 | Redis Pub/Sub |
 | Agent ↔ Runtime | WSS Connector 协议 v1（含 execution_id / collaboration_request_id） |
@@ -830,20 +938,26 @@ CREATE UNIQUE INDEX uq_project_active_work_provider
 
 ---
 
-## 11. 实施顺序（M1-M6 + V1+）
+## 11. 实施顺序（v0.5：与 detailed/09 对齐）
+
+> **唯一基线 = `docs/design/detailed/09-implementation-checklist.md`**。本节此前把 E6 排在 M7、E7 排在 M8，与 detailed/09 的依赖图（M4a=E6、M7=E7 Execution 完整）冲突，v0.5 已对齐。
 
 | 阶段 | 交付 | 对应 Epic |
 | --- | --- | --- |
-| M1 | monorepo + auth + Org/Team/Project/Member | E1 |
-| M2 | Channel + Message + seq + WS 网关 | E3 |
-| M3 | Agent + Credential + lifecycle/activity | E2 + E7 部分（Connector） |
-| M4 | Trigger + CollaborationRequest + Resolver + Decision | E4 |
+| M1 | monorepo + auth/JWT + Org/Team/Project/Member | E1 |
+| M2 | Channel + Message + seq + WS 网关 + outbox relay | E3 |
+| M3a | Agent + Credential + lifecycle/activity/health | E2 |
+| M3b | Connector 基础（transport：`collaboration.request` / dispatch / ack） | E7 部分 |
+| M4a | Permission + Approval 三态（8 键） | E6 |
+| M4b | Trigger + CollaborationRequest + Resolver + Decision | E4 |
 | M5 | Memory + 人审门禁 + 索引 | E5 |
 | M6 | WorkItem + Built-in Provider + Work 页面 | E8 |
-| M7 | Permission + Approval + 三态 | E6 |
-| M8 | Agent Execution domain（attempts/events/artifacts） | E7 |
-| M9 | Observability + 监控 + 压测 | E10 |
+| M7 | Agent Execution domain 完整（attempts/events/artifacts/resume） | E7 |
+| M8 | Observability + 监控 Dashboard + 压测 | E10 |
+| M9 | 集成 + 端到端 | 全部 |
 | V1+ | Jira Provider 适配器 | E9 |
+
+> 评审建议改为 **S1/S2/S3 竖切**（@mention→产出 / 记忆闸门 / 工作推进），**尚未拍板**（见 `docs/review/`）。
 
 ---
 
@@ -854,3 +968,5 @@ CREATE UNIQUE INDEX uq_project_active_work_provider
 | v0.1 | 2026-09-07 | 初稿：独立系统 + 3 Worker + Connector + 实施顺序 |
 | v0.2 | 2026-09-08 | 原型评审修订：6 态 + 错误码 + Source 约束 + 集成扩展点 + ERROR 触发恢复 |
 | v0.3 | 2026-09-08 | 架构评审推倒：删除 AgentBoard execution / 新增 Agent Execution domain（agent_executions + attempts + events + artifacts）/ 新增 Work Management 域（Provider 抽象 + Built-in + bindings + projections）/ CollaborationRequest 一等实体 / Permission effect 改 REQUIRE_APPROVAL / Agent lifecycle+activity 拆分 / 删除 can_execute/can_review / 移除 projects.integration_backend 与 issue_tracker / Trigger 多源汇聚 / Project 不再挂 Provider 字段 |
+| v0.4.5 | 2026-09-10 | **正文回修**（此前只改摘要未改正文）：CR 状态收敛 6 态；Resolver 改 `lifecycle ∩ slot ∩ 有效权限`，§6.4 ERROR 不再挡候选；`work_item_projections` 架构图/表清单/DDL 三处删除；Connector 协议改 `execution.resume_request`/`resume_ack`；`execution_events` 加 `provider_event_id + attempt_id NOT NULL + UNIQUE`；`work_management_connections` 改 `(org_id, owner_user_id)`；`getSelfMetadata` 补"只返回 capability"；权限 7 键 → 8 键（DDL + 默认矩阵 + §3.1）；§8 协议汇总区分消息级/执行级 resume |
+| v0.5 | 2026-09-10 | **技术栈拍板 .NET**（ASP.NET Core + EF Core + outbox relay，BullMQ 移除，协议层中立）；**DDL 收口**：补 `agents.max_concurrency/health`、`agent_executions.active_attempt_no/terminal_envelope_id` + 幂等唯一索引、`execution_attempts` 状态 CHECK 与 dispatch/续传列、`work_items.binding_id/provider_*/search_text`，新增 `outbox_events` / `webhook_inbox` / `work_management_webhooks` 三表入清单与 DDL；§11 实施顺序与 detailed/09 对齐（M7=E7、M8=E10） |

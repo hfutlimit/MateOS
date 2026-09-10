@@ -129,7 +129,7 @@ Conversation Domain          Work Domain
   - `scope` ∈ `{PERSONAL, PROJECT}` —— **只有这两级，只决定可见性**
   - `source_refs` ⊆ `{channel_id, message_seq, topic_id, work_item_id, execution_id, agent_id}` —— **仅溯源展示与跳转，不参与可见性判定**
 - **补充**：跨 Project 零泄漏；Source 三件套强约束不变。
-- **校验**：`memory_items.scope_type CHECK IN ('PERSONAL','PROJECT')`；查询层只按 scope 过滤。
+- **校验**：`memory_items.scope_type CHECK IN ('PERSONAL','PROJECT')`（v0.5 落地：`scope_type` 是由 `type` 推导的**生成列**，见 detailed/05 §4.2 与 E5 §3 —— 保留 E5 的 4 类内容类别，同时保证 scope 不可漂移）；查询层只按 scope 过滤，**PERSONAL 不参与 project 过滤**（否则跨 Project 的个人记忆会漏读）。
 
 ### I5 · Agent 不拥有工作
 - **为什么**：Agent 是 teammate，工作是 Project 的承诺。若 assignee 即所有权，Agent 下线/删除会导致工作悬空。
@@ -139,7 +139,7 @@ Conversation Domain          Work Domain
 ### I6 · Execution 是 Runtime 运行实例，状态收敛且幂等
 - **为什么**：它是可取消、可重试、占 slot、产生 cost 的运行实体，不能被降级成 WorkItem 的一个 history 字段。
 - **约束**：terminal 状态 CAS（`WHERE status IN (PENDING, RUNNING)`）；`provider_event_id` + `UNIQUE(attempt_id, provider_event_id)` 协议级幂等；**异步队列（v0.5 起 = outbox relay）只做 transport，绝不是事实源**。
-- **校验**：`execution_events.attempt_id NOT NULL` + 唯一索引（当前 SYSTEM_DESIGN L438 缺，需补）。
+- **校验**：`execution_events.attempt_id NOT NULL` + `UNIQUE(attempt_id, provider_event_id)`（**v0.4.5 已在 SYSTEM_DESIGN §5.2 补齐**）。
 
 ### I7 · 消息流只存 entity_ref
 - **为什么**：复制事实源字段必然双写漂移。

@@ -13,7 +13,7 @@
 
 团队知识的复用是 AI Coding 的核心价值。v0.4 改动很小：**memory_proposals 表从 `memory_items` 拆出**（之前是直接 status=PROPOSED 在 memory_items 里，v0.4 拆成申请与已批准两个表，避免"已批准的记忆"和"待审批的记忆"混在同一表）。
 
-其余边界不变：4 类 Memory（Personal/Project/Decision/Knowledge）+ Source 溯源强约束 + 人审门禁。
+其余边界不变：4 类 Memory（Personal/Project/Decision/Knowledge，= 内容类别）+ Source 溯源强约束 + 人审门禁。**v0.5 补**：可见性由派生列 `scope_type ∈ {PERSONAL, PROJECT}` 决定（DM-I4），两者不是同一维度。
 
 ## 2. 范围
 
@@ -41,8 +41,11 @@
 -- memory_proposals（v0.4 拆出：申请阶段的事实源）
 CREATE TABLE memory_proposals (
   id                  UUID PRIMARY KEY,
-  project_id          UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  -- v0.5（DM-I4）：PERSONAL 不挂 project → 可空；可见性由 scope_type 决定
+  project_id          UUID REFERENCES projects(id) ON DELETE CASCADE,
   type                TEXT NOT NULL CHECK (type IN ('PERSONAL','PROJECT','DECISION','KNOWLEDGE')),
+  scope_type          TEXT GENERATED ALWAYS AS
+                        (CASE WHEN type = 'PERSONAL' THEN 'PERSONAL' ELSE 'PROJECT' END) STORED,
   title               TEXT NOT NULL,
   content             TEXT NOT NULL,
   status              TEXT NOT NULL DEFAULT 'PROPOSED'
@@ -66,31 +69,40 @@ CREATE TABLE memory_proposals (
     (source_type = 'CHANNEL_MESSAGE' AND source_channel_id IS NOT NULL AND source_message_seq IS NOT NULL)
     OR (source_type <> 'CHANNEL_MESSAGE')
   ),
-  CONSTRAINT chk_owner_for_personal CHECK (
-    (type = 'PERSONAL' AND proposed_by_user_id IS NOT NULL)
-    OR (type <> 'PERSONAL')
+  CONSTRAINT chk_scope_target CHECK (
+    (scope_type = 'PERSONAL' AND project_id IS NULL AND proposed_by_user_id IS NOT NULL)
+    OR (scope_type = 'PROJECT' AND project_id IS NOT NULL)
   )
 );
 CREATE INDEX idx_memory_proposal_project_status ON memory_proposals(project_id, status);
 
--- memory_items（v0.4 拆出：已批准的事实源）
+-- memory_items（v0.4 拆出：已批准的事实源；v0.5 按 detailed/05 对齐）
 CREATE TABLE memory_items (
   id                  UUID PRIMARY KEY,
-  project_id          UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-  proposal_id         UUID NOT NULL REFERENCES memory_proposals(id),  -- 必填，v0.4 起 proposal 不可绕过
+  project_id          UUID REFERENCES projects(id) ON DELETE CASCADE,   -- v0.5：PERSONAL 行为 NULL
+  proposal_id         UUID NOT NULL UNIQUE REFERENCES memory_proposals(id),  -- v0.4.3 加 UNIQUE，v0.4 起不可绕过
   owner_user_id       UUID REFERENCES users(id),                       -- Personal 时填
-  type                TEXT NOT NULL,
+  type                TEXT NOT NULL CHECK (type IN ('PERSONAL','PROJECT','DECISION','KNOWLEDGE')),
+  -- 可见性 scope（DM-I4）：由 type 生成，避免"类别"与"可见性"漂移
+  scope_type          TEXT GENERATED ALWAYS AS
+                        (CASE WHEN type = 'PERSONAL' THEN 'PERSONAL' ELSE 'PROJECT' END) STORED,
   title               TEXT NOT NULL,
   content             TEXT NOT NULL,
+  search_text         TEXT NOT NULL DEFAULT '',                        -- 检索列（detailed/05 §6.3）
   source_type         TEXT NOT NULL,
   source_channel_id   UUID REFERENCES channels(id),
   source_message_seq  BIGINT,
   approved_by         UUID NOT NULL REFERENCES users(id),
   version             INT NOT NULL DEFAULT 1,
   created_at          TIMESTAMPTZ DEFAULT now(),
-  updated_at          TIMESTAMPTZ DEFAULT now()
+  updated_at          TIMESTAMPTZ DEFAULT now(),
+  CONSTRAINT chk_scope_owner CHECK (
+    (scope_type = 'PERSONAL' AND project_id IS NULL AND owner_user_id IS NOT NULL)
+    OR (scope_type = 'PROJECT' AND project_id IS NOT NULL)
+  )
 );
-CREATE INDEX idx_memory_items_project_type ON memory_items(project_id, type);
+CREATE INDEX idx_memory_items_scope ON memory_items(scope_type, project_id, type);
+CREATE INDEX idx_memory_items_search ON memory_items USING GIN (to_tsvector('simple', search_text));
 
 -- memory_chunks（V1 仅 tsv；V2 加 embedding）
 CREATE TABLE memory_chunks (

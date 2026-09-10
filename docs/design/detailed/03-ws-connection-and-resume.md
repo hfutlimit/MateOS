@@ -383,7 +383,7 @@ CAS 已足够；terminal_envelope_id 用于审计。
 （同 v0.4.2）
 
 ```
-Server: NestJS Gateway + ws
+Server: ASP.NET Core WS Gateway + outbox relay（v0.5）
 Client SDK: Node.js / Python / Go
 限速: 10 msgs/sec per session
 帧大小: max_payload_kb = 1024

@@ -9,7 +9,7 @@ MateOS 是一个面向软件开发团队的 AI 原生团队协作平台（V1 = A
 | 维度 | 状态 |
 | --- | --- |
 | 阶段 | **需求与设计收口期**（尚未启动 M1 编码） |
-| 文档 | PRD v0.4 / SYSTEM_DESIGN v0.5（技术栈已拍板 .NET）/ UI Design System v0.6 / detailed 00–09 v0.4.4 |
+| 文档 | PRD v0.4 / SYSTEM_DESIGN v0.5（技术栈已拍板 .NET）/ UI Design System v0.6 / detailed 00–09 v0.5 |
 | 原型 | P3 Agent Card / P4 Project Dashboard / P5 + P5b Channel 主界面（评审修订 v0.4 全部落地） |
 | 待做原型 | P0-Inbox / P0-Fleet（**M1 前必须出**）/ P1 登录注册 / P2 我的 Agents / P6 审批中心 / P7 Memory 文档 / P8 团队设置 |
 
@@ -76,15 +76,20 @@ docs/
 
 以 `docs/design/detailed/09-implementation-checklist.md` 的 **M1–M9** 为 Current 基线（本 README 早期的 M1–M6 已作废）。
 
-| 阶段 | 交付 |
-| --- | --- |
-| M1 | 工程骨架 + auth/JWT + org/team/project/channel CRUD |
-| M2 | 消息收发 + WS 网关 + outbox relay + 附件直传 |
-| M3 | Agent CRUD + Credential 加密 + Connector 基础 |
-| M4 | Resolver + Decision 状态机 + 权限 |
-| M5 | Memory 人审门禁 + 索引 |
-| M6 | Execution 域 + Runtime Gateway |
-| M7–M9 | Work Management / 通知审计 / 可观测与压测 |
+| 阶段 | 交付 | Epic |
+| --- | --- | --- |
+| M1 | 工程骨架 + auth/JWT + Org/Team/Project/Member | E1 |
+| M2 | Channel + Message + seq + WS 网关 + outbox relay | E3 |
+| M3a | Agent + Credential + lifecycle/activity/health | E2 |
+| M3b | Connector transport（`collaboration.request` / dispatch / `dispatch_ack`） | E7 部分 |
+| M4a | Permission + Approval 三态（8 键） | E6 |
+| M4b | Trigger + CollaborationRequest + Resolver + Decision | E4 |
+| M5 | Memory 人审门禁 + 索引 | E5 |
+| M6 | WorkItem + Built-in Provider + Work 页面 | E8 |
+| M7 | Agent Execution domain 完整（attempts/events/artifacts/resume） | E7 |
+| M8 | Observability + Dashboard + 压测 | E10 |
+| M9 | 集成 + 端到端 | 全部 |
+| V1+ | Jira Provider 适配器 | E9 |
 
 > ⚠ 评审已建议改为 **S1/S2/S3 竖切**（@mention→产出 / 记忆闸门 / 工作推进），**尚未拍板**（见 `docs/review/`）。首个纵向闭环的 Agent 端提案见 detailed/09 §2.1。
 

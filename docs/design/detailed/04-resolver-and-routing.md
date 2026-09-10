@@ -128,9 +128,12 @@ candidates = [
 ### 2.2 评分公式
 
 ```python
-score = 0.6 * capability_match
-      + 0.25 * (1 - load)
+# v0.5：补 health 项——detailed/08 §4.2 规定 DEGRADED 要"降权"，
+# 原公式里没有 health，等于该规则无处实现
+score = 0.55 * capability_match
+      + 0.20 * (1 - load)
       + 0.15 * accept_rate_30d
+      + 0.10 * health_factor          # HEALTHY=1.0 / DEGRADED=0.5（UNHEALTHY 不进候选，见 08 §4.2）
 ```
 
 | 因子 | 计算 | 数据源 |
@@ -138,6 +141,9 @@ score = 0.6 * capability_match
 | `capability_match` | required_capabilities ∩ agent.capabilities 的覆盖率 | E4 collab.required_capabilities |
 | `load` | 当前 active leases / max_concurrency | v0.4.3：Redis ZCARD（per-lease ZSET） |
 | `accept_rate_30d` | 30 天 ACCEPT 占总决策的比例 | decision_records 聚合 |
+| `health_factor` | HEALTHY=1.0 / DEGRADED=0.5 | `agents.health`（E7/08 维护） |
+
+> 系数（0.55/0.20/0.15/0.10）来自 v0.4.3 的 0.6/0.25/0.15 并按引入 health 后的量级归一，**属起始值**：M4b 实现后用历史决策数据做一次敏感性验证再定稿（PRD 未约束具体系数）。
 
 ## 3. Redis Per-Lease ZSET Slot Semaphore（v0.4.3 修复 P0-2）
 

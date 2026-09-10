@@ -8,7 +8,7 @@
 
 ## 0. 范围
 
-- Memory 4 类（Personal / Project / Decision / Knowledge）
+- **内容类别 4 类**（Personal / Project / Decision / Knowledge）+ **可见性 scope 两级**（PERSONAL / PROJECT，v0.5 按 DM-I4 收口：scope 只决定可见性，`source_refs` 只做溯源）
 - Source 三件套强约束
 - Agent 申请 → 人类审批 → 写入
 - P6 审批中心
@@ -123,8 +123,12 @@ T+12 原 MEMORY_REQUEST projection 变 "已写入项目记忆 · Jason 批准"
 ```sql
 CREATE TABLE memory_proposals (
   id                  UUID PRIMARY KEY,
-  project_id          UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  -- v0.5（DM-I4）：可见性由 scope 两级决定，PERSONAL 不挂 project → project_id 可空
+  project_id          UUID REFERENCES projects(id) ON DELETE CASCADE,
   type                TEXT NOT NULL CHECK (type IN ('PERSONAL','PROJECT','DECISION','KNOWLEDGE')),
+  -- 生成列：内容类别 → 可见性 scope（PERSONAL | PROJECT），不可漂移
+  scope_type          TEXT GENERATED ALWAYS AS
+                        (CASE WHEN type = 'PERSONAL' THEN 'PERSONAL' ELSE 'PROJECT' END) STORED,
   title               TEXT NOT NULL,
   content             TEXT NOT NULL,
   status              TEXT NOT NULL DEFAULT 'PROPOSED'
@@ -145,32 +149,44 @@ CREATE TABLE memory_proposals (
     (source_type = 'CHANNEL_MESSAGE' AND source_channel_id IS NOT NULL AND source_message_seq IS NOT NULL)
     OR (source_type <> 'CHANNEL_MESSAGE')
   ),
-  CONSTRAINT chk_owner_for_personal CHECK (
-    (type = 'PERSONAL' AND proposed_by_user_id IS NOT NULL)
-    OR (type <> 'PERSONAL')
+  CONSTRAINT chk_scope_target CHECK (
+    (scope_type = 'PERSONAL' AND project_id IS NULL AND proposed_by_user_id IS NOT NULL)
+    OR (scope_type = 'PROJECT' AND project_id IS NOT NULL)
   )
 );
 ```
+
+> **v0.5 说明**：`scope_type` 是 `type` 的**生成列**，用来满足 DM-I4 的 `CHECK IN ('PERSONAL','PROJECT')` 字面校验，同时保留 E5 的 4 类内容类别（Personal / Project / Decision / Knowledge）。两者不可各自独立维护，避免"类别"与"可见性"漂移。
 
 ### 4.2 memory_items（v0.4.3 加 UNIQUE(proposal_id)）
 
 ```sql
 CREATE TABLE memory_items (
   id                  UUID PRIMARY KEY,
-  project_id          UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  -- v0.5：PERSONAL 行为 NULL（不挂 project），否则跨 Project 检索会漏掉自己的个人记忆
+  project_id          UUID REFERENCES projects(id) ON DELETE CASCADE,
   proposal_id         UUID NOT NULL UNIQUE REFERENCES memory_proposals(id),  -- v0.4.3: UNIQUE
   owner_user_id       UUID REFERENCES users(id),
-  type                TEXT NOT NULL,
+  type                TEXT NOT NULL CHECK (type IN ('PERSONAL','PROJECT','DECISION','KNOWLEDGE')),
+  scope_type          TEXT GENERATED ALWAYS AS
+                        (CASE WHEN type = 'PERSONAL' THEN 'PERSONAL' ELSE 'PROJECT' END) STORED,
   title               TEXT NOT NULL,
   content             TEXT NOT NULL,
+  search_text         TEXT NOT NULL DEFAULT '',   -- v0.5：检索列（§6.3 的 websearch_to_tsquery 依赖它）
   source_type         TEXT NOT NULL,
   source_channel_id   UUID REFERENCES channels(id),
   source_message_seq  BIGINT,
   approved_by         UUID NOT NULL REFERENCES users(id),
   version             INT NOT NULL DEFAULT 1,
   created_at          TIMESTAMPTZ DEFAULT now(),
-  updated_at          TIMESTAMPTZ DEFAULT now()
+  updated_at          TIMESTAMPTZ DEFAULT now(),
+  CONSTRAINT chk_scope_owner CHECK (
+    (scope_type = 'PERSONAL' AND project_id IS NULL AND owner_user_id IS NOT NULL)
+    OR (scope_type = 'PROJECT' AND project_id IS NOT NULL)
+  )
 );
+CREATE INDEX idx_memory_items_scope ON memory_items(scope_type, project_id, type);
+CREATE INDEX idx_memory_items_search ON memory_items USING GIN (to_tsvector('simple', search_text));
 ```
 
 ### 4.3 memory_review_actions
@@ -293,11 +309,15 @@ async def accessible_project_ids(principal: MemberRef) -> list[UUID]:
 ### 6.3 搜索查询（v0.4.3 修正）
 
 ```sql
-SELECT id, title, type, snippet, source_*
+SELECT id, title, type, scope_type, snippet, source_*
 FROM memory_items m
-WHERE m.project_id = ANY($1::uuid[])  -- accessible_project_ids
-  AND (m.owner_user_id = $2 OR m.type != 'PERSONAL')  -- Personal 仅 owner
-  AND (m.type = $3 OR $3 IS NULL)
+WHERE (
+        -- v0.5：PERSONAL 按 owner 授权，**不参与 project 过滤**
+        -- （旧写法 m.project_id = ANY(...) 会漏掉用户在其它 Project 里创建的个人记忆）
+        (m.scope_type = 'PERSONAL' AND m.owner_user_id = $2)
+     OR (m.scope_type = 'PROJECT'  AND m.project_id = ANY($1::uuid[]))  -- accessible_project_ids
+      )
+  AND (m.type = $3 OR $3 IS NULL)                                       -- 内容类别过滤（4 类）
   AND m.search_text @@ websearch_to_tsquery('simple', $4)
 ORDER BY ts_rank(m.search_text, websearch_to_tsquery($4)) DESC
 LIMIT 20;

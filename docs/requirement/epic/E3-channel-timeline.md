@@ -92,9 +92,15 @@ CREATE TABLE messages (
 );
 -- v0.4.5：删除 PARTITION BY RANGE(created_at)
 --   （1）PG 16 声明式分区要求唯一约束必须包含分区键，PK (channel_id, seq) 建不出来
---   （2）Prisma migrate 管理不了声明式分区（架构评审「Prisma vs PG 分区」）
+--   （2）迁移工具（EF Core migrations）管不了声明式分区，会反复想删
 -- 替代：保留 (channel_id, seq) 主键 + 按月归档 job（V1+ 再评估分区）
 CREATE INDEX idx_messages_channel_time ON messages(channel_id, created_at DESC);
+
+-- v0.5：client_msg_id 幂等必须由 DB 强制（F2「同 client_msg_id 重发 5 次只产生 1 条」靠的就是它）
+-- 可空列 + 部分唯一索引：允许未带 client_msg_id 的历史/系统消息
+CREATE UNIQUE INDEX uq_messages_client_msg
+  ON messages(channel_id, client_msg_id)
+  WHERE client_msg_id IS NOT NULL AND deleted_at IS NULL;
 ```
 
 ### 3.1 content 五形态 schema（v0.4 projection）

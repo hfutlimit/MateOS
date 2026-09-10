@@ -215,7 +215,7 @@ Redis rl:{email_or_ip}:/auth/login  滑窗 5/min
 
 ## 10. 实施顺序（M1）
 
-1. `apps/api` NestJS + Prisma + PG schema（v0.4 调整）
+1. `apps/api` ASP.NET Core + EF Core(Npgsql) + PG schema（v0.5 技术栈拍板）
 2. `/auth/*` + JWT + Redis rt
 3. `/orgs` + `/orgs/:id/members`（v0.4 新增）
 4. `/teams` / `/projects`（v0.4 简化 Project schema）

@@ -70,7 +70,7 @@ max_attempts = 4     # 总尝试次数（1 initial + 3 retries）
 | 2 (1st retry) | 0 | 5s | max(5, 30) = 30s |
 | 3 (2nd retry) | 1 | 25s | max(25, 30) = 30s |
 | 4 (3rd retry) | 2 | 125s | max(125, 30) = 125s |
-| 5+ (MAX) | — | terminal_fail | — |
+| 超过 4 次（`attempt_count >= max_attempts`） | — | `terminal_fail('MAX_ATTEMPTS_EXCEEDED')` | — |
 
 **关键变化**：
 - 单一公式 `max(exponential, retry_after_s)`
@@ -100,7 +100,8 @@ async def handle_error(execution_id, error_envelope):
     # 可重试：判断 attempt_count
     execution = await get_execution(execution_id)
     if execution.attempt_count >= max_attempts:
-        await terminal_fail(execution_id, 'MAX_ATTEMPTS_EXCEEDED')
+        # v0.5：必须带 attempt_no，否则退回"无 attempt 隔离"的旧 CAS
+        await terminal_fail(execution_id, 'MAX_ATTEMPTS_EXCEEDED', execution.active_attempt_no)
         return
 
     # 计算 backoff

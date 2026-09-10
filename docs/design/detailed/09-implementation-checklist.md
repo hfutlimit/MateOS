@@ -49,7 +49,7 @@
 
 ```
 从 M1 开始就建立：
-  - 结构化日志 (pino / winston)
+  - 结构化日志（.NET：Serilog / Microsoft.Extensions.Logging；v0.5 由 pino/winston 更正）
   - trace_id 生成 + 透传
   - audit_logs 写入基础设施
   - metrics 规范（counter / histogram / gauge 命名）
@@ -115,7 +115,7 @@ contracts:
 mateos/
 ├── apps/
 │   ├── web/                  # Next.js 前端
-│   └── api/                  # NestJS 单体
+│   └── api/                  # ASP.NET Core 单体（v0.5）
 ├── packages/
 │   ├── contracts/            # 共享 DTO + zod schema
 │   │   ├── auth/
@@ -175,7 +175,7 @@ mateos/
 
 ```
 M1: E1 Identity & Workspace
-  1. NestJS + Prisma + PG
+  1. ASP.NET Core + EF Core + PG（v0.5）
   2. users / organizations / organization_members (v0.4.2 删 owner_id)
   3. /auth/* (JWT 双令牌 + refresh rotation)
   4. /orgs / /teams / /projects CRUD
@@ -203,8 +203,8 @@ M3a: E2 Agent Registry
   7. E2E lifecycle / double approval
 
 M3b: E7 Connector (transport 基础)
-  1. WSS Gateway (NestJS)
-  2. hello / heartbeat / status
+  1. WSS Gateway（ASP.NET Core WebSocket 中间件，v0.5）
+  2. hello / heartbeat / status / execution.dispatch_ack（v0.5 新增）
   3. E2 lifecycle 变化 → agents.activity / health 写库
   4. v0.4.3 改：新增 collaboration.request 消息类型
   5. E2E connect / heartbeat / collaboration_request_transport
@@ -241,6 +241,8 @@ M5: E5 Shared Memory
   4. Policy.evaluate('propose_memory') 走 E5 流程
   5. accessible_project_ids() 统一权限查询
   6. UNIQUE(memory_items.proposal_id) 防 race
+  6b. v0.5：`type` 4 类 CHECK + 生成列 `scope_type`（PERSONAL|PROJECT）+ `search_text` 列与 GIN 索引；
+      PERSONAL 行 `project_id` 为 NULL，检索按 scope 分支（不会跨 Project 漏读个人记忆）
   7. 消息流 MEMORY_REQUEST projection
   8. P6 审批中心
   9. P7 Memory 文档
@@ -370,20 +372,27 @@ CREATE TABLE work_management_webhooks (
   created_at          TIMESTAMPTZ DEFAULT now()
 );
 
--- outbox_events（所有 epic 共用）
-CREATE TABLE outbox_events (
-  id              UUID PRIMARY KEY,
-  aggregate_type  TEXT NOT NULL,
-  aggregate_id    UUID NOT NULL,
-  event_type      TEXT NOT NULL,
-  payload         JSONB NOT NULL,
-  idempotency_key TEXT UNIQUE,
-  published_at    TIMESTAMPTZ,
-  attempt_count   INT NOT NULL DEFAULT 0,
-  next_attempt_at TIMESTAMPTZ DEFAULT NOW(),
-  last_error      TEXT,
-  created_at      TIMESTAMPTZ DEFAULT now()
+-- webhook_inbox（v0.5：Jira webhook 收件箱，去重与持久化同一事务）
+CREATE TABLE webhook_inbox (
+  id            BIGSERIAL PRIMARY KEY,
+  provider_key  TEXT NOT NULL,
+  delivery_id   TEXT NOT NULL,
+  webhook_id    UUID NOT NULL,
+  binding_id    UUID NOT NULL,
+  payload       JSONB NOT NULL,
+  status        TEXT NOT NULL DEFAULT 'PENDING'
+                CHECK (status IN ('PENDING','PROCESSED','DEAD')),
+  attempt_count INT NOT NULL DEFAULT 0,
+  last_error    TEXT,
+  received_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  processed_at  TIMESTAMPTZ,
+  UNIQUE (provider_key, delivery_id)
 );
+
+-- outbox_events（所有 epic 共用）
+-- v0.5：权威 DDL 在 SYSTEM_DESIGN §5.2（此处不再重复列定义，仅登记迁移项）
+--   关键差异：新增 status ∈ {PENDING,PUBLISHED,DEAD}；relay 用
+--   WHERE status='PENDING' AND next_attempt_at <= now() ORDER BY next_attempt_at FOR UPDATE SKIP LOCKED 领取
 ```
 
 ## 10. 与其他设计的关系
