@@ -1,0 +1,47 @@
+# MateOS 本地开发基础设施
+# 依据 detailed/09 §3.1（PostgreSQL 16 + pgvector / Redis 7）与 SYSTEM_DESIGN §5.2。
+# 端口刻意避开默认值，防止与本机其他项目（SmartBid / AgentBoard 等）冲突。
+#
+# ⚠️ 端口选择注意：Windows 有「保留端口段」（netsh interface ipv4 show excludedportrange
+#    protocol=tcp 可查），落在其中会报 bind: access permissions。本机 56366-56465 即为其一，
+#    因此 Redis 用 16379 而非 56379。
+
+name: mateos
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: mateos-postgres
+    environment:
+      POSTGRES_USER: mateos
+      POSTGRES_PASSWORD: mateos_dev_only
+      POSTGRES_DB: mateos
+    ports:
+      - "55432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # entrypoint 脚本只在数据卷首次初始化时执行；已有环境见该目录内的说明
+      - ./ops/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mateos -d mateos"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  redis:
+    image: redis:7-alpine
+    container_name: mateos-redis
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "16379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+volumes:
+  pgdata:
+  redisdata:

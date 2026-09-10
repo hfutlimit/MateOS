@@ -1,9 +1,11 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/MateOS.Api/MateOS.Api.csproj" />
     <Project Path="src/MateOS.Contracts/MateOS.Contracts.csproj" />
     <Project Path="src/MateOS.Domain/MateOS.Domain.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/MateOS.IntegrationTests/MateOS.IntegrationTests.csproj" />
     <Project Path="tests/MateOS.UnitTests/MateOS.UnitTests.csproj" />
   </Folder>
 </Solution>

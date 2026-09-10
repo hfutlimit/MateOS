@@ -17,7 +17,7 @@ MateOS 是一个面向软件开发团队的 AI 原生团队协作平台（V1 = A
 | Cache / Presence | Redis 7 |
 | Execution | MateOS Agent Runtime（自研，永久自洽） |
 | Implementation | **S1 → S2 → S3 vertical slices** |
-| Stage | 设计收口完成，可进入 S1 walking skeleton |
+| Stage | S1 进行中：执行域协议内核（Domain/Contracts）+ M1 Identity & Workspace（API）已落地 |
 
 > 本表是唯一需要维护的「技术基线」。**不要在此堆叠文档版本号**：PRD / SYSTEM_DESIGN / UI DS 的版本只在各自文件头与更新记录里维护；detailed / epic / 原型不单独发行版本号，用日期 + commit 追溯。避免出现「文件头 v0.5、changelog v0.7、commit v0.8」这类交叉版本噪音。
 
@@ -125,6 +125,30 @@ docs/
 | V1+ | Jira（Work Management Provider） | E9 |
 
 **M1–M9 仅作能力域映射标签，不是实施顺序**（明细见 `docs/design/detailed/09-implementation-checklist.md`）：M1=E1、M2=E3+WS+relay、M3a=E2、M3b=Connector、M4a=E6、M4b=E4、M5=E5、M6=E8、M7=E7 完整、M8=E10 完整、M9=集成压测。
+
+## 本地开发
+
+```bash
+# 1. 起基础设施（PostgreSQL 16 + pgvector / Redis 7）
+docker-compose up -d
+
+# 2. 建测试库（仅首次；已有数据卷不会重跑 entrypoint 脚本）
+docker exec mateos-postgres psql -U mateos -d mateos -c "CREATE DATABASE mateos_test"
+
+# 3. 跑全部测试（单元 + 集成）
+docker run --rm --network mateos_default \
+  -e MATEOS_TEST_POSTGRES="Host=postgres;Port=5432;Database=mateos_test;Username=mateos;Password=mateos_dev_only" \
+  -e MATEOS_TEST_REDIS="redis:6379" \
+  -v "$PWD:/src" -v mateos-nuget:/root/.nuget/packages -w /src \
+  mcr.microsoft.com/dotnet/sdk:10.0 dotnet test mateos.slnx
+```
+
+- **统一在容器内构建/测试**：不依赖本机是否装了 .NET SDK，CI 与本地走同一条路径。
+- 端口：PG `55432`、Redis `16379`（避开默认值与本机保留端口段）。
+- schema 由 `ops/postgres/migrations/*.sql` 显式管理（不用 EF Migrations），
+  启动时自动应用，每个迁移一个事务；SQL 是唯一副本，以嵌入资源打进 API。
+- 集成测试用独立库 `mateos_test` 并每个用例前 TRUNCATE；连接串可用
+  `MATEOS_TEST_POSTGRES` / `MATEOS_TEST_REDIS` 覆盖。
 
 ## 工作约定
 
