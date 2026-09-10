@@ -63,6 +63,15 @@
 - 不等 M8 才补 tracing
 - 否则前面 6 个 milestone 写完后再补会非常痛苦
 
+## 2.1 首个纵向闭环的 Agent 端（v0.4.5 提案 · 待拍板）
+
+M1 的验收不能卡在「Agent 进程从哪来」这个产品级问题上（V1 禁止 `execute_code`，PRD §8 Non Goals）。提案：
+
+- **M1 用 stub Agent 作为测试替身**，但必须**完整实现 Connector 协议**：`hello` / `heartbeat` / `collaboration.decision` / `execution.dispatch` / `execution.event`（带 `provider_event_id` + seq）/ `execution.result` / `execution.resume_request`+`resume_ack`。产出内容是假的，协议行为是真的。
+- 这样 Runtime Gateway、attempt 状态机、lease 取放与重建、event 幂等、resume 连续位点、outbox relay 全部被真实验证；换成真 Agent 时 Runtime 侧零改动。
+- **不建议**「人类在界面手写产出」当作闭环验收：那条路径绕过 dispatch / attempt / lease / resume，等于没验证 Execution 域。
+- 「真 Agent 由谁提供（fork 上游 / 用户自部署 / 其他）」仍是独立拍板项，不因 M1 用 stub 而被决定。
+
 ## 3. 关键设计决策点（实施前必须确认）
 
 （同 v0.4.2）

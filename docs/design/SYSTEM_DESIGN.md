@@ -144,9 +144,9 @@ services/
 | channel | Channel CRUD / 消息读写 / seq 分配 / 投影 | Trigger 解析（归 orchestrator） |
 | mention | Mention 提取 + 投递触发 | Resolver（归 orchestrator） |
 | **collaboration** | Trigger → CollaborationRequest / Decision / 超时重路由 | Execution（归 runtime） |
-| orchestrator | Resolver（lifecycle ∩ activity 过滤）/ Decision 状态机 | |
+| orchestrator | Resolver（lifecycle ∩ slot 过滤，activity 不参与）/ Decision 状态机 | |
 | memory | Memory CRUD / Source 溯源 / 人审门禁 / 索引 | 消息存储 |
-| permission | 7 键 + 3 态（ALLOW/DENY/REQUIRE_APPROVAL）+ 三层覆盖 | UI 配置 |
+| permission | 8 键 + 3 态（ALLOW/DENY/REQUIRE_APPROVAL）+ 三层覆盖 | UI 配置 |
 | agent-registry | Agent CRUD / Credential 绑定 / lifecycle+activity | Execution（归 runtime） |
 | **runtime** | Connector 协议 / Execution / Attempt / Event / Artifact / 心跳 | 业务决策（归 orchestrator） |
 | **work-management** | WorkItem 域 / Built-in + Provider 抽象 | Project 本身 |
@@ -296,10 +296,10 @@ WorkManagementProvider interface
   └─ getStatusMapping() → CanonicalStatusCategory[]
 
 BuiltInProvider（MVP）
-  └─ work_items / work_item_projections 直接读写 PG
+  └─ work_items 直接读写 PG（单表即 canonical 表示）
 
 JiraProvider（V1+ E9）
-  └─ Jira REST + Webhook → 维护 work_item_projections 缓存
+  └─ Jira REST + Webhook → 同步进 work_items（v0.4.5：无 projections 表）
 ```
 
 业务层永远只依赖 `WorkManagementProvider` 接口；`if (provider === 'jira') ...` 永不允许出现。
@@ -341,8 +341,7 @@ JiraProvider（V1+ E9）
 | execution_attempts | 重试/重连的 attempt | E7 |
 | execution_events | 流式事件 | E7 |
 | execution_artifacts | 产物（diff / file / log） | E7 |
-| work_items | Built-in WorkItem | **E8 v0.4 新增** |
-| work_item_projections | Jira 等外部 Provider 的本地缓存 | E8 |
+| work_items | Built-in WorkItem；Provider=Jira 时亦为本地同步表示（单表） | **E8 v0.4 新增** |
 | work_item_bindings | Project × WorkItemProvider 关联 | E8 |
 | work_comments | WorkItem 评论 | E8 |
 | work_relations | WorkItem 关系（blocks / relates_to） | E8 |
@@ -397,7 +396,8 @@ CREATE TABLE collaboration_requests (
   required_capabilities JSONB NOT NULL DEFAULT '[]',
   context_refs          JSONB NOT NULL DEFAULT '{}',    -- {channel_id, message_seq, memory_refs, work_item_id}
   status                TEXT NOT NULL DEFAULT 'PENDING'
-                        CHECK (status IN ('PENDING','ACCEPTED','REJECTED','NEED_CONTEXT','EXECUTING','COMPLETED','FAILED','UNRESOLVED')),
+                        -- v0.4.5：收敛 6 态（AD-I4：CR 不镜像 Execution 状态，EXECUTING/COMPLETED/FAILED 一律禁用）
+                        CHECK (status IN ('PENDING','ACCEPTED','REJECTED','NEED_CONTEXT','UNRESOLVED','CANCELLED')),
   target_execution_id   UUID,                            -- 接受后回填
   deadline_s            INT NOT NULL DEFAULT 600,
   idempotency_key       TEXT UNIQUE,
@@ -440,17 +440,20 @@ CREATE TABLE execution_attempts (
   UNIQUE (execution_id, attempt_no)
 );
 
--- execution_events
+-- execution_events（v0.4.5：变更 #14 协议级幂等落地）
 CREATE TABLE execution_events (
-  id              BIGSERIAL PRIMARY KEY,
-  execution_id    UUID NOT NULL REFERENCES agent_executions(id) ON DELETE CASCADE,
-  attempt_id      UUID REFERENCES execution_attempts(id),
-  event_type      TEXT NOT NULL,                       -- 'STDOUT' | 'PROGRESS' | 'TOOL_CALL' | 'LLM_TICK' | 'ARTIFACT' | 'ERROR'
-  payload         JSONB NOT NULL,
-  trace_id        TEXT,
-  created_at      TIMESTAMPTZ DEFAULT now()
+  id                BIGSERIAL PRIMARY KEY,
+  execution_id      UUID NOT NULL REFERENCES agent_executions(id) ON DELETE CASCADE,
+  attempt_id        UUID NOT NULL REFERENCES execution_attempts(id),  -- v0.4.5：NOT NULL，否则幂等约束形同虚设
+  provider_event_id TEXT NOT NULL,                     -- 协议级幂等键（envelope 必带）
+  event_type        TEXT NOT NULL,                     -- 'STDOUT' | 'PROGRESS' | 'TOOL_CALL' | 'LLM_TICK' | 'ARTIFACT' | 'ERROR'
+  payload           JSONB NOT NULL,
+  trace_id          TEXT,
+  created_at        TIMESTAMPTZ DEFAULT now(),
+  UNIQUE (attempt_id, provider_event_id)               -- 重复投递直接冲突，写入端 ON CONFLICT DO NOTHING
 );
 CREATE INDEX idx_events_execution_time ON execution_events(execution_id, created_at);
+CREATE INDEX idx_events_attempt ON execution_events(attempt_id);
 
 -- execution_artifacts
 CREATE TABLE execution_artifacts (
@@ -484,28 +487,11 @@ CREATE TABLE work_items (
   updated_at          TIMESTAMPTZ DEFAULT now()
 );
 
--- work_item_projections（Jira 等 Provider 的本地缓存）
-CREATE TABLE work_item_projections (
-  id                  UUID PRIMARY KEY,
-  project_id          UUID NOT NULL REFERENCES projects(id),
-  provider_key        TEXT NOT NULL,                    -- 'jira'
-  external_ref        TEXT NOT NULL,                    -- 'PROJ-123'
-  external_url        TEXT,
-  type                TEXT NOT NULL,
-  title               TEXT NOT NULL,
-  status              TEXT NOT NULL,
-  canonical_status_category TEXT NOT NULL,
-  provider_status     TEXT,                             -- 原始 status 字面值
-  assignee_type       TEXT,
-  assignee_id         UUID,
-  due_at              TIMESTAMPTZ,
-  raw_payload         JSONB NOT NULL,                   -- 原始 provider DTO
-  last_sync_at        TIMESTAMPTZ,
-  last_sync_status    TEXT,                             -- 'OK' | 'FAILED' | 'CONFLICT'
-  created_at          TIMESTAMPTZ DEFAULT now(),
-  updated_at          TIMESTAMPTZ DEFAULT now(),
-  UNIQUE (provider_key, external_ref)
-);
+-- v0.4.5：work_item_projections 已删除（变更 #15 / v0.3.1 起）
+-- Jira 等 Provider 的本地同步表示直接落在 work_items 单表，相关列：
+--   provider_key / external_ref / external_url / provider_status / provider_meta
+--   / search_text / raw_payload / last_sync_at / last_sync_status
+-- 索引：UNIQUE (provider_key, external_ref) 建在 work_items 上
 
 -- work_item_bindings（Project × Provider 关联；v0.4 替代 projects.issue_tracker）
 CREATE TABLE work_item_bindings (
@@ -522,11 +508,12 @@ CREATE TABLE work_item_bindings (
 );
 
 -- work_management_connections（Provider OAuth / API key）
+-- v0.4.5（变更 #28）：Org 级共享，一个 Org 可有多条 Connection，不再绑 Project
 CREATE TABLE work_management_connections (
   id              UUID PRIMARY KEY,
   provider_key    TEXT NOT NULL,                        -- 'jira'
-  project_id      UUID NOT NULL REFERENCES projects(id),
-  user_id         UUID NOT NULL REFERENCES users(id),
+  org_id          UUID NOT NULL REFERENCES organizations(id),
+  owner_user_id   UUID NOT NULL REFERENCES users(id),
   access_token_encrypted  BYTEA NOT NULL,
   refresh_token_encrypted BYTEA,
   expires_at      TIMESTAMPTZ,
@@ -541,8 +528,9 @@ CREATE TABLE permissions (
   scope_id     UUID NOT NULL,
   subject_type TEXT NOT NULL CHECK (subject_type IN ('USER','AGENT')),
   subject_id   UUID NOT NULL,
+  -- v0.4.5：8 键（detailed/07 v0.4.3 拆分出 propose_memory）
   perm_key     TEXT NOT NULL CHECK (perm_key IN (
-                'read_message','write_message','write_memory',
+                'read_message','write_message','propose_memory','write_memory',
                 'execute_code','create_pr','approve_memory','manage_channel')),
   effect       TEXT NOT NULL CHECK (effect IN ('ALLOW','DENY','REQUIRE_APPROVAL')),
   created_at   TIMESTAMPTZ DEFAULT now(),
@@ -591,7 +579,7 @@ Agent Runtime Gateway（services/runtime）
 | activity=WAITING_CONTEXT | decision=NEED_CONTEXT | 人类补齐 | 琥珀点 + 计数 |
 | activity=ERROR | Provider 失败 / 限额 | owner 处理 | 红点 + fix_hint |
 
-**Resolver 过滤**：`lifecycle=ACTIVE ∩ activity ∈ {AVAILABLE, THINKING}`（OFFLINE/ERROR/WORKING/WAITING_CONTEXT 排除）
+**Resolver 过滤（v0.4.5 修正 · 变更 #25 / DM-I8）**：`lifecycle=ACTIVE ∩ Redis tryAcquireSlot 成功 ∩ 有效权限 ALLOW`。**activity 不参与调度过滤**，只做 UI 派生；不再按 `{AVAILABLE, THINKING}` 排除候选。
 
 ### 6.3 Execution Domain（v0.4 新增）
 
@@ -628,13 +616,13 @@ retry / reconnect / crash recovery / timeout / cancel / streaming / artifact 全
 | 日/周限额触顶 | activity=ERROR + reason=rate_limit |
 | Sandbox 启动失败（V3） | activity=ERROR |
 
-ERROR 状态下 Agent **不进入 Resolver 候选**（lifecycle 仍是 ACTIVE，只是 activity 异常）。
+**v0.4.5 修正**：`activity=ERROR` **不影响** Resolver 候选——能否接新活只看 `lifecycle=ACTIVE` + 有空闲 slot + 有效权限 ALLOW；activity 仅影响 UI 呈现。真正把 Agent 挡在调度外的是 `agents.health='UNHEALTHY'`（detailed/08 §4.2）与 slot 耗尽。
 
 ### 6.5 Connector 协议（v1.1 — v0.3.1 协议边界拆开）
 
 ```jsonc
 // 通用 envelope
-{ "v": 1, "type": "hello|heartbeat|status|dispatch|event|result|error|resume", "id": "uuid", "ts": 0, "payload": {} }
+{ "v": 1, "type": "hello|heartbeat|status|dispatch|event|result|error|execution.resume_request|execution.resume_ack", "id": "uuid", "ts": 0, "payload": {} }
 
 // E7 拥有
 { "type": "dispatch", "payload": {
@@ -662,8 +650,14 @@ ERROR 状态下 Agent **不进入 Resolver 候选**（lifecycle 仍是 ACTIVE，
     "artifacts": [ { "kind": "FILE", "name": "...", "s3_key": "..." } ]
 }}
 
-{ "type": "resume", "payload": {
-    "execution_id": "...", "last_event_seq": 42
+// v0.4.5（变更 #23）：resume 反向 —— Agent 问、Runtime 答
+{ "type": "execution.resume_request", "payload": {
+    "execution_id": "...", "attempt_no": 1
+}}
+{ "type": "execution.resume_ack", "payload": {
+    "execution_id": "...", "attempt_no": 1,
+    "last_persisted_seq": 41,          // 连续位点（非 MAX(seq)）
+    "snapshot": { "input": {...}, "context": {...}, "deadline_s": 600 }
 }}
 
 // E4 拥有（独立消息名空间，不重叠）
@@ -679,7 +673,7 @@ ERROR 状态下 Agent **不进入 Resolver 候选**（lifecycle 仍是 ACTIVE，
 - Agent 无入站端口（NAT 穿透）；上下文注入走引用；Project 知识边界由服务端强制
 - **v0.3.1 协议边界**：`collaboration.*`（E4）vs `execution.*`（E7）严格分离
 - **v0.3.1 event 幂等**：`provider_event_id` + UNIQUE(attempt_id, provider_event_id) DB 保证
-- **v0.3.1 attempt ≠ WS session**：`execution.resume` 协议补发；reconnect 不新建 attempt
+- **attempt ≠ WS session**：reconnect 走 `execution.resume_request` / `execution.resume_ack`；reconnect 不新建 attempt，Agent 从 `last_persisted_seq + 1` 续发（Runtime 不补发 event——event 是 Agent 产的）
 
 设计原则：Agent 无入站端口（NAT 穿透）；上下文注入走引用；Project 知识边界由服务端强制。
 
@@ -687,9 +681,10 @@ ERROR 状态下 Agent **不进入 Resolver 候选**（lifecycle 仍是 ACTIVE，
 
 ## 7. Permission Model 实现
 
-- 7 个权限键
+- **8 个权限键**（v0.4.5：detailed/07 v0.4.3 拆分出 `propose_memory`；E6 §2.1 仍写 7 键，**待同步**）
 - 3 态：`check(subject, perm, scope) → ALLOW | DENY | REQUIRE_APPROVAL`
 - 三层覆盖：默认矩阵 → Project 覆盖 → Channel 覆盖
+- **没有覆盖行 ≠ 拒绝**：未命中覆盖时回落到默认矩阵（detailed/04 §2.1 已按此修正候选筛选）
 - Redis 缓存 + `perm.changed` pub/sub 失效
 
 ### 7.1 默认矩阵
@@ -698,6 +693,7 @@ ERROR 状态下 Agent **不进入 Resolver 候选**（lifecycle 仍是 ACTIVE，
 | --- | --- | --- | --- |
 | read_message | ALLOW | ALLOW | ALLOW |
 | write_message | ALLOW | ALLOW | ALLOW |
+| **propose_memory**（v0.4.5 新增） | **ALLOW** | **ALLOW** | **ALLOW** |
 | write_memory | REQUIRE_APPROVAL | REQUIRE_APPROVAL | REQUIRE_APPROVAL |
 | execute_code | DENY | DENY | DENY |
 | create_pr | REQUIRE_APPROVAL | DENY | DENY |
@@ -733,6 +729,8 @@ type ProviderKey = string;
 interface WorkManagementProvider {
   readonly key: ProviderKey;
   getCapabilities(): ProviderCapabilities;
+  // v0.4.5（变更 #29）：方法保留，但**只返回 capability 描述**，
+  // 静态 status 模板已删除；status mapping 一律走 listStatuses(binding) 动态拉取
   getSelfMetadata(): Promise<ProviderMetadata>;
   // v0.3.1 改：listStatuses 接受 binding（不是全局模板）
   listStatuses(binding: WorkItemBinding): Promise<ProviderStatus[]>;

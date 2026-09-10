@@ -20,8 +20,8 @@ Permission Model 是 MateOS 安全核心。v0.4 + v0.4.2 关键变化：
 
 ### 2.1 In Scope
 
-- 7 个权限键
-- 默认权限矩阵（v0.4 改：write_memory / create_pr = REQUIRE_APPROVAL）
+- **8 个权限键**（v0.4.5：detailed/07 v0.4.3 从 `write_memory` 拆出 `propose_memory`，与 SYSTEM_DESIGN §7 对齐）
+- 默认权限矩阵（v0.4 改：write_memory / create_pr = REQUIRE_APPROVAL；`propose_memory` = ALLOW）
 - Project 级 / Channel 级覆盖
 - `check(subject, perm, scope) → ALLOW | DENY | REQUIRE_APPROVAL`（v0.4 改三态）
 - **v0.4.2 改** `policy.evaluate()` 业务层显式调用（不带"放行"含义）

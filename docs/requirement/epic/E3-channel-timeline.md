@@ -89,8 +89,12 @@ CREATE TABLE messages (
   created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
   deleted_at     TIMESTAMPTZ,
   PRIMARY KEY (channel_id, seq)
-) PARTITION BY RANGE (created_at);
--- 按月分区
+);
+-- v0.4.5：删除 PARTITION BY RANGE(created_at)
+--   （1）PG 16 声明式分区要求唯一约束必须包含分区键，PK (channel_id, seq) 建不出来
+--   （2）Prisma migrate 管理不了声明式分区（架构评审「Prisma vs PG 分区」）
+-- 替代：保留 (channel_id, seq) 主键 + 按月归档 job（V1+ 再评估分区）
+CREATE INDEX idx_messages_channel_time ON messages(channel_id, created_at DESC);
 ```
 
 ### 3.1 content 五形态 schema（v0.4 projection）
