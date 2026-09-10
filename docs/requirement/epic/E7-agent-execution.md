@@ -4,10 +4,10 @@
 | --- | --- |
 | Epic ID | E7 |
 | 标题 | Agent Execution |
-| 阶段 | MVP（M8） |
-| 上游 | PRD v0.4 / SYSTEM_DESIGN v0.3.2 / v0.4.1 协议边界 / v0.4.2 幂等收口 |
+| 阶段 | S1（一句话 → 产出主链路的执行端点；能力域 M8） |
+| 上游 | PRD v0.4 / SYSTEM_DESIGN v0.9 / detailed 01·03·10（D9 冻结：由 E4 直调创建 Execution） |
 | 下游 | E4（Accept → 调 E7 API 创建 Execution）、E8（work_item_ref optional）、E10 |
-| 状态 | Draft（v0.4.2 幂等收口） |
+| 状态 | Draft（v0.9 同步：attempt 枚举补 INTERRUPTED + dispatch_ack + active_attempt_no） |
 
 ## 1. 背景与动机
 
@@ -64,10 +64,16 @@ CREATE TABLE execution_attempts (
   attempt_no          INT NOT NULL,
   runtime_session_id  TEXT,
   status              TEXT NOT NULL
-                      CHECK (status IN ('STARTED','RUNNING','COMPLETED','FAILED')),
+                      -- v0.9 同步：与 SYSTEM_DESIGN §5.2 / detailed 01 §4.4 统一为 5 值
+                      -- CANCELLED / TIMEOUT 的执行终态映射到 attempt='INTERRUPTED'
+                      CHECK (status IN ('STARTED','RUNNING','COMPLETED','FAILED','INTERRUPTED')),
   started_at          TIMESTAMPTZ,
   completed_at        TIMESTAMPTZ,
   error               TEXT,
+  -- v0.9 同步（SYSTEM_DESIGN §5.2 变更 #35）：dispatch 与续传位点
+  dispatch_sent_at    TIMESTAMPTZ,       -- Runtime 推 execution.dispatch 的时刻
+  dispatch_acked_at   TIMESTAMPTZ,       -- 收到 execution.dispatch_ack 的时刻（03 §7）
+  last_persisted_seq  BIGINT,            -- resume 连续位点（03 §3.2），非 MAX(seq)
   UNIQUE (execution_id, attempt_no)
 );
 

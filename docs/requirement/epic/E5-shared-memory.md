@@ -4,10 +4,10 @@
 | --- | --- |
 | Epic ID | E5 |
 | 标题 | Shared Context & Memory |
-| 阶段 | MVP（M5，v0.3 起从 V2 提前） |
-| 上游 | PRD v0.4 §5 FR-6 / SYSTEM_DESIGN v0.3 §4.3 / §5.2 memory_proposals + memory_items / UI DS v0.5 §5.1 |
+| 阶段 | S2（记忆闸门；能力域 M5，v0.3 起从 V2 提前） |
+| 上游 | PRD v0.4 §5 FR-6 / SYSTEM_DESIGN v0.9 §4.3 / §5.2 memory_proposals + memory_items / UI DS v0.7 §5.1 |
 | 下游 | E4（Need Context 触发记忆搜索）、E7（dispatch 注入 memory_refs）、E8（WorkItem 可选引用 memory） |
-| 状态 | Draft（v0.4 微调） |
+| 状态 | Draft（v0.9 同步：type/scope_type 两维 + PERSONAL 不参与 project 过滤） |
 
 ## 1. 背景与动机
 

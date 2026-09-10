@@ -1,6 +1,6 @@
 # Detailed Design · Overview
 
-> 配套：PRD v0.4 / SYSTEM_DESIGN v0.3.2 / UI DS v0.6 / E1-E10 epic docs。
+> 配套：PRD v0.4 / SYSTEM_DESIGN v0.9 / UI DS v0.7 / E1-E10 epic docs。
 > 本目录是 **implementation spec**——比 epic 更细，比代码更抽象。
 > 每篇独立可读，但引用前置依赖。
 
@@ -19,7 +19,7 @@
 | [09-implementation-checklist.md](./09-implementation-checklist.md) | **S1/S2/S3 竖切实施顺序 + 能力域标签 + DoD** | 先做哪一刀、阻塞关系、每刀验收 |
 | [10-agent-stub-and-sdk.md](./10-agent-stub-and-sdk.md) | **S1 的 Agent 端：stub + SDK 契约** | 协议面、B1–B8 行为矩阵、与 Runtime 的边界 |
 
-## 全局架构图（一致于 SYSTEM_DESIGN v0.3.2）
+## 全局架构图（一致于 SYSTEM_DESIGN v0.9）
 
 ```
                        Client (Web / Desktop)

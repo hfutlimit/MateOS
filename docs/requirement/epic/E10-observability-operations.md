@@ -4,10 +4,10 @@
 | --- | --- |
 | Epic ID | E10 |
 | 标题 | Observability & Operations |
-| 阶段 | MVP（M9） |
-| 上游 | PRD v0.4 / SYSTEM_DESIGN v0.3 §11 / v0.3 旧 E8 升级（编号顺延） |
+| 阶段 | S1（随主链路审计；能力域 M9） |
+| 上游 | PRD v0.4 / SYSTEM_DESIGN v0.9 §11 / v0.3 旧 E8 升级（编号顺延） |
 | 下游 | 所有 epic（audit / 监控 / 通知） |
-| 状态 | Draft（v0.4 重命名 E8→E10） |
+| 状态 | Draft（v0.9 同步：补 E6 权限变更审计触发点） |
 
 ## 1. 背景与动机
 

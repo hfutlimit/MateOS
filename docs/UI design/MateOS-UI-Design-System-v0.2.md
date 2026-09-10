@@ -1,4 +1,4 @@
-# MateOS UI Design System v0.6
+# MateOS UI Design System v0.7
 
 | 文档信息 | 内容 |
 | --- | --- |

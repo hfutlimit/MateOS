@@ -4,10 +4,10 @@
 | --- | --- |
 | Epic ID | E6 |
 | 标题 | Authorization & Approval |
-| 阶段 | MVP（M4 同步） |
-| 上游 | PRD v0.4 §5 FR-9 / §6 / SYSTEM_DESIGN v0.3 §7 / UI DS v0.5 |
-| 下游 | E1（subject）/ E2（can_execute/can_review 已删除；仅作为受控对象）/ E3（channel scope）/ E4（permission 决策依据）/ E5（write_memory = REQUIRE_APPROVAL）/ E7（execute_code / create_pr） |
-| 状态 | Draft（v0.4 修订版） |
+| 阶段 | S1（随 E4 同步；能力域 M4） |
+| 上游 | PRD v0.4 §5 FR-9 / §6 / SYSTEM_DESIGN v0.9 §7 / UI DS v0.7 |
+| 下游 | E1（subject）/ E2（can_execute/can_review 已删除；仅作为受控对象）/ E3（channel scope）/ E4（permission 决策依据）/ E5（propose_memory = ALLOW，write_memory = REQUIRE_APPROVAL）/ E7（execute_code / create_pr） |
+| 状态 | Draft（v0.9 同步：权限键 8 个，含 propose_memory） |
 
 ## 1. 背景与动机
 
@@ -204,7 +204,7 @@ function policy(): {
 
 - **被依赖**：E1/E2/E3/E4/E5/E7/E8 全部 Guard 调用
 - **依赖**：E1（subject + scope）
-- **冲突裁决**：三层合并 Channel > Project > 默认（SD v0.3 §7）
+- **冲突裁决**：三层合并 Channel > Project > 默认（SD v0.9 §7）；权限键 8 个
 
 ## 9. 风险与开放问题
 

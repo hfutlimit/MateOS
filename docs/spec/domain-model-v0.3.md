@@ -2,10 +2,10 @@
 
 | 项 | 内容 |
 | --- | --- |
-| 状态 | **Draft · 待拍板**。定稿后再回修 SYSTEM_DESIGN 与 Epic，**不要在此之前改主文档** |
-| 日期 | 2026-09-08 |
-| 上游 | PRD v0.4 / SYSTEM_DESIGN v0.3.2 / 2026-09-08 架构评审 |
-| 下游 | 定稿后 → 一次性回修 SYSTEM_DESIGN 7 处 + Epic 5 处 |
+| 状态 | **已收敛**（2026-09-10）：D1/D2/D3/D5 已拍板并落地；§6 的 10 处回修已全部完成。仅 D4（Demo 额度）仍开放，不阻塞 S1 |
+| 日期 | 2026-09-08（2026-09-10 收口） |
+| 上游 | PRD v0.4 / SYSTEM_DESIGN v0.9 / 2026-09-08 架构评审 |
+| 下游 | §6 的 10 处已回修完毕（v0.4.5 → v0.7）；§7 拍板结论见下 |
 
 ---
 
@@ -203,25 +203,29 @@ Conversation Domain          Work Domain
 
 | # | 位置 | 按哪条改 |
 | --- | --- | --- |
-| 1 | L394 `collaboration_requests` CHECK 含 EXECUTING/COMPLETED/FAILED | 收敛 6 态 |
-| 2 | §6.2 Resolver 用 activity 过滤 | I8（改 slot） |
-| 3 | L339 / L482 `work_item_projections` | v0.3.1 已删 |
-| 4 | L659 旧 `resume` 协议 | 改 resume_request / resume_ack |
-| 5 | L438 `execution_events` 缺幂等键 | I6 |
-| 6 | L519 `work_management_connections` 仍 project 级 | 改 org 级 |
-| 7 | L730 残留 `getSelfMetadata()` | 删 |
-| 8 | `messages` 表 `PARTITION BY RANGE(created_at)` + PK `(channel_id, seq)` | **PG 建不出来**，分区键必须在唯一约束内；MVP 建议不分区 |
-| 9 | E5 §5.1 缺 `policy.evaluate('write_memory')` 调用点 | 补 |
-| 10 | E10 §3.1 审计触发点缺 E6 | I10 |
+| 1 | L394 `collaboration_requests` CHECK 含 EXECUTING/COMPLETED/FAILED | 收敛 6 态 | ✅ v0.4.5 已修 |
+| 2 | §6.2 Resolver 用 activity 过滤 | I8（改 slot） | ✅ v0.4.5 已修（activity 不参与调度） |
+| 3 | L339 / L482 `work_item_projections` | v0.3.1 已删 | ✅ 已删（架构图/表清单/DDL 三处） |
+| 4 | L659 旧 `resume` 协议 | 改 resume_request / resume_ack | ✅ v0.4.5 已修 |
+| 5 | L438 `execution_events` 缺幂等键 | I6 | ✅ v0.4.5 已修（attempt_id + provider_event_id NOT NULL + UNIQUE） |
+| 6 | L519 `work_management_connections` 仍 project 级 | 改 org 级 | ✅ v0.4.5 已修 |
+| 7 | L730 残留 `getSelfMetadata()` | 删 | ✅ v0.4.5 改口径：保留方法、只返 capability（UI 需自描述来源） |
+| 8 | `messages` 表 `PARTITION BY RANGE(created_at)` + PK `(channel_id, seq)` | **PG 建不出来**，分区键必须在唯一约束内；MVP 建议不分区 | ✅ v0.4.5 已修（E3 去分区 + 加时间索引 + 归档 job） |
+| 9 | E5 §5.1 缺 `policy.evaluate('propose_memory')` 调用点 | 补 | ✅ v0.7 已修（口径由 `write_memory` 更正为 `propose_memory`） |
+| 10 | E10 §3.1 审计触发点缺 E6 | I10 | ✅ v0.7 已修（PERMISSION_GRANTED / REVOKED / OVERRIDE_CHANGED） |
+
+> **状态**：以上 10 处回修**已全部落地**（v0.4.5 / v0.6 / v0.7，commit 717315a → 590ce37）。本表保留为追溯记录，不再是待办。
 
 ---
 
-## 7. 待拍板
+## 7. 拍板结论（原 §7 待拍板，2026-09-10 收口）
 
-| # | 问题 | 建议 |
-| --- | --- | --- |
-| D1 | Execution 是否可独立存在 | **是**（I2）。上一轮已达成一致 |
-| D2 | Project 是否改名 Workspace | **不改**。改名收益 < 同步成本；职责按 §2 定义为 Context Boundary |
-| D3 | Memory scope 是否收为两级 | **是**（I4）。这是本轮唯一的实质收口，需要确认 |
-| D4 | 试用额度形态 | **Demo Mode（有限额度，仅 onboarding）+ BYOK**，不做全平台承担。Demo 模式下 Memory 人审门禁**不得跳过** |
-| D5 | 是否接受 §0 的"主语判据"作为防退化规则 | 建议接受，并写进 PRD §1 |
+| # | 问题 | 结论 | 落地位置 |
+| --- | --- | --- | --- |
+| D1 | Execution 是否可独立存在 | ✅ **是**（I2） | SYSTEM_DESIGN §1.2；S3 验收含独立 Execution 的 UI 出口 |
+| D2 | Project 是否改名 Workspace | ✅ **不改**。改名收益 < 同步成本；职责按 §2 定义为 Context Boundary | 本文件 §2 / SYSTEM_DESIGN §1.2 |
+| D3 | Memory scope 是否收为两级 | ✅ **是**（I4）。已确认并落地 | SYSTEM_DESIGN §5.2（`type` 4 类 + `scope_type` 两维）；E5 / detailed 05 |
+| D4 | 试用额度形态 | ⏳ **仍开放**（额度未定义）：Demo Mode（有限额度，仅 onboarding）+ BYOK。Demo 模式下 Memory 人审门禁**不得跳过** | 不阻塞 S1（S1 用 stub，不需真 key） |
+| D5 | 是否接受 §0 的"主语判据"作为防退化规则 | ✅ **接受**，已写进 PRD §1 与 README 工作约定（Domain Entity ≠ UI Navigation Entity） | PRD §1.2 / README |
+
+> **D7 / D9 / D10 结论不在本文档**（属实施与协议口径）：D7 竖切 = `detailed/09 §1`；D9 = `detailed/01 §1.1` + `detailed/04 §2.1`；D10 stub = `detailed/10`。

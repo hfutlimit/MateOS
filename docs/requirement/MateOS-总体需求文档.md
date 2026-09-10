@@ -1,12 +1,14 @@
-# MateOS 总体需求文档（PRD v0.4）
+# MateOS 总体需求文档（PRD v0.9）
 
 | 文档信息 | 内容 |
 | --- | --- |
 | 产品名称 | MateOS（备选：MatePro / Crewly / Memora） |
-| 文档状态 | Draft（v0.4，架构评审修订） |
-| 版本 | v0.4 |
-| 日期 | 2026-09-08 |
-| 下游文档 | 系统设计文档 SYSTEM_DESIGN v0.3、UI Design System v0.5、Epic 文档 E1-E10 |
+| 文档状态 | Draft（v0.9，Product/UX 收口；SSOT：产品承诺 / Journey / FR） |
+| 版本 | **v0.9** |
+| 日期 | 2026-09-10（v0.4 架构基线 2026-09-08） |
+| 下游文档 | 系统设计文档 SYSTEM_DESIGN v0.9、UI Design System v0.7、Epic 文档 E1-E10 |
+
+> **版本说明**：架构基线仍为 v0.4（下条摘要所述），v0.5–v0.9 是**同基线内的收口**（技术栈 / D7 竖切 / D9 口径 / stub / Product-UX），不推翻架构。此前文件头停在 v0.4 而正文已含 v0.8 内容，本次对齐。
 
 > **v0.3 → v0.4 变更摘要**（架构评审后推倒重来）：
 > 1. **删除 AgentBoard execution backend 概念**——MateOS 永远是自洽执行域；AgentBoard 不再出现在 architecture diagram、Project schema、Runtime dispatch path
@@ -503,7 +505,7 @@ Permission / User
 
 ## 12. 后续步骤
 
-1. SYSTEM_DESIGN v0.3：新增 Agent Execution domain / Work Management Core + Integrations 拆分 / 数据模型更新
+1. SYSTEM_DESIGN v0.9：新增 Agent Execution domain / Work Management Core + Integrations 拆分 / 数据模型更新
 2. UI Design System v0.5：P4 改 Work Management 动态表单 / 新增 Work 页面
 3. Epic E1-E10 按新边界重写
 4. 启动 M1（E1 Identity & Workspace 编码）
@@ -518,3 +520,5 @@ Permission / User
 | v0.2 | 2026-09-07 | 吸收外部架构师 review：Project 实体 / V1 范围 / Permission Model / Capability 结构化 / Memory Source 溯源 |
 | v0.3 | 2026-09-08 | 原型评审修订：执行层回归自洽 / 6 态 / Shared Memory 提前 MVP / 外部集成扩展点 |
 | v0.4 | 2026-09-08 | 架构评审推倒：删除 AgentBoard execution / 新增 Work Management 域 / CollaborationRequest 一等 / lifecycle 与 activity 拆分 / Capability 与 Permission 单一事实源 / Permission effect 改 `REQUIRE_APPROVAL` / 消息流改 projection / 重新切成 10 个 Epic |
+| v0.5–v0.8 | 2026-09-10 | 同基线收口（未推翻 v0.4 架构）：技术栈拍板 .NET；D7 实施切法改 S1/S2/S3 竖切；D9 冻结 E4 直调 E7 + outbox 兜底；S1 的 Agent 端定为 stub；D1/D2/D3/D5 拍板落地 |
+| v0.9 | 2026-09-10 | **Product/UX 收口**：新增 §1.2 User Promise 与三条 Primary Journey；新增 **FR-10 Human Attention / Needs You**（含硬性 UX invariant：每条必须有可执行动作）；FR-5 Resolver 更正（activity 不参与调度）；FR-9 权限键改 8 键；§2.3 协作边界改为 V1 四项 + Future 四项；文件头版本与正文对齐 |

@@ -4,10 +4,10 @@
 | --- | --- |
 | Epic ID | E3 |
 | 标题 | Channel & Timeline |
-| 阶段 | MVP（M2） |
-| 上游 | PRD v0.4 §5 FR-8 / SYSTEM_DESIGN v0.3 §3 channel / §5 messages / §5.2 |
+| 阶段 | S1（一句话 → 产出主链路的入口；能力域 M2） |
+| 上游 | PRD v0.4 §5 FR-8 / SYSTEM_DESIGN v0.9 §3 channel / §5 messages / §5.2 |
 | 下游 | E4（Trigger 来源）/ E5（记忆申请投影）/ E7（execution 输出投影）/ E10（audit 写消息） |
-| 状态 | Draft（v0.4 架构修订版） |
+| 状态 | Draft（v0.9 同步：去分区 + client_msg_id 部分唯一索引） |
 
 ## 1. 背景与动机
 
@@ -232,7 +232,7 @@ CREATE UNIQUE INDEX uq_messages_client_msg
 
 - **被依赖**：E4（消息载体 + Trigger 提取）/ E5（记忆申请投影）/ E7（execution 输出投影）/ E10（audit）
 - **依赖**：E1（Project + Member）
-- **冲突裁决**：5 形态只投影不复制（PRD v0.4 §5 FR-8 / SD v0.3 §5.2）
+- **冲突裁决**：5 形态只投影不复制（PRD v0.4 §5 FR-8 / SD v0.9 §5.2）
 
 ## 9. 风险与开放问题
 

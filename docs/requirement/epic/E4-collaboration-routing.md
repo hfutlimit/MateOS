@@ -4,10 +4,10 @@
 | --- | --- |
 | Epic ID | E4 |
 | 标题 | Collaboration & Routing |
-| 阶段 | MVP（M4） |
-| 上游 | PRD v0.4 / SYSTEM_DESIGN v0.3.2 / v0.3.1 协议收口 / v0.3.2 capacity 原子化 |
+| 阶段 | S1（一句话 → 产出主链路的调度核心；能力域 M4） |
+| 上游 | PRD v0.4 / SYSTEM_DESIGN v0.9 / detailed 01·04（D9 冻结：E4 直调 E7 + outbox 兜底） |
 | 下游 | E3（消息载体 + Trigger 提取）、E7（Accept → 创建 Execution）、E10（audit） |
-| 状态 | Draft（v0.4.2 capacity 原子化） |
+| 状态 | Draft（v0.9 同步：D7 竖切 + D9 口径 + per-lease ZSET fencing） |
 
 ## 1. 背景与动机
 

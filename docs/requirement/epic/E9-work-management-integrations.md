@@ -4,10 +4,10 @@
 | --- | --- |
 | Epic ID | E9 |
 | 标题 | Work Management Integrations |
-| 阶段 | V1+（PRD v0.4 §10.2 / SD v0.3.2 §9.5 Jira Provider） |
-| 上游 | E8（v0.4.2 WorkItem 域 + Provider 抽象 + Org 级 Connection） |
+| 阶段 | V1+（PRD v0.4 §10.2 / SD v0.9 §9.5 Jira Provider） |
+| 上游 | E8（v0.9 WorkItem 域 + Provider 抽象 + Org 级 Connection） |
 | 下游 | 无（E9 是叶子） |
-| 状态 | Draft（V1+ 阶段详细化 + v0.4.2 同步） |
+| 状态 | Draft（v0.9 同步） |
 
 ## 1. 背景与动机
 

@@ -15,31 +15,35 @@
 
 | Epic | 标题 | 阶段 | 主依赖 | 文档 |
 | --- | --- | --- | --- | --- |
-| **E1** | Identity & Workspace | MVP（M1） | — | [E1-identity-workspace.md](./E1-identity-workspace.md) |
-| **E2** | Agent Registry | MVP（M3） | E1 | [E2-agent-registry.md](./E2-agent-registry.md) |
-| **E3** | Channel & Timeline | MVP（M2） | E1 | [E3-channel-timeline.md](./E3-channel-timeline.md) |
-| **E4** | Collaboration & Routing | MVP（M4） | E2, E3, E6 | [E4-collaboration-routing.md](./E4-collaboration-routing.md) |
-| **E5** | Shared Context & Memory | MVP（M5） | E1, E3, E6 | [E5-shared-memory.md](./E5-shared-memory.md) |
-| **E6** | Authorization & Approval | MVP（M4 同步） | E1 | [E6-authorization-approval.md](./E6-authorization-approval.md) |
-| **E7** | Agent Execution | MVP（M8） | E2, E4 | [E7-agent-execution.md](./E7-agent-execution.md) |
-| **E8** | Work Management Core | MVP（M6） | E1, E6 | [E8-work-management-core.md](./E8-work-management-core.md) |
+| **E1** | Identity & Workspace | S1（能力域 M1） | — | [E1-identity-workspace.md](./E1-identity-workspace.md) |
+| **E2** | Agent Registry | S1（能力域 M3a/M3b） | E1 | [E2-agent-registry.md](./E2-agent-registry.md) |
+| **E3** | Channel & Timeline | S1（能力域 M2） | E1 | [E3-channel-timeline.md](./E3-channel-timeline.md) |
+| **E4** | Collaboration & Routing | S1（能力域 M4） | E2, E3, E6 | [E4-collaboration-routing.md](./E4-collaboration-routing.md) |
+| **E5** | Shared Context & Memory | S2（能力域 M5） | E1, E3, E6 | [E5-shared-memory.md](./E5-shared-memory.md) |
+| **E6** | Authorization & Approval | S1（随 E4；能力域 M4） | E1 | [E6-authorization-approval.md](./E6-authorization-approval.md) |
+| **E7** | Agent Execution | S1（能力域 M8） | E2, E4 | [E7-agent-execution.md](./E7-agent-execution.md) |
+| **E8** | Work Management Core | S3（能力域 M6） | E1, E6 | [E8-work-management-core.md](./E8-work-management-core.md) |
 | **E9** | Work Management Integrations | V1+ | E8 | [E9-work-management-integrations.md](./E9-work-management-integrations.md) |
-| **E10** | Observability & Operations | MVP（M9） | 全部 | [E10-observability-operations.md](./E10-observability-operations.md) |
+| **E10** | Observability & Operations | S1（随主链路；能力域 M9） | 全部 | [E10-observability-operations.md](./E10-observability-operations.md) |
 
-## 实施顺序（M1-M9，对齐 SYSTEM_DESIGN v0.3 §11）
+## 实施顺序（S1/S2/S3 竖切，对齐 SYSTEM_DESIGN v0.9 §11 与 detailed/09 §1）
 
 ```
-M1 ──► E1 (Identity & Workspace)
-M2 ──► E3 (Channel & Timeline)
-M3 ──► E2 (Agent Registry)
-M4 ──► E6 (Authorization) + E4 (Collaboration & Routing)
-M5 ──► E5 (Shared Memory)
-M6 ──► E8 (Work Management Core)
-M7 ──► (gap, optional refactor)
-M8 ──► E7 (Agent Execution)
-M9 ──► E10 (Observability)
+S1 ──► E1 (Identity & Workspace) ──► E3 (Channel & Timeline) ──► E2 (Agent Registry)
+       ──► E6 (Authorization) + E4 (Collaboration & Routing) ──► E7 (Agent Execution)
+       ──► E10 (Observability，随主链路审计)
+         —— 端到端验收：Channel 里 @agent → 接受 → 执行 → 产出回帖，全程可审计
+
+S2 ──► E5 (Shared Context & Memory)
+         —— 端到端验收：propose_memory → 人审 → memory_items → 检索 → dispatch 注入
+
+S3 ──► E8 (Work Management Core)
+         —— 端到端验收：WorkItem → @agent 执行 → 回帖 + 状态更新
+
 V1+ ─► E9 (Work Management Integrations - Jira)
 ```
+
+> **M1–M9 已退为能力域标签**（D7 竖切，2026-09-10 拍板）：M 号只用于标记「这块能力属于哪个域」，**不再是交付里程碑**。唯一实施基线 = [`detailed/09-implementation-checklist.md`](../../design/detailed/09-implementation-checklist.md) §1（S1/S2/S3 竖切 + 按刀 DoD）。
 
 ## 依赖矩阵
 

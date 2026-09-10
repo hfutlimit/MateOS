@@ -2,7 +2,7 @@
 
 > **v0.4.3 修正**：Execution **必须**在 Agent 推 `collaboration.decision: ACCEPT` 之后由 E4 调 E7 内部 API 创建。
 > 详细设计原版（P0-1 错误）：Resolver 选中后立即 create_execution → 把 execution lifecycle 提前到 decision 之前。
-> 修复：Runtime Gateway 推 `collaboration.request`（transport 消息）→ Agent 推 `collaboration.decision` → ACCEPT 后 E4 写 outbox → outbox worker 调 E7 创建 Execution。
+> 修复：Runtime Gateway 推 `collaboration.request`（transport 消息）→ Agent 推 `collaboration.decision` → ACCEPT 后 **E4 事务外同步直调 E7 创建 Execution**，同时写 `collaboration.accepted` outbox 事件**仅作兜底重试**（**D9 冻结口径**，与 04 §2.1 / 187 §1.1 一致）。
 > 前置：[00-overview.md](./00-overview.md) / [04-resolver-and-routing.md](./04-resolver-and-routing.md) / [03-ws-connection-and-resume.md](./03-ws-connection-and-resume.md)
 
 ## 0. 范围
@@ -449,7 +449,11 @@ async def handle_execution_result(execution_id, attempt_no, envelope_id, status)
 ## 5. Idempotency 关键约束
 
 ```sql
+```sql
 -- E4 → E7 create execution 幂等
+-- 见 §4.5：UNIQUE(collaboration_request_id) 保证一个 CR 至多一个 Execution
+-- 创建路径有两条，但只有一条会真正生效（T+13 直调优先；T+14b 兜底仅在前者失败/崩溃时执行）
+```
 ALTER TABLE agent_executions
   ADD CONSTRAINT uq_executions_collab UNIQUE (collaboration_request_id);
 
@@ -469,7 +473,7 @@ ALTER TABLE memory_items
 | Resolver 选 Agent + tryAcquireSlot | < 500ms | Redis Lua + capability 算分 |
 | E4 推 `collaboration.request` WS | < 200ms | WS push |
 | Agent 推 `collaboration.decision` | 由 Agent 决定 | LLM 三件套判断 |
-| **ACCEPT → E4 写 decision + outbox + outbox worker 调 E7** | **< 300ms** | **PG 事务 + outbox 投递 + 内部 API** |
+| **ACCEPT → E4 写 decision + CAS CR + outbox + E4 直调 E7 建 Execution** | **< 300ms** | **PG 事务 + outbox 投递 + 内部 API** |
 | E7 dispatch 到 Agent | < 200ms | WS push |
 | Agent 推 result | 由 Agent 决定 | LLM 主导 |
 | E7 CAS + outbox | < 200ms | PG 事务 |
@@ -478,25 +482,25 @@ ALTER TABLE memory_items
 
 ## 7. 关键不变量
 
-1. **execution_id 唯一**：每个 `collaboration.accepted` outbox 事件对应一个 execution（UNIQUE constraint）
+1. **execution_id 唯一**：一个 `collaboration.accepted` outbox 事件对应一个 execution（UNIQUE(collaboration_request_id) + outbox 幂等）
 2. **attempt_no 单调**：每个 execution 的 attempt_no 从 1 开始，严格 +1
 3. **provider_event_id 单 attempt 内唯一**：UNIQUE(attempt_id, provider_event_id) DB 强制
 4. **envelope.id 全局唯一**：Runtime 给每个 envelope 分配 UUID，DB 落 `terminal_envelope_id` 去重
 5. **CAS 状态转换**：所有终态变更都带 `WHERE status IN ('PENDING','RUNNING')`
 6. **outbox 事务性**：状态变更 + outbox INSERT 同事务（要么都有要么都无）
-7. **Decision-before-Execution**（v0.4.3 关键）：Execution 只在 collab.status=ACCEPTED 后由 outbox worker 创建
+7. **Decision-before-Execution**（v0.4.3 关键）：Execution 只在 collab.status=ACCEPTED 后创建 —— **由 E4 事务外同步直调 E7**（D9 冻结口径），outbox worker 只在直调失败/进程崩溃时兜底补建
 8. **Decision 事实源唯一**：decision_records 仅 E4 写，E7 绝不允许写
 
 ## 8. 失败处理
 
 | 失败点 | 行为 | 重试 |
 | --- | --- | --- |
-| E4 → E7 内部 API 失败 | outbox worker retry（指数退避） | 自动 |
+| E4 → E7 内部 API 失败（T+13 直调） | CR 已是 ACCEPTED 不回滚；由 T+14b outbox worker 兜底补建 + 指数退避 | 自动 |
 | E7 dispatch 失败（Agent 离线） | collab.timeout_s（默认 600s）触发 E4 取消 + 释放 lease | 超时 |
 | Agent 推 result 失败（WS 断） | 落 `agent_executions.status='RUNNING'`，等 Agent 重连 | resume_request |
 | Agent 推 status 失败 | 落 `agents.activity=OFFLINE`（90s 后由 heartbeat 扫） | 重新 dispatch |
 | E7 CAS 失败（status 已是终态） | 忽略，audit 记 "stale_terminal" | 不会重复释放 lease |
-| outbox worker 投递失败 | attempt_count + 1，next_attempt_at 退避 | 自动 retry |
+| outbox worker 兜底投递失败 | attempt_count + 1，next_attempt_at 退避 | 自动 retry |
 | DB crash | outbox_events 在 PG → 事务保证；DB 恢复后 outbox worker 继续 | 启动时扫未投递 |
 
 ## 9. E2E 验收点
@@ -519,11 +523,12 @@ e2e/01-single-agent-lifecycle/
     Then 不创建 execution（agent_executions 无新行）
     And  lease 立即释放
 
-  test_003_outbox_durability.json           # v0.4.3 新增
+  test_003_outbox_fallback_durability.json   # v0.4.3 新增（v0.9 校准注释）
     Given E4 写完 decision + outbox
-    When 进程 crash 在调 E7 之前
-    Then 重启后 outbox worker 自动调 E7 创建 execution
+    When T+13 直调 E7 之前进程 crash（Execution 尚未创建）
+    Then 重启后 outbox worker **兜底**调 E7 创建 execution
     And  collab_request.status=ACCEPTED（不变）
+    # 注意：正常路径下 Execution 由 T+13 E4 直调创建，此用例只覆盖兜底分支
 
   test_004_idempotency.json
     When 重复推同一个 result envelope.id

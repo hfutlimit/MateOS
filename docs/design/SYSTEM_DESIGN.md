@@ -1,12 +1,12 @@
-# MateOS 系统架构设计（SYSTEM_DESIGN v0.5）
+# MateOS 系统架构设计（SYSTEM_DESIGN v0.9）
 
 | 文档信息 | 内容 |
 | --- | --- |
 | 上游文档 | docs/requirement/MateOS-总体需求文档.md（PRD v0.4） |
-| 文档状态 | Draft |
-| 版本 | **v0.5** |
+| 文档状态 | Draft（SSOT：表结构 / 协议 / 缓存 / UI Projection 的唯一事实源） |
+| 版本 | **v0.9** |
 | 日期 | 2026-09-10 |
-| 本版要点 | v0.4.5 正文回修（8 处硬冲突）+ v0.5 技术栈拍板 .NET / capacity rebuild fencing / webhook durable inbox / dispatch_ack / outbox_events 与 DDL 收口 —— 明细见文末「更新记录」，历史推理见 `docs/review/` |
+| 本版要点 | v0.8 Product/UX 收口（§11 UI Projection & Human Attention Model / Progressive Disclosure 三级）；v0.7 per-lease ZSET fencing + `dispatch_ack` 语义定型 + `propose_memory` 门禁；v0.6 **D7 竖切（S1/S2/S3）与 D9（E4 直调 E7）双冻结**；v0.5 技术栈拍板 .NET + DDL 收口 —— 明细见文末「更新记录」，历史推理见 `docs/review/` |
 | 前提 | **MateOS 为独立自洽系统**：Agent Execution 域自研（永久不切到任何外部执行后端）；Work Management 是独立域（Built-in + Jira Provider 抽象，与 Execution 完全解耦） |
 
 > **v0.2 → v0.3 变更摘要**（架构评审后推倒重来）：
@@ -1049,7 +1049,7 @@ Needs You（Decision / Information / Approval / Problems）
 | M9 | 集成 + 端到端 | 全部 |
 | V1+ | Jira Provider 适配器 | E9 |
 
-> 评审建议改为 **S1/S2/S3 竖切**（@mention→产出 / 记忆闸门 / 工作推进），**尚未拍板**（见 `docs/review/`）。
+> **D7 已拍板（2026-09-10）**：实施切法 = **S1/S2/S3 竖切**（`@mention`→产出 / 记忆闸门 / 工作推进），M1–M9 退为能力域标签。本节即落地口径，与 [`detailed/09-implementation-checklist.md`](detailed/09-implementation-checklist.md) §1 一致；竖切不再是"评审建议"。
 
 ---
 
@@ -1065,3 +1065,4 @@ Needs You（Decision / Information / Approval / Problems）
 | v0.6 | 2026-09-10 | **D9 冻结**：ACCEPT 后由 E4 事务外直调 E7 创建 Execution，outbox 仅兜底重试（§11 同步）；**D7 拍板**：实施切法改 **S1/S2/S3 竖切**，M1–M9 退为能力域标签（§11 重写）；**S1 的 Agent 端 = stub**（新增 `detailed/10-agent-stub-and-sdk.md`，B1–B8 行为矩阵）；补 E6 审计触发点（E10 §3.1）与 E5 `policy.evaluate('propose_memory')` 调用点 |
 | v0.7 | 2026-09-10 | **§4.2.1 换成 per-lease ZSET + fencing**（Hash 版标废弃；含 rebuild 顺序与 `REBUILDING` 闸；E4 §4.2 同步）；**`dispatch_ack` 语义定型为 transport 收据**（去掉 `accepted=false` 与"dispatch 拒收→重路由"这条在 CR 状态机里无合法迁移的分支，改为送达失败 → 重试同一 attempt → Inbox）；**§4.3 Memory 门禁改 `propose_memory`**（此前误写 `write_memory`）；**§4.4 Provider 摘要同步正式接口**（`listStatuses(binding)` / `getStatusMapping(binding) → CanonicalStatusMapping[]`）；§4.1 候选过滤去掉 `active_slots` 表述 |
 | v0.8 | 2026-09-10 | **新增 §11 UI Projection & Human Attention Model**（Progressive Disclosure 三级；AttentionItem 为只读投影、非事实源；UX invariant"每条必须带可执行动作"；单入口 Needs You → Approval）；§10 缓存表补 slot ZSET/fence/rebuilding key 并把 `wmc` 修为 Org 级；§1–§10 三个 lifecycle 设计不变 |
+| v0.9 | 2026-09-10 | **Product/UX 收口**：PRD 增 §1.2 User Promise + §1.3 三 Journey + FR-10 Human Attention；domain-model 增 User-facing Vocabulary 表与「Domain Entity ≠ UI Navigation Entity」不变量；UI DS 增 7 原则 + 导航冻结 `Needs You / Channels / Work / Team` + 取消 P6 审批中心。**本文档版本号与更新记录对齐到 v0.9**（此前标题/版本字段滞留在 v0.5，正文实际已到 v0.8） |

@@ -4,10 +4,10 @@
 | --- | --- |
 | Epic ID | E2 |
 | 标题 | Agent Registry |
-| 阶段 | MVP（M3） |
-| 上游 | PRD v0.4 §4.2-§4.4 / §5 FR-1/FR-2/FR-3 / SYSTEM_DESIGN v0.3 §3 agent-registry / §6 Runtime |
+| 阶段 | S1 前置（能力域 M3a/M3b） |
+| 上游 | PRD v0.4 §4.2-§4.4 / §5 FR-1/FR-2/FR-3 / SYSTEM_DESIGN v0.9 §3 agent-registry / §6 Runtime |
 | 下游 | E4（lifecycle+activity 用于 Resolver 过滤）、E7（agent 实体）、E8（assignee） |
-| 状态 | Draft（v0.4 架构修订版） |
+| 状态 | Draft（v0.9 同步：补 max_concurrency / health） |
 
 ## 1. 背景与动机
 
@@ -275,7 +275,7 @@ POST /agents/:id/activity (agent token)
 
 - **被依赖**：E3（agent member）/ E4（lifecycle+activity 过滤）/ E7（agent 实体 + activity 上报）/ E8（WorkItem assignee）
 - **依赖**：E1（owner_user_id / project）
-- **冲突裁决**：6 态（lifecycle × activity）枚举与 SD v0.3 §6.2 / DS v0.5 §3.1 / §4 一致
+- **冲突裁决**：6 态（lifecycle × activity）枚举与 SD v0.9 §6.2 / DS v0.7 §3.1 / §4 一致
 
 ## 9. 风险与开放问题
 

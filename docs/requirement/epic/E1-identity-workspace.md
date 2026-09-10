@@ -4,10 +4,10 @@
 | --- | --- |
 | Epic ID | E1 |
 | 标题 | Identity & Workspace |
-| 阶段 | MVP（M1） |
-| 上游 | PRD v0.4 §4 / SYSTEM_DESIGN v0.3 §3 auth/iam + org/team/project |
+| 阶段 | S1 前置（能力域 M1） |
+| 上游 | PRD v0.4 §4 / SYSTEM_DESIGN v0.9 §3 auth/iam + org/team/project |
 | 下游 | E2 / E3 / E4 / E5 / E6 / E7 / E8 / E10 全部依赖 |
-| 状态 | Draft（v0.4 架构修订版） |
+| 状态 | Draft（v0.9 同步） |
 
 ## 1. 背景与动机
 
@@ -205,7 +205,7 @@ Redis rl:{email_or_ip}:/auth/login  滑窗 5/min
 
 - **被依赖**：E2（owner_user_id）/ E3（project_id）/ E5（owner_user_id）/ E6（subject_id）/ E7（agent_id owner）/ E8（project_id）/ E10（actor_id）
 - **依赖**：无（最底层）
-- **冲突裁决**：与 PRD v0.4 §4 / SYSTEM_DESIGN v0.3 §3.1 auth/iam 对齐
+- **冲突裁决**：与 PRD v0.4 §4 / SYSTEM_DESIGN v0.9 §3.1 auth/iam 对齐
 
 ## 9. 风险与开放问题
 

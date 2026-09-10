@@ -4,10 +4,10 @@
 | --- | --- |
 | Epic ID | E8 |
 | 标题 | Work Management Core |
-| 阶段 | MVP（M6） |
-| 上游 | PRD v0.4 §2.4 / §5 FR-7 / SYSTEM_DESIGN v0.3 §9 / v0.4.1 协议收口 |
+| 阶段 | S3（工作推进；能力域 M6） |
+| 上游 | PRD v0.4 §2.4 / §5 FR-7 / SYSTEM_DESIGN v0.9 §9 |
 | 下游 | E9（Jira Provider）/ E7（Execution 可选引用 WorkItem）/ E4（Trigger from WorkItem V1+） |
-| 状态 | Draft（v0.4.1 简化版） |
+| 状态 | Draft（v0.9 同步：补 binding_id / provider_* / search_text） |
 
 ## 1. 背景与动机
 
