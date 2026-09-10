@@ -138,7 +138,7 @@ Conversation Domain          Work Domain
 
 ### I6 · Execution 是 Runtime 运行实例，状态收敛且幂等
 - **为什么**：它是可取消、可重试、占 slot、产生 cost 的运行实体，不能被降级成 WorkItem 的一个 history 字段。
-- **约束**：terminal 状态 CAS（`WHERE status IN (PENDING, RUNNING)`）；`provider_event_id` + `UNIQUE(attempt_id, provider_event_id)` 协议级幂等；**BullMQ 只做 transport，绝不是事实源**。
+- **约束**：terminal 状态 CAS（`WHERE status IN (PENDING, RUNNING)`）；`provider_event_id` + `UNIQUE(attempt_id, provider_event_id)` 协议级幂等；**异步队列（v0.5 起 = outbox relay）只做 transport，绝不是事实源**。
 - **校验**：`execution_events.attempt_id NOT NULL` + 唯一索引（当前 SYSTEM_DESIGN L438 缺，需补）。
 
 ### I7 · 消息流只存 entity_ref

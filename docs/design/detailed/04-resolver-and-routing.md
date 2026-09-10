@@ -20,9 +20,9 @@
 ### 1.1 触发（同 v0.4.2）
 
 ```
-E3 写 messages + triggers 同步触发
-  → 入 BullMQ 队列 mention.resolve
-  → Worker 并发：1 个 Node 进程 5 个 worker（默认）
+E3 写 messages + triggers + outbox（同事务）
+  → relay 消费 mention.extracted（原 BullMQ mention.resolve）
+  → 并发：relay 消费者数 = 环境变量配置（默认 5），同一 collab 用 aggregate_id 串行
 ```
 
 ### 1.2 v0.4.3 工作流（**关键修正**）
@@ -310,44 +310,76 @@ EXECUTION 阶段（ACCEPT 后）：
 
 ```python
 async def init_agent_capacity(agent_id):
-    # 1. 读 agents.max_concurrency
-    agent = await get_agent(agent_id)
-    max = agent.max_concurrency
-    await redis.hset(f'agent-capacity:{agent_id}:config', 'max', max, ex=86400)
+    """
+    v0.5 修正顺序 + fencing：
+      acquire rebuild fence → set rebuilding=1 → load DB → rebuild → 原子 publish → clear rebuilding
+    v0.4.4 的写法把 set rebuilding 放在最后，等于重建期间根本没挡住 tryAcquire，顺序自相矛盾。
+    """
+    # 0. 取 fencing token：多实例同时 rebuild 同一个 agent 时，旧 fence 的写入被判为过期
+    fence = await redis.incr(f'agent-capacity:{agent_id}:fence')
 
-    # 2. 重建「待决策」lease：只看仍未决的 PENDING
-    #    v0.4.4：ACCEPTED 是永久保留态，不能拿来重建——否则历史请求永久占位，
-    #    运行一段时间后该 Agent 的 capacity 被历史数据吃满，新请求全部落选。
-    collabs = await db.query("""
-        SELECT id FROM collaboration_requests
-        WHERE target_agent_id = $1
-          AND status = 'PENDING'
-    """, agent_id)
-    for collab in collabs:
-        await redis.zadd(f'agent-capacity:{agent_id}:leases',
-                         {f'collab-{collab.id}-PENDING': now_ms + 90*1000})
+    leases_key   = f'agent-capacity:{agent_id}:leases'
+    config_key   = f'agent-capacity:{agent_id}:config'
+    staging_key  = f'agent-capacity:{agent_id}:staging:{fence}'
+    rebuild_key  = f'agent-capacity:{agent_id}:rebuilding'
 
-    # 3. 重建「执行中」lease：从未终结的 Execution 恢复（TTL 取续期周期余量）
-    #    v0.4.4 新增：否则在途 execution 不占容量，90s 后并发上限形同虚设。
-    running = await db.query("""
-        SELECT id, active_attempt_no FROM agent_executions
-        WHERE agent_id = $1
-          AND status IN ('PENDING', 'RUNNING')
-          AND active_attempt_no IS NOT NULL
-    """, agent_id)
-    for ex in running:
-        await redis.zadd(f'agent-capacity:{agent_id}:leases',
-                         {f'exec-{ex.id}-{ex.active_attempt_no}': now_ms + 300*1000})
+    # 1. 抢占 rebuild 锁（SET NX + TTL 兜底，防止持锁进程崩溃后永久挡住调度）
+    got = await redis.set(rebuild_key, str(fence), nx=True, ex=30)
+    if not got:
+        return  # 已有实例在重建，直接返回（或退化为"按 max 保守记账"）
 
-    # 4. 重建完成前不接新活：先把容量按 max 记账，再放开 tryAcquire
-    await redis.set(f'agent-capacity:{agent_id}:rebuilding', '1', ex=30)
+    try:
+        # 2. 读 agents.max_concurrency
+        agent = await get_agent(agent_id)
+        await redis.hset(config_key, 'max', agent.max_concurrency, ex=86400)
+
+        # 3. 重建「待决策」lease：只看仍未决的 PENDING
+        #    v0.4.4：ACCEPTED 是永久保留态，不能拿来重建——否则历史请求永久占位。
+        collabs = await db.query("""
+            SELECT id FROM collaboration_requests
+            WHERE target_agent_id = $1 AND status = 'PENDING'
+        """, agent_id)
+
+        # 4. 重建「执行中」lease：从未终结的 Execution 恢复
+        #    v0.4.4：否则在途 execution 不占容量，并发上限形同虚设。
+        running = await db.query("""
+            SELECT id, active_attempt_no FROM agent_executions
+            WHERE agent_id = $1 AND status IN ('PENDING','RUNNING')
+              AND active_attempt_no IS NOT NULL
+        """, agent_id)
+
+        # 5. 先写 staging，再原子替换（避免重建到一半的半量状态被读到）
+        members = {}
+        for c in collabs:
+            members[f'collab-{c.id}-PENDING'] = now_ms + 90*1000
+        for ex in running:
+            members[f'exec-{ex.id}-{ex.active_attempt_no}'] = now_ms + 300*1000
+
+        pipe = redis.pipeline()
+        pipe.delete(staging_key)
+        if members:
+            pipe.zadd(staging_key, members)
+        pipe.rename(staging_key, leases_key)      # 原子发布
+        pipe.execute()
+    finally:
+        # 6. 清闸：只删自己那把锁（比对 fence，避免误删新实例的锁）
+        await redis.eval(
+            "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end",
+            [rebuild_key], [str(fence)]
+        )
 ```
 
-**v0.4.4 修正（并发上限重建）**：
+**配套（必须同时实现）**：
 
-- 旧写法把所有 `ACCEPTED` 的请求重建成 90s 的 `pending_decision` lease。但 `ACCEPTED` 是**执行结束后仍永久保留**的状态，于是历史请求永久占位；而真正在跑的 execution lease 又没恢复，90s 过期后在途任务不再计入容量——**两个方向同时错**，并发上限在重启后不可信。
-- 新写法分两类恢复：`collaboration_requests.status='PENDING'` → 90s pending lease；`agent_executions.status IN (PENDING,RUNNING) AND active_attempt_no IS NOT NULL` → 300s execution lease（与 187 §2.8「启动 rebuild = 未终结 Execution + PENDING CR」口径一致）。
-- 恢复窗口内用 `rebuilding` 标记挡住 `tryAcquirePendingDecision`，避免重建到一半的容量被抢占（恢复是幂等的，重跑一次结果相同）。
+- `tryAcquirePendingDecision` Lua 开头：`if redis.call('exists', KEYS.rebuilding) == 1 then return {0, 'REBUILDING'} end` —— 重建期间一律不授予 slot（调用方换下一候选或稍后重试），**不能**在重建未完成时按过期容量放行。
+- 所有对 leases 的写入（tryAcquire / promote / release / renew）都带 `fence` 校验：写入前比较 key 里的 `fence`，小于当前值即视为过期写入并丢弃。
+- 锁 TTL（30s）必须大于单次重建耗时上限；重建超时按失败处理并告警，不做"半量放行"。
+
+**v0.4.4 → v0.5 的修正说明**：
+
+- v0.4.4 修的是**恢复内容**（ACCEPTED 不应永久占位、执行中 lease 必须恢复），这部分成立并保留。
+- v0.5 修的是**恢复顺序与并发安全**：`set rebuilding` 必须在 load DB 之前；多实例用 fencing token 防互相覆盖；重建结果先 staging 再 `RENAME` 原子发布。
+- 恢复窗口内用 `rebuilding` 挡住 `tryAcquirePendingDecision`，避免重建到一半的容量被抢占。
 
 ## 4. 60s 超时重路由
 
@@ -355,11 +387,17 @@ async def init_agent_capacity(agent_id):
 
 ```python
 # v0.4.3 改：仅 reservation 后启动倒计时（不依赖 execution 创建）
-await bullmq.enqueue('collab.timeout',
-    {'collab_id': collab.id},
-    delay=90 * 1000  # 与 pending_decision lease TTL 对齐
-)
+# v0.5：outbox delayed（next_attempt_at）替代 MQ delayed job
+await db.execute("""
+    INSERT INTO outbox_events
+    (aggregate_type, aggregate_id, event_type, payload, idempotency_key, next_attempt_at)
+    VALUES ('collaboration', $1, 'collab.timeout', $2, $3,
+            NOW() + interval '90 seconds')   -- 与 pending_decision lease TTL 对齐
+    ON CONFLICT (idempotency_key) DO NOTHING
+""", collab.id, {'collab_id': collab.id}, f'collab-timeout-{collab.id}')
 ```
+
+> 超时不再需要独立定时器：CR 变为非 PENDING 时，`on_collab_timeout()` 首行 CAS 判空即返回（幂等 no-op）；也可显式把该 outbox 行标 `PUBLISHED` 取消。
 
 ### 4.2 超时处理
 

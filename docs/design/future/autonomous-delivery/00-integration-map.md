@@ -1,8 +1,14 @@
 # Detailed Design · Autonomous Delivery · 00 · Integration Map & Invariants
 
+> ⚠️ **本目录已于 2026-09-10 迁至 `docs/design/future/`：V2 愿景设计，保留但不作为 M1–M9 实现依据。**
+> 模型冻结提案已裁决：**WorkItem 是唯一业务对象；Mission / WorkUnit 移出主设计**。
+> MVP 路径为 `PO 选 WorkItems → Grill/Planner 分析 → 执行计划 → Execution → Review/NeedsYou → WorkItem 更新`，
+> 即 **Grill 先作为能力，不急着成为新的 Domain Entity**（不为它引入 Mission + WorkUnit 两套新的持久化容器）。
+> Current Design 只有 `docs/design/detailed/00–09`；实现 Agent 不应把本目录内容当 Current spec。
+
 > **配套**：PRD v0.4 / SYSTEM_DESIGN v0.3.2 / UI DS v0.6 / E1-E10 epic docs / `00-overview.md` 起的 9 份 detailed design / **v0.1 Architecture Proposal（5 层 33 节）**
 > **范围**：把 v0.1 「Autonomous Delivery Architecture」落到现有 E1-E10 bounded feature 模型上，**锁边界** + 9 条关键 Invariants，避免 #2-#5 撞现有域时重蹈 v0.4 推倒覆辙。
-> **前置**：[00-overview.md](../00-overview.md) / [01-single-agent-task-lifecycle.md](../01-single-agent-task-lifecycle.md) / [04-resolver-and-routing.md](../04-resolver-and-routing.md) / [06-workitem-provider-sync.md](../06-workitem-provider-sync.md)
+> **前置**（Current Design，位于 `docs/design/detailed/`）：[00-overview.md](../../detailed/00-overview.md) / [01-single-agent-task-lifecycle.md](../../detailed/01-single-agent-task-lifecycle.md) / [04-resolver-and-routing.md](../../detailed/04-resolver-and-routing.md) / [06-workitem-provider-sync.md](../../detailed/06-workitem-provider-sync.md)
 
 ## 0. 文档结构
 

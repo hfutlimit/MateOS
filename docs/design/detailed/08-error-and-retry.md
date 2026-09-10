@@ -111,11 +111,17 @@ async def handle_error(execution_id, error_envelope):
         retry_after_s=error_envelope.payload.retry_after_s
     )
 
-    # 入 BullMQ delayed job
-    await bullmq.enqueue('execution.retry', {
-        'execution_id': execution_id,
-        'attempt_no': execution.attempt_count + 1
-    }, delay=backoff_s * 1000)
+    # v0.5：不再依赖 MQ 的 delayed job
+    # 写 outbox_events，next_attempt_at = now + backoff，由 relay 到期领取
+    await db.execute("""
+        INSERT INTO outbox_events
+        (aggregate_type, aggregate_id, event_type, payload, idempotency_key, next_attempt_at)
+        VALUES ('execution', $1, 'execution.retry', $2, $3, NOW() + ($4 || ' seconds')::interval)
+        ON CONFLICT (idempotency_key) DO NOTHING
+    """, execution_id,
+        {'attempt_no': execution.attempt_count + 1},
+        f'exec-retry-{execution_id}-{execution.attempt_count + 1}',
+        backoff_s)
 ```
 
 ## 3. 永久失败降级

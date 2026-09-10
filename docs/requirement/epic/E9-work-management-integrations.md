@@ -177,9 +177,9 @@ Scheduler（V1+ E9 落地）：
 ```
 POST /sync/jira/webhook
   Headers: { X-Hub-Signature, X-Atlassian-Webhook-Identifier }
-  → 校验 webhook_id == work_management_connections.webhook_id
-  → 校验 HMAC signature（OAuth 2.0 app webhook 也支持）
-  → 入 BullMQ sync.jira.inbound
+  → 用 `matchedWebhookIds[0]` 定位本地注册记录（**不是** `X-Atlassian-Webhook-Identifier`，后者只标单次投递）
+  → 校验 `Authorization: Bearer` 的 **JWT 签名**（HS256，key = app client secret）
+  → `INSERT webhook_inbox(...) ON CONFLICT (provider_key, delivery_id) DO NOTHING` —— 去重与持久化同一事务
   → Worker 拉 Issue 最新状态
   → 比对 payload_hash → 相同跳过（防循环）
   → 写 work_items 更新（用 workItem.provider_key 路由）+ sync_audit
@@ -220,8 +220,8 @@ MateOS createWorkItem:
 **Jira → MateOS（webhook）**：
 ```
 POST /sync/jira/webhook
-  → 校验 signature + webhook_id
-  → 入 BullMQ
+  → 校验 Bearer JWT 签名 + 用 `matchedWebhookIds` 定位订阅
+  → `INSERT webhook_inbox` 落库（去重 + 持久化原子，v0.5）
   → Worker 拉 Issue 最新状态
   → 比对 payload_hash → 相同跳过
   → 通过 ProviderRouter.forExisting(workItem) 找 Provider

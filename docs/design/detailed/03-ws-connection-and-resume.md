@@ -105,15 +105,22 @@ Agent 进程
     "snapshot": { execution_id, input, context, deadline_s }
 }}
 
-// ─── Agent 上报 lifecycle/activity ───
+// ─── v0.5 显式 dispatch ACK（transport 层协议，与 activity 解耦）───
+{ "type": "execution.dispatch_ack", "payload": {
+    "execution_id", "attempt_no",
+    "accepted": true,                  // false = 明确拒收（见 §7.2）
+    "reason"?: "CAPACITY_FULL|UNKNOWN_EXECUTION|STALE_ATTEMPT"
+}}
+
+// ─── Agent 上报 lifecycle/activity（纯 UI 语义，不承载协议状态）───
 { "type": "status",       "payload": {
     "status": "OFFLINE|AVAILABLE|THINKING|WORKING|WAITING_CONTEXT|ERROR",
-    // v0.4.4 补：status='WORKING' 时必填，用于回填 dispatch_acked_at
-    // （缺字段 → Runtime 无法判定是哪次 attempt 在跑，见 §7 / §7.1）
-    "execution_id"?, "attempt_no"?,
     "reason"?, "since"
 }}
 ```
+
+> **v0.5 语义拆分**：`status` 只表达 **Agent activity**（给 UI 看），`execution.dispatch_ack` 只表达 **transport/runtime 协议状态**（给 Runtime 用）。
+> 之前用 `status=WORKING + execution_id + attempt_no` 回填 ACK 的做法已废弃：Agent 的实际路径可能是 `dispatch accepted → THINKING → WAITING_CONTEXT → WORKING`，用 activity 反推 ACK 会漏掉"已接受但还没 WORKING"的窗口，也让状态机扩展时反复踩"WORKING 到底是 UI 状态还是 ACK"的问题。
 
 ## 3. Resume 协议（v0.4.3 反向 + contiguous cursor）
 
@@ -415,42 +422,61 @@ async def dispatch_to_agent(execution_id, attempt_no):
         }
     })
     # 注意：不在这里写 dispatch_acked_at
-    # dispatch_acked_at 由 Agent 推 status=WORKING 时回填
+    # dispatch_acked_at 由 Agent 回 execution.dispatch_ack 时回填（§7）
 ```
 
 ```python
-async def on_agent_status(agent_id, status, execution_id=None, attempt_no=None):
-    """Agent 推 status envelope 时"""
-    if status != 'WORKING':
+async def on_dispatch_ack(agent_id, ack):
+    """
+    v0.5：ACK 是显式协议消息，不再从 status=WORKING 反推。
+    status 只更新 activity，与本协议处理完全分离。
+    """
+    if not ack.accepted:
+        # 明确拒收：立即释放 slot + 走换候选，不等 lease 过期
+        await release_lease(agent_id, ack.execution_id)
+        await reroute_next_candidate(ack.execution_id, reason=ack.reason)
         return
 
-    # v0.4.4：WORKING 必须带 execution_id + attempt_no（契约见 §2）
-    # 缺失时**不猜**当前 attempt——max_concurrency > 1 时按 agent 维度无法判定，
-    # 猜错会把 ACK 记到另一次 attempt 上。只记指标 + 告警，交给 §7.1 补洞。
-    if not (execution_id and attempt_no):
-        metrics.incr('execution.dispatch_ack.missing_fields')
-        log.warn('status=WORKING without execution_id/attempt_no', agent_id=agent_id)
-        return
-
-    # 幂等：只回填一次，迟到 / 重复的 status 不覆盖首次 ACK 时间
-    await db.update("""
+    # 幂等：只回填一次，迟到 / 重复 ACK 不覆盖首次时间
+    affected = await db.update("""
         UPDATE execution_attempts
         SET dispatch_acked_at = NOW()
         WHERE execution_id = $1 AND attempt_no = $2
           AND dispatch_acked_at IS NULL
-    """, execution_id, attempt_no)
+    """, ack.execution_id, ack.attempt_no)
+
+    if not affected and not await attempt_exists(ack.execution_id, ack.attempt_no):
+        metrics.incr('execution.dispatch_ack.stale')
+        log.warn('dispatch_ack for unknown attempt',
+                 execution_id=ack.execution_id, attempt_no=ack.attempt_no)
 ```
 
-### 7.1 ACK 补洞（v0.4.4 · Runtime / Redis 重启后禁止盲目重派）
+```python
+async def on_agent_status(agent_id, status, reason=None, since=None):
+    """纯 activity 更新：只写 presence / UI 派生，不参与任何协议状态判定"""
+    await presence.set(agent_id, activity=status, reason=reason, since=since)
+```
+
+### 7.1 ACK 补洞（v0.5 · Runtime / Redis 重启后禁止盲目重派）
 
 | 场景 | 现象 | 处理 |
 | --- | --- | --- |
-| status 已带 `execution_id + attempt_no` | 正常回填 `dispatch_acked_at` | §7 主路径 |
-| 旧契约客户端（只发 `status/reason/since`） | ACK 永远为空 | 记 `execution.dispatch_ack.missing_fields` 并告警，**不猜 attempt** |
+| 正常收到 `execution.dispatch_ack` | 回填 `dispatch_acked_at` | §7 主路径 |
+| 一直没收到 ACK（`accepted` 也没有） | `dispatch_acked_at IS NULL` | 记 `execution.dispatch_ack.timeout` 并告警；**不猜 attempt** |
 | Agent 已启动，ACK 在网络 / Runtime 重启中丢失 | execution=`RUNNING` 但 `dispatch_acked_at IS NULL` | 重启后先发 `execution.resume_request`，等 `resume_ack` 或 `execution.event`；`ack_wait_s`（默认 15s）内无响应才重派**同一 attempt_no** |
 | 重派同一 attempt | Agent 收到重复 dispatch | 客户端**必须按 `(execution_id, attempt_no)` 去重**：已有该 attempt 上下文时改走 resume，不重新起跑 |
 
-要点：重启恢复能安全工作的前提只有一个——**客户端按 `(execution_id, attempt_no)` 幂等**。SDK `on('dispatch')` 首次收到即建 attempt 上下文；重复收到同一 `(execution_id, attempt_no)` 时只重新绑定 WS 会话，不得重复执行。缺了这条，任何重派都会造成重复执行与重复计费。
+要点：重启恢复能安全工作的前提只有一个——**客户端按 `(execution_id, attempt_no)` 幂等**。SDK `on('dispatch')` 首次收到即建 attempt 上下文并立即回 `execution.dispatch_ack`；重复收到同一 `(execution_id, attempt_no)` 时只重新绑定 WS 会话并再次 ACK，不得重复执行。缺了这条，任何重派都会造成重复执行与重复计费。
+
+### 7.2 拒收语义（v0.5 新增）
+
+`accepted=false` 是**显式拒收**，与"超时未 ACK"区分开：
+
+| 情形 | Agent 行为 | Runtime 行为 |
+| --- | --- | --- |
+| 本地已满 / 不想接 | 立即回 `dispatch_ack{accepted=false, reason=CAPACITY_FULL}` | 立即 `releaseLease` + 取下一候选，**不等 90s** |
+| 收到未知 execution / 过期 attempt | 回 `accepted=false, reason=UNKNOWN_EXECUTION / STALE_ATTEMPT` | 记 `stale` 指标，不重派 |
+| 崩溃 / 网络断，没来得及回 | 无 ACK | 走 §7.1 的 `ack_wait_s` 超时路径 |
 
 ## 8. Agent SDK 设计
 
@@ -460,6 +486,9 @@ async def on_agent_status(agent_id, status, execution_id=None, attempt_no=None):
 class AgentClient {
   on('cancel', handler)  // 必须实现
   on('resume_ack', handler)  // v0.4.3
+  on('dispatch', handler)  // 必须实现：收到即回 sendDispatchAck（v0.5）
+  sendDispatchAck(execution_id, attempt_no, accepted = true, reason?)  // v0.5
+  sendStatus(activity, reason?)  // v0.5：纯 activity，不再承载 ACK
   sendDecision(...)  // collab.decision
   sendEvent(...)  // execution.event with seq
   sendResult(...)  // execution.result

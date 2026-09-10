@@ -30,7 +30,7 @@ T+2   E3 Channel Module 事务：
                                      context_refs={channel_id, ...})
 T+3   E3 WS 广播 message.created 给 channel 在线 member
 T+4   客户端渲染：消息泡 + mention 胶囊占位「⏳ 解析中」
-T+5   E4 Orchestrator 异步 Resolver 启动（BullMQ mention.resolve）
+T+5   E4 Orchestrator 异步 Resolver 启动（outbox relay 消费 mention.extracted，原 BullMQ mention.resolve）
 T+6   Resolver:
         a) 硬过滤：lifecycle=ACTIVE ∩ channel member ∩ permission ALLOW
         b) Capability ranking: 0.6 * match + 0.25 * (1-load) + 0.15 * accept_rate_30d

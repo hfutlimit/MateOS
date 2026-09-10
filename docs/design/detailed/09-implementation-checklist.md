@@ -79,17 +79,24 @@ M1 的验收不能卡在「Agent 进程从哪来」这个产品级问题上（V1
 ### 3.1 框架选型
 
 ```yaml
+# v0.5 拍板（2026-09-10）：后台 = .NET，BullMQ 从 Current Design 移除
 backend:
-  framework: NestJS (Node 22 LTS, TypeScript)
-  orm: Prisma + PostgreSQL 16
-  queue: BullMQ + Redis 7
-  test: Vitest + pytest
+  runtime: .NET 10 LTS
+  framework: ASP.NET Core (C#)
+  orm: EF Core 10 (Npgsql) + 显式 SQL 迁移
+  async: PostgreSQL transactional outbox + BackgroundService relay (SKIP LOCKED)
+  test: xUnit + Testcontainers（PG/Redis 真实实例）
 
 frontend:
   framework: Next.js + TypeScript
   ui: antd 6
   state: Zustand + TanStack Query
   realtime: WebSocket client
+
+contracts:
+  # 协议层技术中立：Connector envelope / REST 契约只定义语义，不绑定实现语言
+  spec: OpenAPI 3.1 + JSON Schema
+  codegen: 前端 TS 类型由 OpenAPI 生成；后端 C# DTO 由同一份契约校验
 ```
 
 ### 3.2 部署
@@ -217,7 +224,7 @@ M4a: E6 Authorization
 
 M4b: E4 Resolver
   1. triggers / collaboration_requests / decision_records
-  2. Resolver Worker (BullMQ)
+  2. Resolver Worker (outbox relay consumer，v0.5 改名)
   3. 能力排序
   4. Redis Lua: tryAcquirePendingDecision / promoteLease / releaseLease / renewExecutionLease
   5. 90s 超时重路由

@@ -190,7 +190,7 @@ body{font-family:var(--font);color:var(--text-body);background:var(--surface);
     <span class="lg-dash"><i></i>异步 · 事件</span>
     <span class="lg-evt"><i></i>Outbox 领域事件</span>
     <span class="lg-box"><i></i>有状态节点</span>
-    <span class="note">DB = 唯一事实源；Redis 仅承载 scheduling state，不持久化 · BullMQ 只做 transport/scheduler</span>
+    <span class="note">DB = 唯一事实源；Redis 仅承载 scheduling state，不持久化 · outbox relay（v0.5 取代 BullMQ）只做 transport/scheduler</span>
   </div>
 
   <div class="cols">
@@ -222,7 +222,7 @@ body{font-family:var(--font);color:var(--text-body);background:var(--surface);
             <div class="d">auth·iam / org·team·project / channel / mention / collaboration / permission / agent-registry / execution / work-management / ws gateway</div></div>
           <div class="node"><div class="t">Permission Guard<span class="pill">E6</span></div>
             <div class="d">7 键 × 3 态（ALLOW / DENY / REQUIRE_APPROVAL）+ 三层覆盖；Guard <b>只判</b> ALLOW / DENY</div></div>
-          <div class="node"><div class="t">WS Gateway + BullMQ<span class="pill">FANOUT</span></div>
+          <div class="node"><div class="t">WS Gateway + Outbox Relay<span class="pill">FANOUT</span></div>
             <div class="d">事件分发 / 队列调度；<b>不做</b> Execution 事实源</div></div>
         </div>
       </section>
@@ -495,7 +495,7 @@ body{font-family:var(--font);color:var(--text-body);background:var(--surface);
     <div class="cell"><div class="l">Scale</div><div class="v">System · Not to scale</div></div>
     <div class="cell"><div class="l">Rev</div><div class="v">v0.3.2 + v0.1 delivery</div></div>
     <div class="cell"><div class="l">Status</div><div class="v">Draft · 待评审</div></div>
-    <div class="grow">上游：docs/requirement/MateOS-总体需求文档.md（PRD v0.4）· docs/design/SYSTEM_DESIGN.md v0.3.2 · E1–E10 epic docs · docs/design/detailed/00–09 · detailed/autonomous-delivery/00–04<br>
+    <div class="grow">上游：docs/requirement/MateOS-总体需求文档.md（PRD v0.4）· docs/design/SYSTEM_DESIGN.md v0.3.2 · E1–E10 epic docs · docs/design/detailed/00–09 ·（autonomous-delivery/00–04 已迁 docs/design/future/，属 V2 愿景）<br>
       执行后端永久自研（PRD §8 Non-Goal）· Work Management 与 Execution 完全解耦 · 色源 tokens.css</div>
   </div>
 </div>

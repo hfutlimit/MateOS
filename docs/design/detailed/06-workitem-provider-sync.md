@@ -163,28 +163,87 @@ async def jira_webhook(request):
     if not webhook:
         return 404
 
-    # OAuth 2.0 动态 webhook 用 Bearer 校验：
-    # 没有 X-Hub-Signature（那是 GitHub 的协议），也没有 webhook.secret 概念
+    # v0.5：OAuth 2.0 动态 webhook 的 Authorization: Bearer 是**用 app client secret 签名的 JWT**，
+    # 必须验签名（JWT library），不是保存一个 token 做字符串比较。
+    # 没有 X-Hub-Signature（那是 GitHub 的协议），也没有 webhook.secret 概念。
     token = request.headers.get('Authorization', '').removeprefix('Bearer ').strip()
-    if not hmac.compare_digest(token, webhook.auth_token):
+    try:
+        claims = jwt.decode(
+            token,
+            key=webhook.client_secret,        # 注册 app 的 client secret
+            algorithms=['HS256'],
+            issuer='atlassian',               # 按 Atlassian 文档校验 iss / aud / exp
+            leeway=30,
+        )
+    except jwt.InvalidTokenError as e:
+        log.warn('jira webhook jwt rejected', err=str(e), delivery_id=delivery_id)
         return 401
 
-    # 幂等：Atlassian 会重试投递，同一 delivery_id 只处理一次
-    if await has_seen_delivery(delivery_id):
-        return 202
-    await mark_delivery_seen(delivery_id)
+    # v0.5：durable inbox —— 「去重」与「持久化入队」必须是同一个事务里的原子操作
+    # （v0.4.4 的 mark_delivery_seen() → enqueue() 有 durability hole：
+    #   seen 成功但入队失败 → Jira 重试被判已见 → 事件永久丢失）
+    inserted = await db.execute("""
+        INSERT INTO webhook_inbox
+        (provider_key, delivery_id, webhook_id, binding_id, payload, received_at, status)
+        VALUES ('jira', $1, $2, $3, $4, NOW(), 'PENDING')
+        ON CONFLICT (provider_key, delivery_id) DO NOTHING
+        RETURNING id
+    """, delivery_id, webhook.id, webhook.binding_id, json.dumps(event))
 
-    # 入 BullMQ
-    await bullmq.enqueue('sync.jira.inbound', {
-        'webhook_id': webhook.id,
-        'binding_id': webhook.binding_id,        # v0.4.3 关键
-        'delivery_id': delivery_id,
-        'event': event
-    })
-    return 202
+    if not inserted:
+        return 202   # 重复投递（Atlassian 重试），已落库或已处理
+
+    return 202       # 事务提交即"durably queued"，由 relay/worker 消费
 ```
 
-**v0.4.4 修正说明**：照旧写法实现会**拒绝全部合法回调**——`X-Atlassian-Webhook-Identifier` 每次投递都变，拿它去查本地注册记录必然 404；`X-Hub-Signature` 与 `webhook.secret` 在 Jira OAuth 2.0 webhook 上根本不存在，鉴权分支会 401。注册订阅时 Jira 返回的 `webhookRegistrationResult[]` 需落库保存（订阅 ID + `auth_token`），并保存 `expirationDateTime` 以便到期前刷新。
+```sql
+-- v0.5 新增：webhook 收件箱（幂等 + 持久化，替代 mark_delivery_seen + enqueue 两步）
+CREATE TABLE webhook_inbox (
+  id            BIGSERIAL PRIMARY KEY,
+  provider_key  TEXT NOT NULL,
+  delivery_id   TEXT NOT NULL,               -- X-Atlassian-Webhook-Identifier
+  webhook_id    UUID NOT NULL REFERENCES work_management_webhooks(id),
+  binding_id    UUID NOT NULL,               -- v0.4.3 关键：binding 决定路由
+  payload       JSONB NOT NULL,
+  status        TEXT NOT NULL DEFAULT 'PENDING'
+                CHECK (status IN ('PENDING','PROCESSED','DEAD')),
+  attempt_count INT NOT NULL DEFAULT 0,
+  last_error    TEXT,
+  received_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  processed_at  TIMESTAMPTZ,
+  UNIQUE (provider_key, delivery_id)
+);
+CREATE INDEX idx_webhook_inbox_pending ON webhook_inbox(status, received_at) WHERE status='PENDING';
+```
+
+worker 侧（消费 `webhook_inbox`，同一份 outbox/relay 语义）：
+
+```python
+async def process_webhook_inbox(batch_size=50):
+    rows = await db.query("""
+        SELECT * FROM webhook_inbox
+        WHERE status='PENDING'
+        ORDER BY received_at
+        LIMIT $1
+        FOR UPDATE SKIP LOCKED
+    """, batch_size)
+    for row in rows:
+        try:
+            await process_jira_inbound(row.webhook_id, row.binding_id, row.payload)
+            await db.execute("UPDATE webhook_inbox SET status='PROCESSED', processed_at=NOW() WHERE id=$1", row.id)
+        except Exception as e:
+            await db.execute("""
+                UPDATE webhook_inbox
+                SET attempt_count = attempt_count + 1,
+                    last_error = $2,
+                    status = CASE WHEN attempt_count + 1 >= 8 THEN 'DEAD' ELSE 'PENDING' END
+                WHERE id = $1
+            """, row.id, str(e))
+```
+
+**v0.4.4 修正说明**：照旧写法实现会**拒绝全部合法回调**——`X-Atlassian-Webhook-Identifier` 每次投递都变，拿它去查本地注册记录必然 404；`X-Hub-Signature` 与 `webhook.secret` 在 Jira OAuth 2.0 webhook 上根本不存在，鉴权分支会 401。注册订阅时 Jira 返回的 `webhookRegistrationResult[]` 需落库保存（订阅 ID + `client_secret`），并保存 `expirationDateTime` 以便到期前刷新（官方 `PUT /rest/api/3/webhook/refresh`）。
+
+**v0.5 追加修正**：① 收件用 `webhook_inbox` 单事务落库（`ON CONFLICT DO NOTHING`），**不允许**"先标 seen 再入队"的两步写法；② Bearer 必须是**验 JWT 签名**（HS256，key = app client secret，校 `iss/aud/exp`），不做字符串比较。
 
 ```python
 # worker 处理

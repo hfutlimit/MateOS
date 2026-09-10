@@ -274,7 +274,7 @@ E7 cancel:
 - `e2e/E7-006-resume-request-direction`（v0.4.2 改）—— Agent 推 resume_request，Runtime 答 last_persisted_seq
 - `e2e/E7-007-cancel-on-lifecycle-pause`
 - `e2e/E7-008-active-slots-tracking`
-- `e2e/E7-009-bullmq-restart-state-survive`
+- `e2e/E7-009-relay-restart-state-survive`（v0.5 改名：BullMQ → outbox relay）
 - `e2e/E7-010-error-trigger`
 - `e2e/E7-011-terminal-result-cas`（v0.4.2 新）—— 重复 result 第二次执行 UPDATE 返回 affected_rows=0
 - `e2e/E7-012-cancel-result-race`（v0.4.2 新）—— cancel 和 result 同到，结果一致

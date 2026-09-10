@@ -10,7 +10,7 @@
 
 > **v0.2 → v0.3 变更摘要**（架构评审后推倒重来）：
 > 1. **删除 AgentBoard execution backend**：Architecture diagram、Project schema、Runtime dispatch path 全清
-> 2. **新增 Agent Execution domain（§6）**：`agent_executions` / `execution_attempts` / `execution_events` / `execution_artifacts`；BullMQ 不再是 source of truth
+> 2. **新增 Agent Execution domain（§6）**：`agent_executions` / `execution_attempts` / `execution_events` / `execution_artifacts`；异步队列（v0.5 起 = outbox relay）不再是 source of truth
 > 3. **新增 Work Management 域（§9）**：`WorkItem` / `WorkItemBinding` / Provider 抽象（Built-in + Jira）；Project 不再存 `integration_backend` / `issue_tracker`
 > 4. **新增 CollaborationRequest 一等实体（§4.2）**：Trigger → CollaborationRequest → Decision → Execution
 > 5. **Permission effect `REQUEST` → `REQUIRE_APPROVAL`**：与 CollaborationRequest / HTTP Request 概念分离
@@ -102,21 +102,23 @@ MVP 不做微服务。单体 + 独立 Worker 进程；触发以下任一条件�
 | 领域 | 选型 | 理由 |
 | --- | --- | --- |
 | 前端 | Next.js + TypeScript + antd 6 | 团队栈；TanStack Query 管 WS 缓存 |
-| 后端 | NestJS (Node 22 LTS) | 模块化匹配 Permission + Domain 分层 |
-| ORM | Prisma | Schema 即文档 |
+| 后端 | **ASP.NET Core（.NET 10 LTS，C#）** | 模块化匹配 Permission + Domain 分层；`BackgroundService` 承载 outbox relay |
+| ORM / 迁移 | EF Core 10（Npgsql）+ FluentMigrator 风格的显式 SQL 迁移 | DDL 是本设计的硬约束（分区/唯一约束/CK），需要真实迁移而非 schema-first 推断 |
 | DB | PostgreSQL 16 + pgvector | 关系 + JSONB + 全文 + 向量一库 |
-| 缓存/队列 | Redis 7 + BullMQ | presence / pub/sub / 限流 / 异步任务 |
+| 缓存 / 异步 | Redis 7（presence / pub/sub / 限流）+ **PostgreSQL transactional outbox + `SELECT ... FOR UPDATE SKIP LOCKED` relay** | 异步不引入独立 MQ：outbox 与业务同事务提交，relay 只做 transport |
 | 对象存储 | S3 / MinIO | 附件 + Execution Artifact |
 | LLM | Provider Adapter（OpenAI-compatible） | Credential 分离 |
 | 沙箱 | Docker（V3） | V1 不执行代码，架构预留 |
 | 部署 | Docker Compose → K8s | |
 | 可观测 | OTel + Prometheus + Grafana + Loki | |
 
-> ⚠ **技术栈裁决冲突（v0.4.4 登记 · 未拍板，M1 前必须先解决）**
-> AgentBoard 文档 id=187《MateOS 组件流程图》首页口径为「**后台 .NET 已裁决**」，并把 BullMQ 的等价物定义为 `outbox + SELECT ... FOR UPDATE SKIP LOCKED` relay。
-> 本表与 `detailed/09-implementation-checklist.md` §3.1 仍写 `NestJS (Node 22 LTS) / Prisma / BullMQ`，detailed 00–09 的全部伪代码亦按 Node 侧写法。
-> **两者不能同时成立**。裁决来源确认前，本表状态为**待定**，**不得作为 M1 工程骨架依据**。
-> 拍板后需同步修改：本表 → `detailed/09` §3.1 → `detailed/03` §8 Agent SDK 示例 → 所有出现 `BullMQ` 的段落（.NET 侧统一改为 outbox relay 表述）。
+> ✅ **技术栈已拍板（v0.5 · 2026-09-10，owner 裁决）**
+> **后台 = ASP.NET Core（.NET 10）+ PostgreSQL 16 + transactional outbox + `BackgroundService` relay。BullMQ 从 Current Design 全部移除。**
+> 裁决要点：
+> - 异步不再依赖独立 MQ。所有跨模块副作用走 `outbox_events`，由 relay 用 `SELECT ... FOR UPDATE SKIP LOCKED` 领取并投递；重试用 `next_attempt_at`，超阈值置 `DEAD`。（BullMQ 的等价物，见 id=187 口径）
+> - **协议层保持技术中立**：Connector 协议、REST 契约、消息 envelope 只描述语义，不绑定语言；detailed 里的伪代码是**语言无关的示意**，不得反向绑架架构。
+> - 已同步：本表 / `detailed/09` §3.1 / `detailed/03` §8 / 全部原 BullMQ 表述（改为 outbox relay）/ `README.md`。
+> - AgentBoard 文档 id=187 首页「后台 .NET 已裁决」据此确认为有效裁决。
 
 ---
 
@@ -125,10 +127,10 @@ MVP 不做微服务。单体 + 独立 Worker 进程；触发以下任一条件�
 ```
 apps/
   web/              # Next.js 前端
-  api/              # NestJS 单体（含 ws 模块）
+  api/              # ASP.NET Core 单体（含 WS 中间件 + BackgroundService relay）
 packages/
-  contracts/        # DTO + zod schema（含 WorkItem / Execution）
-  config/           # eslint/tsconfig
+  contracts/        # OpenAPI + JSON Schema（WorkItem / Execution / Connector envelope），前端 TS 类型由契约生成
+  config/           # eslint/tsconfig + EditorConfig
 services/
   orchestrator/     # Trigger → CollaborationRequest → Decision
   memory/           # Memory 索引/检索/审批
@@ -605,7 +607,7 @@ agent_executions
 retry / reconnect / crash recovery / timeout / cancel / streaming / artifact 全部基于 Execution 模型
 ```
 
-**关键原则**：BullMQ job 绝不能成为 Agent Execution 的事实源。BullMQ 只做 transport / scheduler（把任务推到 Runtime），`agent_executions` + `execution_attempts` + `execution_events` 才是事实源。
+**关键原则**：outbox relay（原 BullMQ 语义）绝不能成为 Agent Execution 的事实源。relay 只做 transport / scheduler（把任务推到 Runtime），`agent_executions` + `execution_attempts` + `execution_events` 才是事实源。延迟重试走 `outbox_events.next_attempt_at`，不依赖 MQ 的 delayed job。
 
 ### 6.4 ERROR 触发（lifecycle 维度）
 
@@ -708,7 +710,7 @@ retry / reconnect / crash recovery / timeout / cancel / streaming / artifact 全
 | --- | --- |
 | Client ↔ API | REST `/api/v1` + JWT |
 | Client ↔ Gateway | WSS + JSON envelope |
-| 内部异步 | BullMQ |
+| 内部异步 | PostgreSQL `outbox_events` + `SKIP LOCKED` relay（BackgroundService），**无独立 MQ** |
 | 内部广播 | Redis Pub/Sub |
 | Agent ↔ Runtime | WSS Connector 协议 v1（含 execution_id / collaboration_request_id） |
 | Work Provider ↔ Built-in | 直读 PG |

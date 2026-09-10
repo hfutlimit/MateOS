@@ -29,7 +29,7 @@
                 │                           │
                 ▼                           ▼
     ┌─────────────────────────┐   ┌─────────────────────┐
-    │   NestJS API (monolith) │   │  WS Gateway + BullMQ  │
+    │ ASP.NET Core (monolith) │   │ WS Gateway + Outbox Relay │
     │                         │   │  (event fanout)        │
     │  ┌───────────────────┐  │   └─────────────────────┘
     │  │ Modules:          │  │              │
