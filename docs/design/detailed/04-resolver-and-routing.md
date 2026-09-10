@@ -96,22 +96,34 @@ async def resolve(trigger_id: UUID):
 ### 2.1 候选筛选
 
 ```sql
+-- v0.4.4：SQL 只做「成员资格 + lifecycle」硬过滤，权限交给统一有效权限计算
 SELECT a.id, a.lifecycle, a.max_concurrency
 FROM agents a
 JOIN channel_members cm ON cm.member_id = a.id
                          AND cm.member_type = 'AGENT'
                          AND cm.channel_id = $1
 WHERE a.lifecycle = 'ACTIVE'
-  AND a.id IN (
-      SELECT subject_id FROM permissions
-      WHERE scope_type = 'CHANNEL'
-        AND scope_id = $1
-        AND subject_type = 'AGENT'
-        AND perm_key = 'write_message'
-        AND effect = 'ALLOW'
-  )
   -- v0.4.2 改：activity 不再用于过滤
 ```
+
+```python
+# v0.4.4：SQL 之后逐候选走 E6 统一入口
+candidates = [
+    a for a in rows
+    if permission.check(
+        subject={'type': 'AGENT', 'id': a.id},
+        perm_key='write_message',
+        scope={'type': 'CHANNEL', 'id': channel_id},
+    ).effect == 'ALLOW'
+]
+# REQUIRE_APPROVAL 在 Resolver 里没有人类审批位 → 视为不放行
+```
+
+**v0.4.4 修正（权限继承）**：
+
+- 旧 SQL 要求 `permissions` 里存在 `scope_type='CHANNEL' AND perm_key='write_message' AND effect='ALLOW'` 的**显式记录**。
+- 但 E6 的模型是 **Channel 覆盖 → Project 覆盖 → 默认矩阵** 三层合并（E6 §2.1），**没有覆盖行 ≠ 拒绝**。新建 Channel 里按默认矩阵本可发言的 Agent 会被这条 SQL 提前过滤掉，表现为「Channel 里明明有 Agent，Resolver 却 0 候选」。
+- 新做法：SQL 只管成员资格与 lifecycle；随后对每个候选调 E6 的 `check(subject, perm_key, scope)`——`ALLOW` 放行、`DENY` 与 `REQUIRE_APPROVAL` 剔除。命中 E6 的 Redis 5min 缓存，候选集通常 < 20，开销可忽略。
 
 ### 2.2 评分公式
 
@@ -303,17 +315,39 @@ async def init_agent_capacity(agent_id):
     max = agent.max_concurrency
     await redis.hset(f'agent-capacity:{agent_id}:config', 'max', max, ex=86400)
 
-    # 2. 从 DB 重建 active leases
+    # 2. 重建「待决策」lease：只看仍未决的 PENDING
+    #    v0.4.4：ACCEPTED 是永久保留态，不能拿来重建——否则历史请求永久占位，
+    #    运行一段时间后该 Agent 的 capacity 被历史数据吃满，新请求全部落选。
     collabs = await db.query("""
         SELECT id FROM collaboration_requests
         WHERE target_agent_id = $1
-          AND status IN ('PENDING', 'ACCEPTED')
+          AND status = 'PENDING'
     """, agent_id)
     for collab in collabs:
-        await redis.zadd(f'agent-capacity:{agent_id}:leases', {f'collab-{collab.id}-PENDING': now_ms + 90*1000})
+        await redis.zadd(f'agent-capacity:{agent_id}:leases',
+                         {f'collab-{collab.id}-PENDING': now_ms + 90*1000})
+
+    # 3. 重建「执行中」lease：从未终结的 Execution 恢复（TTL 取续期周期余量）
+    #    v0.4.4 新增：否则在途 execution 不占容量，90s 后并发上限形同虚设。
+    running = await db.query("""
+        SELECT id, active_attempt_no FROM agent_executions
+        WHERE agent_id = $1
+          AND status IN ('PENDING', 'RUNNING')
+          AND active_attempt_no IS NOT NULL
+    """, agent_id)
+    for ex in running:
+        await redis.zadd(f'agent-capacity:{agent_id}:leases',
+                         {f'exec-{ex.id}-{ex.active_attempt_no}': now_ms + 300*1000})
+
+    # 4. 重建完成前不接新活：先把容量按 max 记账，再放开 tryAcquire
+    await redis.set(f'agent-capacity:{agent_id}:rebuilding', '1', ex=30)
 ```
 
-**V1 简化**：不重建 execution lease（执行中的 lease 丢了→execution ATTEMPT 会因 capacity 满而 retry，无数据丢失）。V2 重建。
+**v0.4.4 修正（并发上限重建）**：
+
+- 旧写法把所有 `ACCEPTED` 的请求重建成 90s 的 `pending_decision` lease。但 `ACCEPTED` 是**执行结束后仍永久保留**的状态，于是历史请求永久占位；而真正在跑的 execution lease 又没恢复，90s 过期后在途任务不再计入容量——**两个方向同时错**，并发上限在重启后不可信。
+- 新写法分两类恢复：`collaboration_requests.status='PENDING'` → 90s pending lease；`agent_executions.status IN (PENDING,RUNNING) AND active_attempt_no IS NOT NULL` → 300s execution lease（与 187 §2.8「启动 rebuild = 未终结 Execution + PENDING CR」口径一致）。
+- 恢复窗口内用 `rebuilding` 标记挡住 `tryAcquirePendingDecision`，避免重建到一半的容量被抢占（恢复是幂等的，重跑一次结果相同）。
 
 ## 4. 60s 超时重路由
 

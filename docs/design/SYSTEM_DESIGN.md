@@ -112,6 +112,12 @@ MVP 不做微服务。单体 + 独立 Worker 进程；触发以下任一条件�
 | 部署 | Docker Compose → K8s | |
 | 可观测 | OTel + Prometheus + Grafana + Loki | |
 
+> ⚠ **技术栈裁决冲突（v0.4.4 登记 · 未拍板，M1 前必须先解决）**
+> AgentBoard 文档 id=187《MateOS 组件流程图》首页口径为「**后台 .NET 已裁决**」，并把 BullMQ 的等价物定义为 `outbox + SELECT ... FOR UPDATE SKIP LOCKED` relay。
+> 本表与 `detailed/09-implementation-checklist.md` §3.1 仍写 `NestJS (Node 22 LTS) / Prisma / BullMQ`，detailed 00–09 的全部伪代码亦按 Node 侧写法。
+> **两者不能同时成立**。裁决来源确认前，本表状态为**待定**，**不得作为 M1 工程骨架依据**。
+> 拍板后需同步修改：本表 → `detailed/09` §3.1 → `detailed/03` §8 Agent SDK 示例 → 所有出现 `BullMQ` 的段落（.NET 侧统一改为 outbox relay 表述）。
+
 ---
 
 ## 3. 服务拆分

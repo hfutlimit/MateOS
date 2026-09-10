@@ -366,26 +366,41 @@ async def handle_collab_decision_ACCEPT(collab_id, agent_id, analysis):
 **Execution 完成路径**：
 
 ```python
-async def handle_execution_result(execution_id, envelope_id, status):
+async def handle_execution_result(execution_id, attempt_no, envelope_id, status):
+    """
+    v0.4.4：attempt_no 必须由调用方显式带入（来自 result envelope / 内部计时器），
+    禁止再从 agent_executions 反查——终态 CAS 会先把 active_attempt_no 置 NULL，
+    反查必得 NULL，attempt 永远收不了尾。
+    """
     async with db.transaction() as tx:
-        # 1. CAS terminal
+        # 0. 锁定并校验当前 attempt（隔离旧 attempt 的迟到结果）
+        row = await tx.fetchrow("""
+            SELECT active_attempt_no FROM agent_executions
+            WHERE id = $1 FOR UPDATE
+        """, execution_id)
+        if row is None or row['active_attempt_no'] != attempt_no:
+            return  # 旧 attempt 的迟到结果 / 未知 execution：直接丢弃
+
+        # 1. CAS 终态（带 active_attempt_no 条件，杜绝跨 attempt 收尾）
         affected = await tx.execute("""
             UPDATE agent_executions
             SET status = $2, completed_at = NOW(), active_attempt_no = NULL,
                 terminal_envelope_id = $3
             WHERE id = $1 AND status IN ('PENDING', 'RUNNING')
+              AND active_attempt_no = $4
             RETURNING id
-        """, execution_id, status, envelope_id)
+        """, execution_id, status, envelope_id, attempt_no)
 
         if not affected:
-            return  # 重复 / stale
+            return  # 重复 / stale / attempt 已切换
 
-        # 2. update attempt
+        # 2. 结束该 attempt（用入参 attempt_no，不再反查）
+        attempt_status = {'SUCCEEDED': 'COMPLETED'}.get(status, status)
         await tx.execute("""
             UPDATE execution_attempts
-            SET status = 'COMPLETED', completed_at = NOW()
-            WHERE execution_id = $1 AND attempt_no = (SELECT active_attempt_no FROM agent_executions WHERE id = $1)
-        """, execution_id)
+            SET status = $3, completed_at = NOW()
+            WHERE execution_id = $1 AND attempt_no = $2 AND status = 'RUNNING'
+        """, execution_id, attempt_no, attempt_status)
 
         # 3. 写 outbox
         await tx.execute("""
@@ -396,6 +411,14 @@ async def handle_execution_result(execution_id, envelope_id, status):
 
     # 事务外：outbox worker → 释放 lease + 写 AGENT_OUTPUT 投影
 ```
+
+**v0.4.4 修正（attempt 收尾 + 旧 attempt 隔离）**：
+
+- 原写法先 `SET active_attempt_no = NULL`，下一条 SQL 又用 `active_attempt_no` 反查要结束的 attempt —— 必然匹配 0 行，**attempt 永远停在 RUNNING**。
+- 现写法：入参显式带 `attempt_no`；事务内先 `SELECT ... FOR UPDATE` 锁定 Execution 并比对 `active_attempt_no`；CAS 增加 `AND active_attempt_no = $attempt_no`；attempt 只收尾 `status='RUNNING'` 的那一条。
+- 迟到结果隔离：attempt 1 的 result 在 attempt 2 已启动后到达 → `active_attempt_no != attempt_no` → 丢弃，不会把正在运行的 Execution 判成终态。
+- 调用方：`execution.result` envelope 必须携带 `execution_id + attempt_no`（与 `03-ws` 的 `execution.cancel` / `resume_request` 同一套契约）。
+- 同样的问题在 `detailed/08` §3 `terminal_fail()` / `terminal_timeout()` 里存在，需按同一模式补 `attempt_no`（见 08 的 v0.4.4 注）。
 
 ### 4.5 解决的具体问题
 

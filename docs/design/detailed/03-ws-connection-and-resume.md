@@ -108,6 +108,9 @@ Agent 进程
 // ─── Agent 上报 lifecycle/activity ───
 { "type": "status",       "payload": {
     "status": "OFFLINE|AVAILABLE|THINKING|WORKING|WAITING_CONTEXT|ERROR",
+    // v0.4.4 补：status='WORKING' 时必填，用于回填 dispatch_acked_at
+    // （缺字段 → Runtime 无法判定是哪次 attempt 在跑，见 §7 / §7.1）
+    "execution_id"?, "attempt_no"?,
     "reason"?, "since"
 }}
 ```
@@ -418,15 +421,36 @@ async def dispatch_to_agent(execution_id, attempt_no):
 ```python
 async def on_agent_status(agent_id, status, execution_id=None, attempt_no=None):
     """Agent 推 status envelope 时"""
-    if status == 'WORKING' and execution_id and attempt_no:
-        # Agent 已 ACK dispatch
-        await db.update("""
-            UPDATE execution_attempts
-            SET dispatch_acked_at = NOW()
-            WHERE execution_id = $1 AND attempt_no = $2
-              AND dispatch_acked_at IS NULL
-        """, execution_id, attempt_no)
+    if status != 'WORKING':
+        return
+
+    # v0.4.4：WORKING 必须带 execution_id + attempt_no（契约见 §2）
+    # 缺失时**不猜**当前 attempt——max_concurrency > 1 时按 agent 维度无法判定，
+    # 猜错会把 ACK 记到另一次 attempt 上。只记指标 + 告警，交给 §7.1 补洞。
+    if not (execution_id and attempt_no):
+        metrics.incr('execution.dispatch_ack.missing_fields')
+        log.warn('status=WORKING without execution_id/attempt_no', agent_id=agent_id)
+        return
+
+    # 幂等：只回填一次，迟到 / 重复的 status 不覆盖首次 ACK 时间
+    await db.update("""
+        UPDATE execution_attempts
+        SET dispatch_acked_at = NOW()
+        WHERE execution_id = $1 AND attempt_no = $2
+          AND dispatch_acked_at IS NULL
+    """, execution_id, attempt_no)
 ```
+
+### 7.1 ACK 补洞（v0.4.4 · Runtime / Redis 重启后禁止盲目重派）
+
+| 场景 | 现象 | 处理 |
+| --- | --- | --- |
+| status 已带 `execution_id + attempt_no` | 正常回填 `dispatch_acked_at` | §7 主路径 |
+| 旧契约客户端（只发 `status/reason/since`） | ACK 永远为空 | 记 `execution.dispatch_ack.missing_fields` 并告警，**不猜 attempt** |
+| Agent 已启动，ACK 在网络 / Runtime 重启中丢失 | execution=`RUNNING` 但 `dispatch_acked_at IS NULL` | 重启后先发 `execution.resume_request`，等 `resume_ack` 或 `execution.event`；`ack_wait_s`（默认 15s）内无响应才重派**同一 attempt_no** |
+| 重派同一 attempt | Agent 收到重复 dispatch | 客户端**必须按 `(execution_id, attempt_no)` 去重**：已有该 attempt 上下文时改走 resume，不重新起跑 |
+
+要点：重启恢复能安全工作的前提只有一个——**客户端按 `(execution_id, attempt_no)` 幂等**。SDK `on('dispatch')` 首次收到即建 attempt 上下文；重复收到同一 `(execution_id, attempt_no)` 时只重新绑定 WS 会话，不得重复执行。缺了这条，任何重派都会造成重复执行与重复计费。
 
 ## 8. Agent SDK 设计
 

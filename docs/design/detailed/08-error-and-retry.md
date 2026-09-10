@@ -84,8 +84,17 @@ async def handle_error(execution_id, error_envelope):
     code = error_envelope.payload.code
 
     # 不可重试：立即终态
-    if code in ('PROVIDER_401', 'PROVIDER_403', 'SANDBOX_INIT_FAILED', 'DEADLINE_EXCEEDED'):
+    if code in ('PROVIDER_401', 'PROVIDER_403', 'SANDBOX_INIT_FAILED'):
         await terminal_fail(execution_id, code)
+        return
+
+    # v0.4.4：deadline 触顶是**超时终态**，不是失败
+    # agent_executions.status 有 TIMEOUT 枚举（E7 / SYSTEM_DESIGN §4），
+    # 写成 FAILED 会让 UI 与统计把"超时"和"执行失败"混为一谈，
+    # 也违反 E7 状态机 RUNNING → TIMEOUT 的迁移
+    if code == 'DEADLINE_EXCEEDED':
+        execution = await get_execution(execution_id)
+        await terminal_timeout(execution_id, execution.active_attempt_no, code)
         return
 
     # 可重试：判断 attempt_count
@@ -95,8 +104,10 @@ async def handle_error(execution_id, error_envelope):
         return
 
     # 计算 backoff
+    # v0.4.4：attempt_count = "已发生的尝试次数"，首次失败时为 1。
+    # 直接当 retry_index 会得到 5 * 5^1 = 25s，而 §2.2 表格要求首次重试 5s
     backoff_s = compute_backoff(
-        retry_index=execution.attempt_count,
+        retry_index=execution.attempt_count - 1,
         retry_after_s=error_envelope.payload.retry_after_s
     )
 
@@ -112,19 +123,32 @@ async def handle_error(execution_id, error_envelope):
 （同 v0.4.2，仅命名变化）
 
 ```python
-async def terminal_fail(execution_id, failure_code):
+async def terminal_fail(execution_id, failure_code, attempt_no=None):
+    """
+    v0.4.4：attempt_no 由调用方带入（重试路径 = 当前 attempt；超时路径 = 计时器持有的 attempt）。
+    不传时退化为旧 CAS，**不具备旧 attempt 隔离能力**，仅用于兼容。
+    """
     async with db.transaction() as tx:
-        # 1. CAS
+        # 1. CAS（带 attempt 条件，与 detailed/01 §4.4 v0.4.4 同模式）
         affected = await tx.execute("""
             UPDATE agent_executions
             SET status='FAILED', completed_at=NOW(),
                 failure_code=$1, active_attempt_no=NULL,
                 terminal_envelope_id=$2
             WHERE id=$3 AND status IN ('PENDING', 'RUNNING')
-        """, failure_code, envelope_id, execution_id)
+              AND ($4::int IS NULL OR active_attempt_no = $4)
+        """, failure_code, envelope_id, execution_id, attempt_no)
 
         if not affected:
-            return  # 重复
+            return  # 重复 / attempt 已切换
+
+        # 1b. 收尾该 attempt（用入参，不再反查已被置 NULL 的 active_attempt_no）
+        if attempt_no is not None:
+            await tx.execute("""
+                UPDATE execution_attempts
+                SET status='FAILED', completed_at=NOW()
+                WHERE execution_id=$1 AND attempt_no=$2 AND status='RUNNING'
+            """, execution_id, attempt_no)
 
         # 2. 写 audit + outbox
         await tx.execute("""
@@ -135,6 +159,39 @@ async def terminal_fail(execution_id, failure_code):
     # 3. 通知 E4（outbox worker）
     # 4. AGENT_OUTPUT 投影 + SYSTEM 事件
 ```
+
+### 3.1 超时终态（v0.4.4 新增）
+
+`DEADLINE_EXCEEDED` 属于 `agent_executions.status='TIMEOUT'`，**不得**写成 `FAILED`：UI 与 Agent 评分口径里"超时"和"执行失败"是两类信号，E7 / SYSTEM_DESIGN §4 的终态枚举也单独给了 `TIMEOUT`。
+
+```python
+async def terminal_timeout(execution_id, attempt_no, failure_code='DEADLINE_EXCEEDED'):
+    async with db.transaction() as tx:
+        affected = await tx.execute("""
+            UPDATE agent_executions
+            SET status='TIMEOUT', completed_at=NOW(),
+                failure_code=$1, active_attempt_no=NULL,
+                terminal_envelope_id=$2
+            WHERE id=$3 AND status IN ('PENDING', 'RUNNING')
+              AND active_attempt_no = $4
+        """, failure_code, envelope_id, execution_id, attempt_no)
+
+        if not affected:
+            return  # 重复 / attempt 已切换
+
+        await tx.execute("""
+            UPDATE execution_attempts
+            SET status='INTERRUPTED', completed_at=NOW()
+            WHERE execution_id=$1 AND attempt_no=$2 AND status='RUNNING'
+        """, execution_id, attempt_no)
+
+        await tx.execute("""
+            INSERT INTO outbox_events (event_type, payload, idempotency_key)
+            VALUES ('execution.timeout', $1, $2)
+        """, {...}, f'exec-timeout-{execution_id}-{attempt_no}')
+```
+
+超时后同样要 `releaseLease`（交 outbox worker），否则 slot 会挂到 lease TTL 到期。
 
 ## 4. ERROR 活动状态（v0.4.3 修复 P1-5）
 

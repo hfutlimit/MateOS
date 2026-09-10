@@ -150,25 +150,41 @@ async updateWorkItem(ref, changes, binding) {
 # 收 webhook
 async def jira_webhook(request):
     body = await request.body()
-    signature = request.headers.get('X-Hub-Signature', '')
-    webhook_id = request.headers.get('X-Atlassian-Webhook-Identifier', '')
+    event = json.loads(body)
 
-    # v0.4.3 改：先查 work_management_webhooks 表（不是 connection）
-    webhook = await db.get_webhook_by_external_id(webhook_id)
+    # v0.4.4 修正（对齐 Atlassian 实际协议）：
+    #   X-Atlassian-Webhook-Identifier = **单次投递 ID**（标识一次投递、用于去重重试），
+    #   **不是**注册订阅 ID；命中的动态订阅 ID 在 body.matchedWebhookIds[] 里。
+    delivery_id = request.headers.get('X-Atlassian-Webhook-Identifier', '')
+    matched_ids = event.get('matchedWebhookIds') or []
+
+    # 先按命中的订阅 ID 定位本地注册记录（不是 connection）
+    webhook = await db.get_webhook_by_external_id(matched_ids[0]) if matched_ids else None
     if not webhook:
         return 404
 
-    if not hmac.verify(body, signature, webhook.secret):
+    # OAuth 2.0 动态 webhook 用 Bearer 校验：
+    # 没有 X-Hub-Signature（那是 GitHub 的协议），也没有 webhook.secret 概念
+    token = request.headers.get('Authorization', '').removeprefix('Bearer ').strip()
+    if not hmac.compare_digest(token, webhook.auth_token):
         return 401
+
+    # 幂等：Atlassian 会重试投递，同一 delivery_id 只处理一次
+    if await has_seen_delivery(delivery_id):
+        return 202
+    await mark_delivery_seen(delivery_id)
 
     # 入 BullMQ
     await bullmq.enqueue('sync.jira.inbound', {
         'webhook_id': webhook.id,
         'binding_id': webhook.binding_id,        # v0.4.3 关键
-        'event': json.loads(body)
+        'delivery_id': delivery_id,
+        'event': event
     })
     return 202
 ```
+
+**v0.4.4 修正说明**：照旧写法实现会**拒绝全部合法回调**——`X-Atlassian-Webhook-Identifier` 每次投递都变，拿它去查本地注册记录必然 404；`X-Hub-Signature` 与 `webhook.secret` 在 Jira OAuth 2.0 webhook 上根本不存在，鉴权分支会 401。注册订阅时 Jira 返回的 `webhookRegistrationResult[]` 需落库保存（订阅 ID + `auth_token`），并保存 `expirationDateTime` 以便到期前刷新。
 
 ```python
 # worker 处理

@@ -272,17 +272,10 @@ WHERE m.project_id IN (
 async def accessible_project_ids(principal: MemberRef) -> list[UUID]:
     """统一权限查询：返回 principal 能访问的所有 project_id"""
     if principal.type == 'USER':
-        # User 能访问：自己 owner 的 project + 自己被邀请为 member 的 project
+        # v0.4.4 修正：只按显式 Project membership 授权
         return await db.query("""
-            SELECT id FROM projects
-            WHERE team_id IN (
-              SELECT team_id FROM team_members
-              WHERE user_id = $1
-            )
-            OR id IN (
-              SELECT project_id FROM project_members
-              WHERE user_id = $1
-            )
+            SELECT project_id FROM project_members
+            WHERE user_id = $1
         """, principal.id)
     elif principal.type == 'AGENT':
         return await db.query("""
@@ -290,6 +283,12 @@ async def accessible_project_ids(principal: MemberRef) -> list[UUID]:
             WHERE agent_id = $1 AND can_read_history = true
         """, principal.id)
 ```
+
+**v0.4.4 越权修复要点（替换 §6.1 指出的问题）**：
+
+- 删掉 `WHERE team_id IN (SELECT team_id FROM team_members ...)` 分支。**Team 成员 ≠ Project 成员**：用 Team 反查会把该 Team 下用户**并未加入**的 Project 全部放行；用户被移出某 Project 后，只要仍在 Team 内就仍能读到该 Project 的共享 Memory。原 v0.4.3 写法只是把这条越权分支"统一"到了一个函数里，问题本身没消除。
+- 唯一授权来源：User → `project_members`；Agent → `agent_project_membership(can_read_history)`。所有跨模块可见性查询（Memory 检索、Inbox 聚合、WorkItem 列表）都必须走 `accessible_project_ids()`，禁止各模块手写 team→project 反查。
+- 回归用例（必须进 e2e）：**同 Team、不同 Project** —— 用户 A 是 Team T 成员但只加入 P1，检索 `scope_type='PROJECT'` 的 Memory 时不得返回 P2 的任何条目；随后把 A 从 P1 的 `project_members` 移除，同一查询立即返回空集。
 
 ### 6.3 搜索查询（v0.4.3 修正）
 
