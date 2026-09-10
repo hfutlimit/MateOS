@@ -198,7 +198,7 @@ WHERE id = $2
   1. 查 agent_executions.terminal_envelope_id
      - 相同 → 重复 terminal，忽略（idempotency）
      - 不同 → 走 CAS
-  2. affected_rows = 1 → 真正完成 → active_slots 释放
+  2. affected_rows = 1 → 真正完成 → 写 outbox `execution.terminal` → E4 releaseLease（slot 释放）
   3. affected_rows = 0 → stale / 重复 / 并发竞争 → 忽略
 ```
 

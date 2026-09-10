@@ -23,7 +23,7 @@
 > 9. **E4 / E7 协议彻底拆开**：`collaboration.*`（E4 拥有）vs `execution.*`（E7 拥有）；`execution.result` 不携带 decision；`collaboration.decision` 不携带 execution_id
 > 10. **execution_id 由 E4 Orchestrator → E7 API 产生**（不是 Agent 自报），消除 v0.4 的不可能时序
 > 11. **CollaborationRequest.status 收敛**为 `PENDING|ACCEPTED|REJECTED|NEED_CONTEXT|UNRESOLVED|CANCELLED`（去掉 EXECUTING/COMPLETED/FAILED，Execution 状态由 E7 维护）
-> 12. **Resolver 调度改用 lifecycle=ACTIVE + active_slots < max_concurrency**（不再用 activity；activity 仅做 UI derived）
+> 12. **Resolver 调度改用 lifecycle=ACTIVE + slot 占用 < max_concurrency**（不再用 activity；activity 仅做 UI derived）—— v0.7 起 slot 占用判定为 Redis **per-lease ZSET**，见 §4.2.1
 > 13. **Attempt ≠ WS session**：reconnect 不新建 attempt；新增 `execution.resume` 协议
 > 14. **Event 协议级幂等**：`provider_event_id` + UNIQUE(attempt_id, provider_event_id)
 > 15. **E8 简化**：`work_item_projections` 表删除；`work_items` 单表含 `search_text` / `provider_status` / `provider_meta`
@@ -33,7 +33,7 @@
 > 19. **Jira Status Mapping 动态**：`listStatuses(binding)` 而非 Provider 级静态模板
 >
 > **v0.3.1 → v0.3.2 并发与幂等收口**（架构评审后）：
-> 20. **Capacity 原子化**：旧方案 `agents.max_concurrency + agents.active_slots` 是 DB + Redis 双事实源，存在 SELECT → accept → INSERT 的 race。**新方案**：仅 `max_concurrency` 落 DB（durable config），`active_slots` 归 Redis Lua atomic semaphore；`agent-capacity:{agent_id}` hash，tryAcquireSlot / releaseSlot 一次 EVAL 完成
+> 20. **Capacity 原子化**：旧方案 `agents.max_concurrency + agents.active_slots` 是 DB + Redis 双事实源，存在 SELECT → accept → INSERT 的 race。**新方案**：仅 `max_concurrency` 落 DB（durable config），slot 占用归 Redis Lua 原子操作。**v0.7 定稿**：per-lease **ZSET** `agent-capacity:{agent_id}:leases`（member=lease_id，score=expires_at）+ `fence`/`rebuilding`；中间 Hash 版（`used` + 整 key EXPIRE）已废弃 —— 详见 §4.2.1
 > 21. **Slot 提前 reservation**：Resolver 选 Agent → 立即 tryAcquireSlot → 成功才 dispatch；不等到 ACCEPT 后再 acquire（语义"我可以但 Runtime 拒绝"很奇怪）
 > 22. **`agents.active_slots` 字段删除**：E2 删字段，状态归 Redis
 > 23. **resume 协议反向**（E7 改）：旧 `execution.resume` 是 Agent 推 last_event_seq、Runtime 补发——但 event 是 Agent 产，Runtime 补发是错的。新协议 `execution.resume_request`（Agent 问）→ `execution.resume_ack`（Runtime 答 `last_persisted_seq`）→ Agent 从 43 续发
@@ -191,7 +191,7 @@ CollaborationRequest
   └─ idempotency_key
 
 ↓ Resolver（如未指定 target_agent_id）
-  ① 硬过滤：lifecycle=ACTIVE ∩ active_slots < max_concurrency ∩ permission 允许    # v0.3.1 改
+  ① 硬过滤：lifecycle=ACTIVE ∩ 成员资格 ∩ 有效权限 ALLOW    # v0.7 改：不再用 activity / active_slots（见 §6.2 与 §4.2.1）
   ② Capability ranking：capability_match + load + accept_rate_30d
   ③ 产出 Top-N 候选
 
@@ -238,73 +238,94 @@ T2:  两次 dispatch → 两次 ACCEPT → 两次 active_slots++ → 实际值=2
 
 **双事实源 + 不可序列化**。同时 SELECT 看到的是过期快照。
 
-**新方案**：单一事实源（Redis Lua atomic semaphore）
+**中间方案（v0.4.2–v0.6 Hash 版）—— 已废弃，勿实现**：
 
 ```
-Redis key: agent-capacity:{agent_id}
-  used        当前已 reservation 的 slot 数
-  max         来自 agents.max_concurrency（启动时写入）
-  leases      hash: lease_id → collaboration_request_id
+Redis key: agent-capacity:{agent_id}   hash { used, max, leases{lease_id→collab_id} }
+tryAcquireSlot：used++、leases[lease_id]=collab_id、EXPIRE（整 key）
+releaseSlot：HDEL leases[lease_id]、used--
+```
+
+废弃原因：`EXPIRE` 作用于**整个 key**，任一 lease 续期都会延长其它 lease（per-lease 隔离失效）；`used` 与 `leases` 是两个可变字段，release 路径漏一次即永久漂移；无法表达「每个 lease 各自过期」。
+
+**Current（v0.7）单一事实源：per-lease ZSET + fencing**
+
+```
+agent-capacity:{agent_id}:leases        ZSET  member=lease_id, score=expires_at(ms)
+agent-capacity:{agent_id}:config        hash  { max }      ← 来自 agents.max_concurrency
+agent-capacity:{agent_id}:fence         int   递增
+agent-capacity:{agent_id}:rebuilding    fence 值，SET NX EX 30
 ```
 
 ```
-EVAL tryAcquireSlot(agent_id, lease_id, collab_id, ttl)
-  1. if leases[lease_id] exists → 重复 reservation，idempotency 返回成功
-  2. if used >= max → return {0, used}            # 失败
-  3. used++, leases[lease_id] = collab_id
-  4. EXPIRE
-  5. return {1, used+1}
+EVAL tryAcquireSlot(agent_id, lease_id, ttl_ms)
+  1. if exists rebuilding            → return {0, 'REBUILDING'}
+  2. ZREMRANGEBYSCORE leases -inf now  （惰性回收全部过期 lease）
+  3. if ZSCORE leases lease_id        → return {1, 'EXISTS'}   （幂等）
+  4. if ZCARD leases >= max           → return {0, 'FULL'}
+  5. ZADD leases now+ttl_ms lease_id  → return {1, ZCARD}
 
-EVAL releaseSlot(agent_id, lease_id)
-  1. if not leases[lease_id] → return 0
-  2. HDEL leases[lease_id]
-  3. used = max(0, used - 1)
-  4. return 1
+EVAL promoteLease(agent_id, from_lease, to_lease, ttl_ms)   ZREM from → ZADD to
+EVAL renewLease(agent_id, lease_id, ttl_ms)                 只改该 member 的 score
+EVAL releaseLease(agent_id, lease_id)                       ZREM lease_id
 ```
+
+**为什么是 ZSET**：`ZREMRANGEBYSCORE` 一次回收所有过期项；`ZCARD` 即当前占用（不需要 `used` 计数，消除第二事实源）；每个 lease 独立 score，续期互不影响。
+
+**Fencing**：所有 lease 写操作带 fence token，小于当前 fence 的写入被丢弃 —— 防多实例同时 rebuild 互相覆盖。
+
+**启动 rebuild**：`incr fence → SET rebuilding NX EX 30 → 读 DB → 写 staging ZSET → RENAME 原子发布 → 比对 fence 后清锁`；恢复窗口内 `tryAcquireSlot` 一律返回 `REBUILDING`（实现细节见 `detailed/04` §3.6）。
 
 **单一事实源**：
 - `max_concurrency`：DB 字段（durable config）
-- `active_slots`：Redis 字段（Runtime scheduling state）
-- DB + Redis **没有**双写
+- 占用集合与到期时间：Redis ZSET（Runtime scheduling state，可随时由 DB 重建）
+- DB 与 Redis **没有**双写
 
 **Slot 提前 reservation**：
 
 ```
-Resolver 选 Agent → 立即 tryAcquireSlot → 成功才 dispatch
+Resolver 选 Agent → tryAcquireSlot(pending_decision) → 成功才推 collaboration.request
   ↓
 Agent ACCEPT
   ↓
-E4 调 E7 API 创建 execution（slot lease 仍由 E4 持有，引用 collaboration_requests.slot_lease_id）
+E4 事务外直调 E7 创建 execution（lease 由 E4 promote 为 execution lease，仍引用 collaboration_requests.slot_lease_id）
   ↓
-E7 推 execution.result SUCCEEDED / FAILED → E4 释放 slot
+E7 terminal → outbox → E4 releaseLease
   ↓
-或：Agent REJECT / NEED_CONTEXT / timeout / 管理员 cancel → E4 释放 slot
+或：Agent REJECT / NEED_CONTEXT / timeout / 管理员 cancel → E4 releaseLease
 ```
+
+**capacity invariant（v0.7 冻结）**：容量在 **Resolver 阶段**已由 lease 预占（`tryAcquireSlot → ACCEPT → promoteLease`），因此**执行阶段不应再出现 `CAPACITY_FULL`**。
+若 `execution.dispatch` 时 Agent 报满/掉线，按 **transport 问题**处理（重试同一 `(execution_id, attempt_no)` → 超过阈值 FAILED + 进 Inbox），**不回到 Resolver 重路由** —— CR 在 ACCEPT 后即终态，且 `UNIQUE(collaboration_request_id)` 保证一个 CR 只有一个 Execution。详见 `detailed/03` §7.2 与 `detailed/10` §2 B2。
 
 ### 4.3 Memory 写入门禁
 
 ```
 Agent proposal（type / content / source 引用）
-  ↓ permission check：write_memory → REQUIRE_APPROVAL
+  ↓ permission check：propose_memory（v0.7 修正：8 键拆分后应为 propose_memory，默认 ALLOW）
   ↓ 写 memory_proposals（status=PROPOSED）
   ↓ WS 推送给 project 内有 approve_memory 权限的人类
-  ↓ Approve → 写 memory_items（status=APPROVED）→ 入库 + 索引
+  ↓ Approve → permission check：approve_memory → 写 memory_items（status=APPROVED）→ 入库 + 索引
   ↓ Reject → memory_proposals.status=REJECTED
 ```
+
+> **v0.7 修正**：此前此处写 `write_memory → REQUIRE_APPROVAL`，与 8 键设计（`propose_memory` 管申请、`write_memory` 仅 service-to-service）矛盾，会导致 `propose_memory` 存在却不控制申请入口。`write_memory` **不**出现在 Agent 申请路径上，仅由 Memory Service 在审批通过后内部调用。
 
 Source 三件套（`source_type` / `source_channel_id` / `source_message_seq`）强约束。
 
 ### 4.4 Work Management 抽象
 
 ```
-WorkManagementProvider interface
+WorkManagementProvider interface          # 正式定义见 §9.1（v0.7 摘要同步）
   ├─ getCapabilities() → ProviderCapabilities
-  ├─ listWorkItems(query) → WorkItemPage
-  ├─ getWorkItem(ref) → WorkItem
-  ├─ createWorkItem(input) → WorkItem
-  ├─ updateWorkItem(ref, changes) → WorkItem
-  ├─ addComment(ref, comment) → WorkComment
-  └─ getStatusMapping() → CanonicalStatusCategory[]
+  ├─ getSelfMetadata() → ProviderMetadata            # 只返回 capability，无静态 status 模板
+  ├─ listStatuses(binding) → ProviderStatus[]        # v0.3.1：按 binding 动态拉
+  ├─ listWorkItems(query, binding) → WorkItemPage
+  ├─ getWorkItem(ref, binding) → WorkItem
+  ├─ createWorkItem(input, binding) → WorkItem
+  ├─ updateWorkItem(ref, changes, binding) → WorkItem
+  ├─ addComment(ref, comment, binding) → WorkComment
+  └─ getStatusMapping(binding) → CanonicalStatusMapping[]
 
 BuiltInProvider（MVP）
   └─ work_items 直接读写 PG（单表即 canonical 表示）
@@ -979,3 +1000,4 @@ CREATE UNIQUE INDEX uq_project_active_work_provider
 | v0.4.5 | 2026-09-10 | **正文回修**（此前只改摘要未改正文）：CR 状态收敛 6 态；Resolver 改 `lifecycle ∩ slot ∩ 有效权限`，§6.4 ERROR 不再挡候选；`work_item_projections` 架构图/表清单/DDL 三处删除；Connector 协议改 `execution.resume_request`/`resume_ack`；`execution_events` 加 `provider_event_id + attempt_id NOT NULL + UNIQUE`；`work_management_connections` 改 `(org_id, owner_user_id)`；`getSelfMetadata` 补"只返回 capability"；权限 7 键 → 8 键（DDL + 默认矩阵 + §3.1）；§8 协议汇总区分消息级/执行级 resume |
 | v0.5 | 2026-09-10 | **技术栈拍板 .NET**（ASP.NET Core + EF Core + outbox relay，BullMQ 移除，协议层中立）；**DDL 收口**：补 `agents.max_concurrency/health`、`agent_executions.active_attempt_no/terminal_envelope_id` + 幂等唯一索引、`execution_attempts` 状态 CHECK 与 dispatch/续传列、`work_items.binding_id/provider_*/search_text`，新增 `outbox_events` / `webhook_inbox` / `work_management_webhooks` 三表入清单与 DDL；§11 实施顺序与 detailed/09 对齐（M7=E7、M8=E10） |
 | v0.6 | 2026-09-10 | **D9 冻结**：ACCEPT 后由 E4 事务外直调 E7 创建 Execution，outbox 仅兜底重试（§11 同步）；**D7 拍板**：实施切法改 **S1/S2/S3 竖切**，M1–M9 退为能力域标签（§11 重写）；**S1 的 Agent 端 = stub**（新增 `detailed/10-agent-stub-and-sdk.md`，B1–B8 行为矩阵）；补 E6 审计触发点（E10 §3.1）与 E5 `policy.evaluate('propose_memory')` 调用点 |
+| v0.7 | 2026-09-10 | **§4.2.1 换成 per-lease ZSET + fencing**（Hash 版标废弃；含 rebuild 顺序与 `REBUILDING` 闸；E4 §4.2 同步）；**`dispatch_ack` 语义定型为 transport 收据**（去掉 `accepted=false` 与"dispatch 拒收→重路由"这条在 CR 状态机里无合法迁移的分支，改为送达失败 → 重试同一 attempt → Inbox）；**§4.3 Memory 门禁改 `propose_memory`**（此前误写 `write_memory`）；**§4.4 Provider 摘要同步正式接口**（`listStatuses(binding)` / `getStatusMapping(binding) → CanonicalStatusMapping[]`）；§4.1 候选过滤去掉 `active_slots` 表述 |

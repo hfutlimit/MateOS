@@ -105,11 +105,11 @@ Agent 进程
     "snapshot": { execution_id, input, context, deadline_s }
 }}
 
-// ─── v0.5 显式 dispatch ACK（transport 层协议，与 activity 解耦）───
+// ─── v0.7 dispatch ACK = transport receipt（收据，不是第二次业务 acceptance）───
 { "type": "execution.dispatch_ack", "payload": {
     "execution_id", "attempt_no",
-    "accepted": true,                  // false = 明确拒收（见 §7.2）
-    "reason"?: "CAPACITY_FULL|UNKNOWN_EXECUTION|STALE_ATTEMPT"
+    "received": true,
+    "protocol_error"?: "UNKNOWN_EXECUTION|STALE_ATTEMPT"   // 仅协议层异常；不表达业务接受与否
 }}
 
 // ─── Agent 上报 lifecycle/activity（纯 UI 语义，不承载协议状态）───
@@ -119,8 +119,13 @@ Agent 进程
 }}
 ```
 
-> **v0.5 语义拆分**：`status` 只表达 **Agent activity**（给 UI 看），`execution.dispatch_ack` 只表达 **transport/runtime 协议状态**（给 Runtime 用）。
-> 之前用 `status=WORKING + execution_id + attempt_no` 回填 ACK 的做法已废弃：Agent 的实际路径可能是 `dispatch accepted → THINKING → WAITING_CONTEXT → WORKING`，用 activity 反推 ACK 会漏掉"已接受但还没 WORKING"的窗口，也让状态机扩展时反复踩"WORKING 到底是 UI 状态还是 ACK"的问题。
+> **v0.7 语义定型 —— 两件事必须分开**：
+> - `collaboration.decision = ACCEPT` = **我要不要接这个工作**（业务接受；发生在 Resolver 阶段，Agent 承诺后 CR 进入终态 `ACCEPTED` 且 E7 创建唯一 Execution）
+> - `execution.dispatch_ack` = **我有没有收到这次执行指令**（transport 收据；只用于回填 `dispatch_acked_at` 与恢复判定）
+>
+> 因此 ACK **没有** `accepted=false` 分支，也不会出现「`ACCEPTED` 之后要求重路由」这种在 CR 状态机里**没有合法迁移**、且被 `UNIQUE(collaboration_request_id)` 挡住的情况。容量在 Resolver 阶段已由 lease 预占（SYSTEM_DESIGN §4.2.1）。
+>
+> `status` 只表达 **Agent activity**（给 UI 看）。用 `status=WORKING + ids` 反推 ACK 的做法已废弃：Agent 的真实路径可能是 `THINKING → WAITING_CONTEXT → WORKING`，会漏掉"已收到但还没 WORKING"的窗口。
 
 ## 3. Resume 协议（v0.4.3 反向 + contiguous cursor）
 
@@ -428,13 +433,15 @@ async def dispatch_to_agent(execution_id, attempt_no):
 ```python
 async def on_dispatch_ack(agent_id, ack):
     """
-    v0.5：ACK 是显式协议消息，不再从 status=WORKING 反推。
-    status 只更新 activity，与本协议处理完全分离。
+    v0.7：ACK = transport 收据，只做一件事——记下"这条 dispatch 已送达并被接收"。
+    不释放 slot、不重路由（业务接受已在 collaboration.decision 阶段完成，
+    CR=ACCEPTED 是终态，且一个 CR 只有一个 Execution）。
     """
-    if not ack.accepted:
-        # 明确拒收：立即释放 slot + 走换候选，不等 lease 过期
-        await release_lease(agent_id, ack.execution_id)
-        await reroute_next_candidate(ack.execution_id, reason=ack.reason)
+    if ack.protocol_error:
+        # 协议层异常：只记录，不改变任何状态（重试/恢复走 §7.1）
+        metrics.incr(f'execution.dispatch_ack.protocol_error.{ack.protocol_error}')
+        log.warn('dispatch_ack protocol_error', execution_id=ack.execution_id,
+                 attempt_no=ack.attempt_no, err=ack.protocol_error)
         return
 
     # 幂等：只回填一次，迟到 / 重复 ACK 不覆盖首次时间
@@ -468,15 +475,24 @@ async def on_agent_status(agent_id, status, reason=None, since=None):
 
 要点：重启恢复能安全工作的前提只有一个——**客户端按 `(execution_id, attempt_no)` 幂等**。SDK `on('dispatch')` 首次收到即建 attempt 上下文并立即回 `execution.dispatch_ack`；重复收到同一 `(execution_id, attempt_no)` 时只重新绑定 WS 会话并再次 ACK，不得重复执行。缺了这条，任何重派都会造成重复执行与重复计费。
 
-### 7.2 拒收语义（v0.5 新增）
+### 7.2 ACK 语义与 capacity invariant（v0.7 重写）
 
-`accepted=false` 是**显式拒收**，与"超时未 ACK"区分开：
+**ACK 只有一个含义：dispatch 已送达并被接收。** 它不表达业务接受（那是 `collaboration.decision`），因此**没有拒收分支，也不会触发重路由**。
 
 | 情形 | Agent 行为 | Runtime 行为 |
 | --- | --- | --- |
-| 本地已满 / 不想接 | 立即回 `dispatch_ack{accepted=false, reason=CAPACITY_FULL}` | 立即 `releaseLease` + 取下一候选，**不等 90s** |
-| 收到未知 execution / 过期 attempt | 回 `accepted=false, reason=UNKNOWN_EXECUTION / STALE_ATTEMPT` | 记 `stale` 指标，不重派 |
-| 崩溃 / 网络断，没来得及回 | 无 ACK | 走 §7.1 的 `ack_wait_s` 超时路径 |
+| 正常收到 dispatch | 立即回 `dispatch_ack{received:true}`（先按 `(execution_id, attempt_no)` 幂等去重） | 回填 `dispatch_acked_at`；Execution 进入 RUNNING 判定路径 |
+| 收到未知 execution / 过期 attempt | 回 `dispatch_ack{received:true, protocol_error:UNKNOWN_EXECUTION/STALE_ATTEMPT}` | 记 `protocol_error` 指标并丢弃，**不改状态、不重派** |
+| Agent 崩溃 / 网络断，没来得及回 | 无 ACK | 走 §7.1 的 `ack_wait_s` 超时路径：先 `execution.resume_request`，仍无响应才重派**同一 `(execution_id, attempt_no)`**，超阈值 → `FAILED` + 进 Inbox（`execution.failed` 分类） |
+| Agent 本地容量已满 | **不应发生** | 见下 |
+
+**capacity invariant（v0.7 冻结）**：容量在 **Resolver 阶段**已由 lease 预占（`tryAcquireSlot(pending_decision) → ACCEPT → promoteLease(execution)`，SYSTEM_DESIGN §4.2.1）。因此 dispatch 阶段再出现「本地已满」= **invariant 被破坏**，处理方式是：
+
+- 记 `capacity.invariant_violation` 指标 + 告警（这是 bug 信号，不是正常路径）；
+- 仍然**不回到 Resolver**：CR 已 `ACCEPTED`（终态），且 `UNIQUE(collaboration_request_id)` 保证一个 CR 只创建一个 Execution；
+- 由 E7 按「执行不可达」收尾：重试同一 attempt → 超阈值 `FAILED` + 进 Inbox。
+
+> 结论：`dispatch_ack` 从不需要"换下一个候选"，因为 Resolver 的职责在 ACCEPT 那一刻就结束了。
 
 ## 8. Agent SDK 设计
 

@@ -150,7 +150,7 @@ T+26  客户端渲染: 决策卡（v0.4.1 projection）+ Agent 输出卡
 
 **关键**：
 - activity 转换由 Runtime Gateway（E7）写入 DB + Redis presence
-- active_slots 计数在 Redis Lua semaphore（v0.4.2 修复）
+- slot 占用在 Redis **per-lease ZSET**（`agent-capacity:{agent_id}:leases`，v0.7；无 `used` 计数）
 - lifecycle 由 owner REST 控制，与 activity 解耦
 
 ## 3. WS 协议（v0.4.3 修正）

@@ -118,53 +118,52 @@ contracts:
 
 （同 v0.4.2）
 
-## 4. 仓库结构
-
-（同 v0.4.2）
+## 4. 仓库结构（v0.7 随 .NET 收口）
 
 ```
 mateos/
 ├── apps/
 │   ├── web/                  # Next.js 前端
 │   └── api/                  # ASP.NET Core 单体（v0.5）
-├── packages/
-│   ├── contracts/            # 共享 DTO + zod schema
-│   │   ├── auth/
-│   │   ├── project/
-│   │   ├── channel/
-│   │   ├── agent/
-│   │   ├── execution/
-│   │   ├── memory/
-│   │   ├── work-item/
-│   │   ├── permission/       # 8 键 + propose_memory
-│   │   └── provider/        # WorkManagementProvider interface
-│   └── config/              # ESLint / tsconfig
+├── contracts/                # 协议 SSOT（v0.7：不再是 zod 实体）
+│   ├── openapi/              # OpenAPI 3.1（REST 契约）
+│   └── schemas/              # JSON Schema（Connector envelope / 领域 DTO）
+│       ├── collaboration/
+│       ├── execution/
+│       ├── memory/
+│       ├── work-item/
+│       └── permission/       # 8 键 + propose_memory
+├── src/                      # .NET solution
+│   ├── MateOS.Api/           # 宿主 + 模块 + WS 中间件
+│   ├── MateOS.Domain/        # 领域模型 / 不变量
+│   ├── MateOS.Application/   # 用例 / Resolver / Execution 编排
+│   ├── MateOS.Infrastructure/# EF Core + outbox relay + Redis + Provider
+│   └── MateOS.Contracts/     # 由 contracts/schemas 生成的 C# DTO（校验一致性）
 ├── services/
-│   ├── orchestrator/        # E4 Resolver
-│   ├── memory/              # E5 索引
-│   └── runtime/             # E7 Runtime Gateway + Connector transport
+│   └── agent-stub/           # S1 的 stub Agent（v0.7，见 detailed/10）
 ├── tests/
-│   ├── e2e/                 # pytest -m e2e
-│   ├── perf/                # locust 压测
-│   └── unit/                # vitest
+│   ├── MateOS.UnitTests/         # xUnit
+│   ├── MateOS.IntegrationTests/  # xUnit + Testcontainers（PG/Redis）
+│   └── e2e/                      # xUnit + WebApplicationFactory + Testcontainers
+├── web-tests/                # 前端：Vitest（unit）+ Playwright（e2e）
 ├── docs/
-│   ├── requirement/         # PRD + epic
-│   ├── design/              # SD + detailed
-│   └── UI design/           # UI DS + 原型
-└── .github/
-    └── workflows/
-        └── ci.yml
+│   ├── requirement/ / design/ / UI design/
+└── .github/workflows/ci.yml
 ```
 
-## 5. 测试策略
+## 5. 测试策略（v0.7 随 .NET 收口）
 
 | 层 | 工具 | 覆盖 |
 | --- | --- | --- |
-| 单元 | Vitest | ≥ 80% |
-| 集成 | Vitest + docker | DB/Redis/S3 mock |
-| E2E | pytest | ~60 个 |
-| 压测 | locust | 1k WS |
-| 契约 | pact | E4↔E7 / Client↔API |
+| 后端 单元 | **xUnit** | 领域逻辑 / 状态机 / 不变量 ≥ 80% |
+| 后端 集成 | **xUnit + Testcontainers（PostgreSQL / Redis 真实实例）** | Repository / outbox relay / Lua 脚本 |
+| 后端 E2E | **xUnit + `WebApplicationFactory` + Testcontainers** | 主链路（S1 ≤ 15 条） |
+| 前端 单元 | Vitest（**仅 Next.js 前端**） | 组件 / hook |
+| 前端 E2E | Playwright | P0/P5 主流程 |
+| 契约 | OpenAPI schema validation（必要时 PactNet） | Client↔API / E4↔E7 |
+| 压测 | k6 或 locust | 1k WS（S3 之后） |
+
+> **v0.7 更正**：此前的 `pytest / vitest / locust / pact` 组合是 NestJS 时代的残留；Vitest **只保留给前端**，后端一律 xUnit 系。`zod schema` 不再作为契约事实源，契约 = `contracts/openapi` + `contracts/schemas`，TS 与 C# 均由此生成/校验。
 
 ### 5.1 E2E 套件 v0.4.3 汇总
 
@@ -301,7 +300,7 @@ M7: E7 Agent Execution Domain (完整)
 M8: E10 Observability & Operations (完整 Dashboard)
   1. Grafana 面板
   2. @all 成本阈值
-  3. locust 压测
+  3. k6 或 locust 压测
   4. P9 通知中心
   5. P10 审计
   6. E2E audit / notification / trace / load

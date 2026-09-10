@@ -24,7 +24,7 @@ V1 禁止 `execute_code`（PRD §8 Non Goals），但 S1 必须验证的是 **Ma
 | Runtime → Agent | `collaboration.request` | 按 `stub.mode` 决定 ACCEPT / REJECT / NEED_CONTEXT / 不响应 | 01 §T+7 |
 | Agent → Runtime | `collaboration.decision` | 必须带 `reason`；ACCEPT 带 `analysis` 三件套 | 01 §T+11 |
 | Runtime → Agent | `execution.dispatch` | —— | 01 §T+15 |
-| Agent → Runtime | `execution.dispatch_ack` | **收到即回**（默认 `accepted=true`） | 03 §2 §7.2 |
+| Agent → Runtime | `execution.dispatch_ack` | **收到即回** `{received:true}`（transport 收据；先按 `(execution_id, attempt_no)` 去重） | 03 §2 §7.2 |
 | Agent → Runtime | `execution.event` | 带 `provider_event_id` + 单调 `seq`，可配置重复/乱序 | 03 §3.2 |
 | Agent → Runtime | `execution.result` | 终态 envelope：`execution_id + attempt_no + status` | 01 §T+19 |
 | Runtime → Agent | `execution.cancel` | stub 需响应并停止产出（可配置"抗命"分支） | 02 |
@@ -39,7 +39,7 @@ V1 禁止 `execute_code`（PRD §8 Non Goals），但 S1 必须验证的是 **Ma
 | # | 场景 | stub 配置 | 期望的 MateOS 行为（断言点） |
 | --- | --- | --- | --- |
 | B1 | 正常闭环 | `mode=ACCEPT_OK` | CR=ACCEPTED → Execution PENDING→RUNNING→SUCCEEDED；attempt 收尾 `COMPLETED`；`dispatch_acked_at` / `last_persisted_seq` 有值；AGENT_OUTPUT 回帖 |
-| B2 | 拒收 | `mode=ACCEPT_THEN_REJECT_DISPATCH`（`dispatch_ack{accepted=false, reason=CAPACITY_FULL}`） | **立即** releaseLease + 换下一候选，不等 90s；CR 保持 ACCEPTED；不产生第二次 attempt |
+| B2 | **dispatch 未 ACK（送达失败）** | `mode=ACCEPT_OK_NO_ACK`（收到 dispatch 不回 ACK） | 先发 `execution.resume_request`；`ack_wait_s`（默认 15s）后重派**同一 `(execution_id, attempt_no)`**，退避重试；超阈值 → Execution `FAILED` + 进 Inbox。**CR 保持 ACCEPTED、不重路由、不新建 attempt** |
 | B3 | 决策拒绝 | `mode=REJECT` | CR=REJECTED，写 `decision_records`，投影决策卡，不创建 Execution |
 | B4 | 决策缺上下文 | `mode=NEED_CONTEXT` | CR=NEED_CONTEXT，写 Inbox `NEEDS_HUMAN`，任务挂起等人类补齐 |
 | B5 | 决策超时 | `mode=SILENT`（收 request 不响应） | 90s 后 E4 释放 slot → 取下一候选；全部超时 → CR=UNRESOLVED；**不落 TIMEOUT 决策** |
@@ -51,6 +51,7 @@ V1 禁止 `execute_code`（PRD §8 Non Goals），但 S1 必须验证的是 **Ma
 
 - B1–B8 全部要求 `audit_logs` 有对应记录、`trace_id` 从 Trigger 贯穿到 Execution。
 - 任何场景都不允许出现「状态在 DB 里被人工手改」才算通过（DoD，09 §7）。
+- **stub 不提供 `CAPACITY_FULL` 拒收分支**（v0.7）：容量已由 Resolver 的 lease 预占（SYSTEM_DESIGN §4.2.1），执行阶段出现"本地已满"属 invariant 破坏，按 §2 B2 的送达失败路径处理，**不回 Resolver 重路由**。若要专门测这条 invariant，另立 case 断言"出现即告警且 Execution 走向 FAILED，而非生成第二个候选/第二个 Execution"。
 
 ## 3. stub 的形态与运行方式
 
@@ -72,8 +73,10 @@ stub 同时是 SDK 的参考实现。SDK 需暴露（语言无关的最小面）
 ```
 connect(agentToken)                     → hello / heartbeat 由 SDK 托管
 on('collaboration.request', handler)    → handler 返回 decision（或抛错=不响应）
-on('execution.dispatch',   handler)     → SDK 自动回 execution.dispatch_ack；handler 返回 accepted / reason
-                                        → 必须按 (execution_id, attempt_no) 幂等：重复 dispatch 只重绑 WS
+on('execution.dispatch',   handler)     → SDK 收到后：① 按 (execution_id, attempt_no) 幂等去重
+                                          ② 立即回 execution.dispatch_ack{received:true}
+                                          ③ 再调 handler 启动执行（handler 不决定 ACK，也无权"拒收"）
+                                        → 重复收到同一 (execution_id, attempt_no)：只重绑 WS + 再回 ACK，不重新执行
 sendEvent(execution_id, attempt_no, type, payload)   → SDK 负责 provider_event_id + seq 单调递增
 sendResult(execution_id, attempt_no, status, output, usage, artifacts)
 on('execution.cancel', handler)

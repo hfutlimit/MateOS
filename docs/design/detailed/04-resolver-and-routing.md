@@ -307,11 +307,12 @@ EXECUTION 阶段（ACCEPT 后）：
 | ACCEPT 前 | `pending_decision` | 60-90s | 否（短 TTL） | E4：REJECT / NEED_CONTEXT / timeout / cancel / ACCEPT→promote |
 | ACCEPT 后 | `execution` | 300s | Agent 每 60s renewExecutionLease | E7：execution.completed → E4 release |
 
-**v0.4.3 关键**：
+**关键**：
 - ACCEPT 不释放 lease，而是 `promoteLease(pending_decision → execution)`
 - 同 agent 同一个 slot 流转，无 capacity 释放 + 重占
 - 长任务靠 renewLease 续期
 - 旧 pending_decision lease 永远不超 90s（即使 Agent 无限 hang）
+- **capacity invariant（v0.7）**：ACCEPT 之后 Resolver 的职责即结束。dispatch 阶段若 Agent 报"本地已满/掉线"，按 transport 问题处理（重试同一 `(execution_id, attempt_no)` → 超阈值 FAILED + Inbox），**不得重路由**：CR 已是终态 `ACCEPTED`，且 `UNIQUE(collaboration_request_id)` 保证一个 CR 只有一个 Execution。详见 `detailed/03` §7.2。
 
 ### 3.6 启动时初始化
 

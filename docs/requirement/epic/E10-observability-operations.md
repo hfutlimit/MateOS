@@ -196,6 +196,6 @@ CREATE INDEX idx_notif_recipient_unread ON notifications(recipient_type, recipie
 3. OTel SDK 集成 + trace 出口
 4. Prometheus metrics + Grafana 面板
 5. @all 成本阈值
-6. locust 压测脚本
+6. k6 或 locust 压测脚本（v0.7：后端已是 .NET，两者均可）
 7. P9 / P10 UI
 8. E2E 套件

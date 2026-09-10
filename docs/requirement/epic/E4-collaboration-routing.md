@@ -128,63 +128,58 @@ Request B → Resolver → SELECT agents WHERE active_slots < max_concurrency �
 
 **双事实源 + 不可序列化 → race condition。**
 
-### 4.2 新方案：Redis Lua 原子 semaphore
+### 4.2 新方案：Redis Lua 原子 semaphore（v0.7：per-lease ZSET + fencing）
+
+> 中间的 **Hash 版**（`used` + `leases` hash + 整 key `EXPIRE`）已废弃：`EXPIRE` 作用于整 key，任一 lease 续期会延长其它 lease；`used` 与 `leases` 双字段容易漂移。v0.7 统一为 **ZSET**（每个 lease 自己的 `score = expires_at`），细节与 rebuild 见 `detailed/04` §3.6 与 SYSTEM_DESIGN §4.2.1。
 
 ```
-# Redis key: agent-capacity:{agent_id}
-# 结构：
-#   used        当前已 reservation 的 slot 数
-#   max         来自 agents.max_concurrency（启动时写入）
-#   leases      hash: lease_id → collaboration_request_id（用于 release 反查）
+# Redis 结构
+#   agent-capacity:{agent_id}:leases   ZSET  member=lease_id, score=expires_at(ms)
+#   agent-capacity:{agent_id}:config   hash  { max }        ← 来自 agents.max_concurrency
+#   agent-capacity:{agent_id}:fence    int   递增（多实例 rebuild 互斥）
+#   agent-capacity:{agent_id}:rebuilding  fence 值，SET NX EX 30
 ```
 
-**EVAL Lua tryAcquireSlot(agent_id, collab_request_id)**：
+**EVAL Lua tryAcquireSlot(agent_id, lease_id, ttl_ms)**：
 
 ```lua
--- KEYS[1] = agent-capacity:{agent_id}
+-- KEYS[1] = agent-capacity:{agent_id}:leases
+-- KEYS[2] = agent-capacity:{agent_id}:rebuilding
+-- KEYS[3] = agent-capacity:{agent_id}:config
 -- ARGV[1] = lease_id
--- ARGV[2] = collab_request_id
--- ARGV[3] = ttl_seconds (default 600 = deadline_s + 30s buffer)
+-- ARGV[2] = ttl_ms
+-- ARGV[3] = now_ms
 
-local used = tonumber(redis.call('HGET', KEYS[1], 'used') or '0')
-local max = tonumber(redis.call('HGET', KEYS[1], 'max') or '1')
-local current_lease = redis.call('HGET', KEYS[1], 'leases->' .. ARGV[1])
-
-if current_lease then
-    -- 重复 reservation（idempotency）：返回成功
-    return {1, ARGV[1], used}
+if redis.call('EXISTS', KEYS[2]) == 1 then
+    return {0, 'REBUILDING'}          -- 重建窗口内不放行
 end
-
-if used >= max then
-    return {0, '', used}  -- 失败
+redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', ARGV[3])   -- 惰性回收过期 lease
+if redis.call('ZSCORE', KEYS[1], ARGV[1]) then
+    return {1, 'EXISTS'}              -- 重复 reservation（幂等）
 end
-
-redis.call('HSET', KEYS[1], 'used', used + 1)
-redis.call('HSET', KEYS[1], 'leases->' .. ARGV[1], ARGV[2])
-redis.call('EXPIRE', KEYS[1], tonumber(ARGV[3]))
-return {1, ARGV[1], used + 1}
+local max = tonumber(redis.call('HGET', KEYS[3], 'max') or '1')
+if redis.call('ZCARD', KEYS[1]) >= max then
+    return {0, 'FULL'}
+end
+redis.call('ZADD', KEYS[1], tonumber(ARGV[3]) + tonumber(ARGV[2]), ARGV[1])
+return {1, 'OK'}
 ```
 
 **EVAL Lua releaseSlot(agent_id, lease_id)**：
 
 ```lua
--- KEYS[1] = agent-capacity:{agent_id}
+-- KEYS[1] = agent-capacity:{agent_id}:leases
 -- ARGV[1] = lease_id
-local collab = redis.call('HGET', KEYS[1], 'leases->' .. ARGV[1])
-if not collab then
-    return 0  -- 已经释放或不存在
-end
-redis.call('HDEL', KEYS[1], 'leases->' .. ARGV[1])
-local used = tonumber(redis.call('HGET', KEYS[1], 'used') or '1')
-redis.call('HSET', KEYS[1], 'used', math.max(0, used - 1))
-return 1
+return redis.call('ZREM', KEYS[1], ARGV[1]) == 1 and 1 or 0
 ```
+
+**EVAL Lua promoteLease / renewLease**：`ZREM from → ZADD to`（promote）；只改该 member 的 `score`（renew）。**所有写操作带 fence 校验**，小于当前 fence 的写入被丢弃。
 
 ### 4.3 单一事实源
 
 - **`max_concurrency`**：DB 字段（durable config）
-- **`active_slots`**：Redis 字段（Runtime scheduling state）
-- 不再有 DB + Redis 双写
+- **占用集合与到期时间**：Redis ZSET（Runtime scheduling state，可由 DB 重建）
+- 不再有 DB + Redis 双写；**没有 `used` 计数**（`ZCARD` 即占用）
 
 ## 5. 关键流程
 
@@ -200,15 +195,16 @@ return 1
       - 失败 → 下一个候选
 4. 全部失败 → status=UNRESOLVED + 通知发起人
 5. Agent 收到 dispatch 推 collaboration.decision
-6a. ACCEPT → E4 调 E7 API 创建 execution（**lease 不释放**，由 E7 持有）
+6a. ACCEPT → **promoteLease(pending_decision → execution)** + E4 事务外直调 E7 API 创建 execution（lease 不释放）
 6b. REJECT / NEED_CONTEXT / timeout / 管理员 cancel → **releaseSlot(lease_id)**
-7. E7 推 execution.result SUCCEEDED / FAILED → **releaseSlot**（如果是从 dispatch 拿的 lease）
+7. E7 terminal（execution.completed / failed / timeout）→ outbox → E4 **releaseSlot**
 ```
 
 **关键**：
 - Slot 在 Resolver 投递时 reservation，不等 ACCEPT
-- ACCEPT 后 lease 仍持有（E7 接管 active_slots 语义）
-- 任何路径失败（REJECT/NEED_CONTEXT/timeout/cancel/E7 完成）→ release
+- ACCEPT 后 lease 不释放，而是 `promoteLease` 转为 execution lease（E7 负责 renew，E4 负责 release）
+- 任何路径失败（REJECT/NEED_CONTEXT/timeout/cancel/E7 终态）→ release
+- **v0.7**：ACCEPT 之后 Resolver 的职责结束。dispatch 阶段不存在「本地容量满 → 换候选」分支（容量已由 lease 预占，若出现即 invariant 破坏 → 告警 + 按送达失败处理），详见 `detailed/03` §7.2
 
 ### 5.2 超时重路由
 
