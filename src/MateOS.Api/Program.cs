@@ -101,15 +101,17 @@ builder.Services
 
         options.Events = new JwtBearerEvents
         {
-            // refresh token 与 access token 用同一把密钥签名，若不在这一层拦住，
-            // 一个 30 天有效的 refresh token 就能当 access token 直接访问业务端点。
+            // 同时接受 access（user token）与 agent（agent_token）。
+            // refresh token 仍被这一层拦住：一个 30 天有效的 refresh token 不能当 access 用。
+            // agent_token 与 access 共用密钥，但 token_type claim 区分上下文。
             OnTokenValidated = context =>
             {
                 string? tokenType = context.Principal?.FindFirstValue(MateOsClaims.TokenType);
 
-                if (!string.Equals(tokenType, MateOsClaims.AccessTokenType, StringComparison.Ordinal))
+                if (!string.Equals(tokenType, MateOsClaims.AccessTokenType, StringComparison.Ordinal)
+                    && !string.Equals(tokenType, MateOsClaims.AgentTokenType, StringComparison.Ordinal))
                 {
-                    context.Fail("令牌类型不是 access");
+                    context.Fail($"令牌类型不被接受：{tokenType ?? "null"}");
                 }
 
                 return Task.CompletedTask;
@@ -156,6 +158,7 @@ app.MapMeEndpoints();
 app.MapWorkspaceEndpoints();
 app.MapChannelEndpoints();
 app.MapAgentEndpoints();
+app.MapExecutionEndpoints();
 app.MapWs();
 
 app.Run();

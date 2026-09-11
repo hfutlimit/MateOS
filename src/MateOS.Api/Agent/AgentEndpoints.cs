@@ -10,6 +10,7 @@ using Microsoft.EntityFrameworkCore;
 using Project = MateOS.Api.Persistence.Project;
 using DbAgent = MateOS.Api.Persistence.Agent;
 using DbAgentToken = MateOS.Api.Persistence.AgentToken;
+using AgentTokenResult = MateOS.Api.Auth.AgentTokenResult;
 
 namespace MateOS.Api.Agents;
 
@@ -77,8 +78,9 @@ public sealed record IssueTokenRequest(string? Label, int? LifetimeDays);
 public sealed record AgentTokenIssuanceResponse(
     Guid TokenId,
     Guid AgentId,
-    string MatToken,
-    long MatTokenExpiresAtMs,
+    string JwtToken,
+    string JwtJti,
+    long ExpiresAtMs,
     string? Label);
 
 /// <summary>
@@ -548,6 +550,7 @@ public static class AgentEndpoints
         Guid id,
         IssueTokenRequest request,
         MateOSDbContext db,
+        TokenService tokenService,
         HttpContext http,
         CancellationToken ct)
     {
@@ -568,11 +571,14 @@ public static class AgentEndpoints
         int lifetimeDays = Math.Clamp(request.LifetimeDays ?? 30, 1, 365);
         TimeSpan lifetime = TimeSpan.FromDays(lifetimeDays);
 
-        var (plaintext, _, hashHex) = Domain.Agent.AgentToken.Generate();
+        // M3b 改造：agent_token 走 JWT（sub=agent_id, token_type=agent），与 user access JWT
+        // 共享密钥 + 同一中间件；通过 token_type claim 区分上下文。
+        AgentTokenResult jwt = tokenService.IssueAgentToken(agent.Id, lifetime);
+        string hashHex = Domain.Agent.AgentToken.ComputeHashHex(jwt.AccessToken);
 
         DateTimeOffset now = DateTimeOffset.UtcNow;
         Guid tokenId = Guid.NewGuid();
-        DateTimeOffset expiresAt = now.Add(lifetime);
+        DateTimeOffset expiresAt = jwt.ExpiresAt;
 
         var agentToken = new DbAgentToken
         {
@@ -594,8 +600,9 @@ public static class AgentEndpoints
             new AgentTokenIssuanceResponse(
                 TokenId: tokenId,
                 AgentId: agent.Id,
-                MatToken: plaintext,
-                MatTokenExpiresAtMs: expiresAt.ToUnixTimeMilliseconds(),
+                JwtToken: jwt.AccessToken,
+                JwtJti: jwt.Jti,
+                ExpiresAtMs: expiresAt.ToUnixTimeMilliseconds(),
                 Label: request.Label));
     }
 

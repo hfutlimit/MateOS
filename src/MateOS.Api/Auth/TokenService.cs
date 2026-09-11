@@ -43,6 +43,9 @@ public sealed record TokenPair(
 /// <summary>轮转结果：新令牌 + 令牌归属方，免去调用方再查一次用户。</summary>
 public sealed record RotationResult(TokenPair Tokens, Guid UserId, string DisplayName);
 
+/// <summary>agent_token 签发结果（E2 §3 + M3b 完整鉴权路径）。</summary>
+public sealed record AgentTokenResult(string AccessToken, string Jti, DateTimeOffset ExpiresAt);
+
 /// <summary>
 /// 令牌签发与轮转。
 /// </summary>
@@ -157,6 +160,38 @@ public sealed class TokenService(
         try
         {
             return Validate(accessToken, MateOsClaims.AccessTokenType);
+        }
+        catch (SecurityTokenException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// 签发 agent_token（E2 §3 + M3b 完整鉴权路径）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// sub = <c>agent_id</c>，token_type = <c>agent</c>。M3b 端到端鉴权路径。
+    /// </para>
+    /// <para>
+    /// 注意：与 user token 走同一密钥；通过 <c>token_type</c> claim 区分两端。
+    /// </para>
+    /// </remarks>
+    public AgentTokenResult IssueAgentToken(Guid agentId, TimeSpan lifetime)
+    {
+        string token = CreateToken(agentId, displayName: string.Empty, MateOsClaims.AgentTokenType, lifetime,
+            out string jti, out DateTimeOffset expiresAt);
+
+        return new AgentTokenResult(token, jti, expiresAt);
+    }
+
+    /// <summary>校验 agent_token 并返回主体（手动校验入口；WS 鉴权用）。</summary>
+    public ClaimsPrincipal? ValidateAgentToken(string agentToken)
+    {
+        try
+        {
+            return Validate(agentToken, MateOsClaims.AgentTokenType);
         }
         catch (SecurityTokenException)
         {

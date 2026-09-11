@@ -25,4 +25,28 @@ public static class CurrentUserExtensions
     public static Guid? GetUserId(this HttpContext context) => context.User.GetUserId();
 
     public static Guid RequireUserId(this HttpContext context) => context.User.RequireUserId();
+
+    /// <summary>
+    /// 取 agent id（agent_token 鉴权时）。与 <see cref="GetUserId"/> 共用 sub 字段，
+    /// 由 <c>token_type</c> claim 区分上下文。
+    /// </summary>
+    public static Guid? GetAgentId(this ClaimsPrincipal? principal)
+    {
+        string? tokenType = principal?.FindFirstValue(MateOsClaims.TokenType);
+
+        if (!string.Equals(tokenType, MateOsClaims.AgentTokenType, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        return principal.GetUserId();
+    }
+
+    public static Guid RequireAgentId(this ClaimsPrincipal? principal) =>
+        principal.GetAgentId() ?? throw new InvalidOperationException(
+            "已认证请求不是 agent_token 上下文，缺少 token_type=agent claim");
+
+    public static Guid? GetAgentId(this HttpContext context) => context.User.GetAgentId();
+
+    public static Guid RequireAgentId(this HttpContext context) => context.User.RequireAgentId();
 }

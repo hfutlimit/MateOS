@@ -32,6 +32,10 @@ public sealed class MateOSDbContext(DbContextOptions<MateOSDbContext> options) :
     public DbSet<Agent> Agents => Set<Agent>();
     public DbSet<AgentProjectMember> AgentProjectMembers => Set<AgentProjectMember>();
     public DbSet<AgentToken> AgentTokens => Set<AgentToken>();
+    public DbSet<AgentExecution> AgentExecutions => Set<AgentExecution>();
+    public DbSet<ExecutionAttempt> ExecutionAttempts => Set<ExecutionAttempt>();
+    public DbSet<ExecutionEvent> ExecutionEvents => Set<ExecutionEvent>();
+    public DbSet<AgentDispatchInbox> AgentDispatchInbox => Set<AgentDispatchInbox>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -55,6 +59,10 @@ public sealed class MateOSDbContext(DbContextOptions<MateOSDbContext> options) :
         modelBuilder.Entity<Agent>().ToTable("agents");
         modelBuilder.Entity<AgentProjectMember>().ToTable("agent_project_membership");
         modelBuilder.Entity<AgentToken>().ToTable("agent_tokens");
+        modelBuilder.Entity<AgentExecution>().ToTable("agent_executions");
+        modelBuilder.Entity<ExecutionAttempt>().ToTable("execution_attempts");
+        modelBuilder.Entity<ExecutionEvent>().ToTable("execution_events");
+        modelBuilder.Entity<AgentDispatchInbox>().ToTable("agent_dispatch_inbox");
 
         // ── 主键 ──
         modelBuilder.Entity<User>().HasKey(x => x.Id);
@@ -73,6 +81,10 @@ public sealed class MateOSDbContext(DbContextOptions<MateOSDbContext> options) :
         modelBuilder.Entity<Agent>().HasKey(x => x.Id);
         modelBuilder.Entity<AgentProjectMember>().HasKey(x => new { x.AgentId, x.ProjectId });
         modelBuilder.Entity<AgentToken>().HasKey(x => x.Id);
+        modelBuilder.Entity<AgentExecution>().HasKey(x => x.Id);
+        modelBuilder.Entity<ExecutionAttempt>().HasKey(x => x.Id);
+        modelBuilder.Entity<ExecutionEvent>().HasKey(x => x.Id);
+        modelBuilder.Entity<AgentDispatchInbox>().HasKey(x => x.Id);
 
         // 成员表是复合主键（同一用户在同一层级只有一条成员记录）
         modelBuilder.Entity<OrganizationMember>().HasKey(x => new { x.OrganizationId, x.UserId });
@@ -144,6 +156,20 @@ public sealed class MateOSDbContext(DbContextOptions<MateOSDbContext> options) :
 
         modelBuilder.Entity<Credential>().Property(x => x.Meta).HasColumnType("jsonb");
         modelBuilder.Entity<Agent>().Property(x => x.Capabilities).HasColumnType("jsonb");
+
+        // E7：agent_executions / events / dispatch inbox 关系 + JSONB
+        modelBuilder.Entity<AgentExecution>()
+            .HasOne<Agent>().WithMany().HasForeignKey(x => x.AgentId);
+        modelBuilder.Entity<ExecutionAttempt>()
+            .HasOne<AgentExecution>().WithMany().HasForeignKey(x => x.ExecutionId);
+        modelBuilder.Entity<ExecutionEvent>()
+            .HasOne<ExecutionAttempt>().WithMany().HasForeignKey(x => x.AttemptId);
+
+        modelBuilder.Entity<AgentExecution>().Property(x => x.Input).HasColumnType("jsonb");
+        modelBuilder.Entity<AgentExecution>().Property(x => x.ContextRefs).HasColumnType("jsonb");
+        modelBuilder.Entity<AgentExecution>().Property(x => x.ResultOutput).HasColumnType("jsonb");
+        modelBuilder.Entity<AgentExecution>().Property(x => x.ResultUsage).HasColumnType("jsonb");
+        modelBuilder.Entity<ExecutionEvent>().Property(x => x.Payload).HasColumnType("jsonb");
 
         // ── 全局列名 → snake_case ──
         // EF 默认用属性名原样，而 DDL 是 snake_case；漏掉任何一个都会在运行期报列不存在。

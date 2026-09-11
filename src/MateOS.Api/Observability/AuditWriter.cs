@@ -61,6 +61,12 @@ public static class AuditActions
     public const string AgentTokenRevoked = "AGENT_TOKEN_REVOKED";
     public const string AgentAddedToProject = "AGENT_ADDED_TO_PROJECT";
     public const string AgentRemovedFromProject = "AGENT_REMOVED_FROM_PROJECT";
+
+    // ── E7 Agent Execution & Dispatch ──
+    public const string ExecutionCreated = "EXECUTION_CREATED";
+    public const string ExecutionDispatchAcked = "EXECUTION_DISPATCH_ACKED";
+    public const string ExecutionResult = "EXECUTION_RESULT";
+    public const string ExecutionEvent = "EXECUTION_EVENT";
 }
 
 /// <summary>一条待写入的审计记录。</summary>

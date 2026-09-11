@@ -270,3 +270,79 @@ public sealed class AgentToken
     public bool Revoked { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
 }
+
+// ============================================================================
+// E7 Agent Execution & Dispatch（迁移 004）
+// ============================================================================
+
+/// <summary>Agent Execution 顶层（E7）。</summary>
+public sealed class AgentExecution
+{
+    public Guid Id { get; set; }
+    public Guid? CollaborationRequestId { get; set; }
+    public Guid AgentId { get; set; }
+    public Guid? WorkItemRef { get; set; }
+    public string Status { get; set; } = ExecutionStatusMap.PendingDbValue;
+    public DateTimeOffset? DispatchSentAt { get; set; }
+    public DateTimeOffset? DispatchAckedAt { get; set; }
+
+    /// <summary>contiguous cursor（v0.4.3 修复：严格不跳号）。</summary>
+    public long LastPersistedSeq { get; set; } = 0;
+
+    public string? TerminalEnvelopeId { get; set; }
+    public int? ActiveAttemptNo { get; set; }
+    public int AttemptCount { get; set; } = 0;
+    public string Input { get; set; } = "{}";
+    public string? ContextRefs { get; set; }
+    public string? ResultOutput { get; set; }
+    public string? ResultUsage { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset? StartedAt { get; set; }
+    public DateTimeOffset? CompletedAt { get; set; }
+    public DateTimeOffset? DeadlineAt { get; set; }
+}
+
+/// <summary>Execution Attempt（一次执行可有多次 attempt；V1 简化为单 attempt）。</summary>
+public sealed class ExecutionAttempt
+{
+    public Guid Id { get; set; }
+    public Guid ExecutionId { get; set; }
+    public int AttemptNo { get; set; } = 1;
+    public string Status { get; set; } = AttemptStatusMap.PendingDbValue;
+    public DateTimeOffset? DispatchSentAt { get; set; }
+    public DateTimeOffset? DispatchAckedAt { get; set; }
+    public DateTimeOffset? StartedAt { get; set; }
+    public DateTimeOffset? CompletedAt { get; set; }
+
+    /// <summary>contiguous cursor（attempt 级）。</summary>
+    public long LastPersistedSeq { get; set; } = 0;
+
+    public string? RuntimeSessionId { get; set; }
+    public string? TerminalErrorCode { get; set; }
+    public string? TerminalMessage { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+}
+
+/// <summary>Execution Event（agent 产出事件流；cursor 强制 contiguous）。</summary>
+public sealed class ExecutionEvent
+{
+    public Guid Id { get; set; }
+    public Guid AttemptId { get; set; }
+    public string EventType { get; set; } = string.Empty;
+    public string ProviderEventId { get; set; } = string.Empty;
+    public long Seq { get; set; }
+    public string Payload { get; set; } = "{}";
+    public DateTimeOffset CreatedAt { get; set; }
+}
+
+/// <summary>E4 → E7 dispatch 重发去重（v0.5 §7.1）。</summary>
+public sealed class AgentDispatchInbox
+{
+    public Guid Id { get; set; }
+    public string IdempotencyKey { get; set; } = string.Empty;
+    public Guid AgentId { get; set; }
+    public Guid ExecutionId { get; set; }
+    public int AttemptNo { get; set; }
+    public DateTimeOffset DispatchedAt { get; set; }
+    public DateTimeOffset? AckedAt { get; set; }
+}

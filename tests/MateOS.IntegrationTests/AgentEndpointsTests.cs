@@ -144,8 +144,8 @@ public sealed class AgentEndpointsTests(MateOsApiFixture fixture) : IClassFixtur
         await EnsureSuccessAsync(issueResp);
         AgentTokenIssuanceResponse issued = (await issueResp.Content.ReadFromJsonAsync<AgentTokenIssuanceResponse>())!;
 
-        Assert.StartsWith("matk_", issued.MatToken);
-        long expiresIn = issued.MatTokenExpiresAtMs - DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        Assert.StartsWith("eyJ", issued.JwtToken);  // JWT prefix
+        long expiresIn = issued.ExpiresAtMs - DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         long expectedLifetimeMs = 7L * 24 * 60 * 60 * 1000;
         Assert.InRange(expiresIn, expectedLifetimeMs - 30_000, expectedLifetimeMs + 30_000);
 
