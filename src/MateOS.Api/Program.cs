@@ -4,6 +4,7 @@ using MateOS.Api.Agents;
 using MateOS.Api.Auth;
 using MateOS.Api.Channels;
 using MateOS.Api.Memory;
+using MateOS.Api.NeedsYou;
 using MateOS.Api.Observability;
 using MateOS.Api.Outbox;
 using MateOS.Api.Permissions;
@@ -170,6 +171,7 @@ app.MapExecutionEndpoints();
 app.MapPermissionEndpoints();
 app.MapRoutingEndpoints();
 app.MapMemoryEndpoints();
+app.MapNeedsYouEndpoints();
 app.MapWs();
 
 app.Run();
