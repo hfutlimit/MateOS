@@ -568,8 +568,12 @@ public static class ExecutionEndpoints
             TargetType: "agent_execution", TargetId: executionId,
             Detail: new { status = targetStatus.ToDbValue(), envelope_id = request.EnvelopeId }));
 
-        // M7 outbox：写 execution.completed 事件（relay 后续推 E3 AGENT_OUTPUT 投影 + WS）
-        if (targetStatus == ExecutionStatus.SUCCEEDED)
+        // M7 outbox：写 execution.completed 事件（relay 后续推 E3 AGENT_OUTPUT 投影 + WS）。
+        // S3 补充：FAILED 也要发——否则 WorkItem 上的 Agent 永远「看起来还在跑」，
+        // 失败只能靠人自己去翻 execution 列表。消费者按 payload.status 分支
+        // （SUCCEEDED 才写 AGENT_OUTPUT 投影），因此对 E3 行为零影响。
+        // CANCELLED 不发：那是人的主动取消，不需要再通知一遍。
+        if (targetStatus is ExecutionStatus.SUCCEEDED or ExecutionStatus.FAILED)
         {
             outboxWriter.Append(
                 db,
