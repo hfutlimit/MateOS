@@ -1,6 +1,7 @@
 ﻿using System.Net;
 
 using MateOS.Domain.Agent;
+using MateOS.Domain.Routing;
 
 namespace MateOS.Api.Persistence;
 
@@ -362,4 +363,58 @@ public sealed class Permission
     public string PermKey { get; set; } = string.Empty;
     public string Effect { get; set; } = string.Empty;
     public DateTimeOffset CreatedAt { get; set; }
+}
+
+// ============================================================================
+// E4 Collaboration & Routing（迁移 006）
+// ============================================================================
+
+/// <summary>Trigger（E4 §3）—— 4 态：MENTION / WORK_ITEM / API / AUTOMATION。</summary>
+public sealed class Trigger
+{
+    public Guid Id { get; set; }
+    public string TriggerType { get; set; } = string.Empty;
+    public string TriggerRef { get; set; } = "{}";
+    public string FromActorType { get; set; } = string.Empty;
+    public Guid FromActorId { get; set; }
+    public DateTimeOffset CapturedAt { get; set; }
+}
+
+/// <summary>Collaboration Request（E4 §3）—— 6 态状态机。</summary>
+public sealed class CollaborationRequest
+{
+    public Guid Id { get; set; }
+    public Guid TriggerId { get; set; }
+    public string TriggerType { get; set; } = string.Empty;
+    public string TriggerRef { get; set; } = "{}";
+    public string RequestKind { get; set; } = string.Empty;
+    public string FromActorType { get; set; } = string.Empty;
+    public Guid FromActorId { get; set; }
+    public Guid? TargetAgentId { get; set; }
+    public string RequiredCapabilities { get; set; } = "[]";
+    public string ContextRefs { get; set; } = "{}";
+    public string Status { get; set; } = CrStatusMap.PendingValue;
+    public string? SlotLeaseId { get; set; }
+    public Guid? TargetExecutionId { get; set; }
+    public int DeadlineS { get; set; } = 600;
+    public string IdempotencyKey { get; set; } = string.Empty;
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset? ResolvedAt { get; set; }
+}
+
+/// <summary>Decision Record（E4 §3）—— 一个 CR 一次决策（UNIQUE）。</summary>
+public sealed class DecisionRecord
+{
+    public Guid Id { get; set; }
+    public Guid CollaborationRequestId { get; set; }
+    public string Decision { get; set; } = string.Empty;
+    public string? Reason { get; set; }
+    public string? Needs { get; set; }
+    public bool? AnalysisCapability { get; set; }
+    public int? AnalysisContextScore { get; set; }
+    public bool? AnalysisPermission { get; set; }
+    public Guid? AcceptedExecutionId { get; set; }
+    public string ActorType { get; set; } = string.Empty;
+    public Guid ActorId { get; set; }
+    public DateTimeOffset DecidedAt { get; set; }
 }

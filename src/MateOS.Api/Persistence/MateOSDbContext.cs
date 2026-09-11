@@ -37,6 +37,9 @@ public sealed class MateOSDbContext(DbContextOptions<MateOSDbContext> options) :
     public DbSet<ExecutionEvent> ExecutionEvents => Set<ExecutionEvent>();
     public DbSet<AgentDispatchInbox> AgentDispatchInbox => Set<AgentDispatchInbox>();
     public DbSet<Permission> Permissions => Set<Permission>();
+    public DbSet<Trigger> Triggers => Set<Trigger>();
+    public DbSet<CollaborationRequest> CollaborationRequests => Set<CollaborationRequest>();
+    public DbSet<DecisionRecord> DecisionRecords => Set<DecisionRecord>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -65,6 +68,9 @@ public sealed class MateOSDbContext(DbContextOptions<MateOSDbContext> options) :
         modelBuilder.Entity<ExecutionEvent>().ToTable("execution_events");
         modelBuilder.Entity<AgentDispatchInbox>().ToTable("agent_dispatch_inbox");
         modelBuilder.Entity<Permission>().ToTable("permissions");
+        modelBuilder.Entity<Trigger>().ToTable("triggers");
+        modelBuilder.Entity<CollaborationRequest>().ToTable("collaboration_requests");
+        modelBuilder.Entity<DecisionRecord>().ToTable("decision_records");
 
         // ── 主键 ──
         modelBuilder.Entity<User>().HasKey(x => x.Id);
@@ -88,6 +94,9 @@ public sealed class MateOSDbContext(DbContextOptions<MateOSDbContext> options) :
         modelBuilder.Entity<ExecutionEvent>().HasKey(x => x.Id);
         modelBuilder.Entity<AgentDispatchInbox>().HasKey(x => x.Id);
         modelBuilder.Entity<Permission>().HasKey(x => x.Id);
+        modelBuilder.Entity<Trigger>().HasKey(x => x.Id);
+        modelBuilder.Entity<CollaborationRequest>().HasKey(x => x.Id);
+        modelBuilder.Entity<DecisionRecord>().HasKey(x => x.Id);
 
         // 成员表是复合主键（同一用户在同一层级只有一条成员记录）
         modelBuilder.Entity<OrganizationMember>().HasKey(x => new { x.OrganizationId, x.UserId });
@@ -173,6 +182,18 @@ public sealed class MateOSDbContext(DbContextOptions<MateOSDbContext> options) :
         modelBuilder.Entity<AgentExecution>().Property(x => x.ResultOutput).HasColumnType("jsonb");
         modelBuilder.Entity<AgentExecution>().Property(x => x.ResultUsage).HasColumnType("jsonb");
         modelBuilder.Entity<ExecutionEvent>().Property(x => x.Payload).HasColumnType("jsonb");
+
+        // E4：triggers / collaboration_requests / decision_records 关系 + JSONB
+        modelBuilder.Entity<CollaborationRequest>()
+            .HasOne<Trigger>().WithMany().HasForeignKey(x => x.TriggerId);
+        modelBuilder.Entity<DecisionRecord>()
+            .HasOne<CollaborationRequest>().WithMany().HasForeignKey(x => x.CollaborationRequestId);
+
+        modelBuilder.Entity<Trigger>().Property(x => x.TriggerRef).HasColumnType("jsonb");
+        modelBuilder.Entity<CollaborationRequest>().Property(x => x.TriggerRef).HasColumnType("jsonb");
+        modelBuilder.Entity<CollaborationRequest>().Property(x => x.RequiredCapabilities).HasColumnType("jsonb");
+        modelBuilder.Entity<CollaborationRequest>().Property(x => x.ContextRefs).HasColumnType("jsonb");
+        modelBuilder.Entity<DecisionRecord>().Property(x => x.Needs).HasColumnType("jsonb");
 
         // ── 全局列名 → snake_case ──
         // EF 默认用属性名原样，而 DDL 是 snake_case；漏掉任何一个都会在运行期报列不存在。

@@ -71,6 +71,12 @@ public static class AuditActions
     // ── E6 Authorization & Approval ──
     public const string PermissionCreated = "PERMISSION_CREATED";
     public const string PermissionDeleted = "PERMISSION_DELETED";
+
+    // ── E4 Collaboration & Routing ──
+    public const string TriggerCreated = "TRIGGER_CREATED";
+    public const string CollaborationRequestCreated = "COLLABORATION_REQUEST_CREATED";
+    public const string DecisionRecorded = "DECISION_RECORDED";
+    public const string ExecutionDispatchedFromCr = "EXECUTION_DISPATCHED_FROM_CR";
 }
 
 /// <summary>一条待写入的审计记录。</summary>

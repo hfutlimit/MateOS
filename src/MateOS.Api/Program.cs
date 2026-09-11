@@ -6,6 +6,7 @@ using MateOS.Api.Channels;
 using MateOS.Api.Observability;
 using MateOS.Api.Permissions;
 using MateOS.Api.Persistence;
+using MateOS.Api.Routing;
 using MateOS.Api.Workspace;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
@@ -161,6 +162,7 @@ app.MapChannelEndpoints();
 app.MapAgentEndpoints();
 app.MapExecutionEndpoints();
 app.MapPermissionEndpoints();
+app.MapRoutingEndpoints();
 app.MapWs();
 
 app.Run();
