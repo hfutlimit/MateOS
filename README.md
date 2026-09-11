@@ -17,7 +17,7 @@ MateOS 是一个面向软件开发团队的 AI 原生团队协作平台（V1 = A
 | Cache / Presence | Redis 7 |
 | Execution | MateOS Agent Runtime（自研，永久自洽） |
 | Implementation | **S1 → S2 → S3 vertical slices** |
-| Stage | **S1+S2+S3 已落地**（M1+M2+M2-WS+M3a+M3b+M4a+M4b+M7+E5+E6 + Needs You + Memory 写链路 + E8 Work Delivery）：11 个 feat commit + 本轮 S3，**541 unit 全过**；User Promise「@Agent → 工作 → 记忆 → 审批」+「WorkItem → Agent 推进 → 产出回流」双闭环 |
+| Stage | **S1+S2+S3 已落地 + M3b Phase 2**（M1+M2+M2-WS+M3a+M3b+M4a+M4b+M7+E5+E6 + Needs You + Memory 写链路 + E8 Work Delivery + E7 dispatch 实时推送）：13 个 feat commit，**547 unit 全过**；User Promise「@Agent → 工作 → 记忆 → 审批」+「WorkItem → Agent 推进 → 产出回流」双闭环 |
 
 > 本表是唯一需要维护的「技术基线」。**不要在此堆叠文档版本号**：PRD / SYSTEM_DESIGN / UI DS 的版本只在各自文件头与更新记录里维护；detailed / epic / 原型不单独发行版本号，用日期 + commit 追溯。避免出现「文件头 v0.5、changelog v0.7、commit v0.8」这类交叉版本噪音。
 
@@ -199,6 +199,30 @@ Stub Agent 轮询 ──▶ dispatch_ack ──▶ RUNNING ──▶ events ─�
 **S3 的不变量（DB 强制，不靠应用层自觉）**：同 project 只能有一条 `is_active` binding（partial unique index）；
 `(binding_id, external_ref)` 唯一；`work_relations` 自关联与非同 project 关联被拒；`assignee_type` / `assignee_id` 成对；
 `canonical_status_category` 由 `status` 派生（代码层，禁止手填）。
+
+**M3b Phase 2：Agent 实时收单**（`docs/design/detailed/03` §2 §7.2）：
+
+```
+Agent ──WS /ws + hello{agent_token}──▶ 校验 agent_token → 会话登记为 (AGENT, agent_id)
+                                        │
+PO ──POST /work-items/{id}/assign──▶ 事务提交（CR + Execution）
+                                        │
+                                        └─▶ 提交后 push execution.dispatch ──▶ Agent 实时开工
+                                                 │
+                                                 └─ 无活跃会话时推送返回 false：
+                                                    dispatch 留在 inbox，Agent 轮询兜底
+```
+
+- **推送是优化，不是依赖**：`AgentDispatchNotifier` 只读 DB 事实、只推帧、**不写库**
+  （尤其不改 `dispatch_sent_at`——那是「Runtime 决定派发」的业务事实，不是投递尝试）。
+  推不出去不算失败；`GET /agents/{id}/executions/inbox` 永久保留为兜底路径。
+- **推送与轮询形状逐字段一致**：同一份 dispatch 两条通道，SDK 只应有一份解析代码。
+  `deadline_s` 统一为**相对秒数**（绝对时间戳会让快时钟的 Agent 提前放弃）。
+- **重复投递允许**：客户端按 `(execution_id, attempt_no)` 幂等（detailed/10 §4），
+  重复收到只重绑会话并再回 ACK，不得重复执行。
+- **会话主体分类型**：`project_members`（人）与 `agent_project_membership`（Agent）是两套关系表；
+  注册表按 `(ActorType, ActorId)` 分别索引，`execution.dispatch` 只认 AGENT 索引——
+  人 id 与 agent id 同为 UUID，只按 id 索引会把执行指令推给人的浏览器。
 
 > **wire 契约统一 snake_case**：REST 响应 / WS envelope / outbox payload / JSONB 内容四处同形。
 > 全局策略在 `Program.cs` 的 `ConfigureHttpJsonOptions`；query 参数对新增端点显式声明 snake_case 名。

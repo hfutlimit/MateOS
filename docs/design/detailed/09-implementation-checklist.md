@@ -45,6 +45,22 @@
 > 2. `no active Work Management Provider` / `provider_key 未注册` 返回 **400**（`ApiErrors.BadRequest`）而非 §5.1 写的 422，
 >    与本仓库既有错误码风格（全部 400/403/404/409）保持一致。
 
+> **M3b Phase 2 已落地（E7 dispatch 实时推送）**：
+> `/ws` 的 hello 现接受 `access_token`（人）**或** `agent_token`（Agent），二者必须且只能给一个；
+> `hello_ack` 回 `actor_type` / `actor_id`。会话注册表按 `(ActorType, ActorId)` 分别索引
+> （`project_members` 与 `agent_project_membership` 是两套关系表，不能只看一张）。
+> `AgentDispatchNotifier` 在三处 execution 创建点**提交之后**推送 `execution.dispatch`
+> （E7 internal create / E4 CR accept / Work 指派），并且推送与轮询 inbox **逐字段同形**。
+> 已实现的消息类型只有 `execution.dispatch`（出站）；`execution.dispatch_ack` /
+> `execution.event` / `execution.result` / `execution.resume_request` / `collaboration.*`
+> 仍走既有 HTTP 端点，属下一阶段。
+>
+> **本轮顺带修掉的两个既有越权/校验缺口**：
+> 1. `/ws` 的 `resume`（channel 消息续传）此前**没有任何成员校验**——任何已认证主体
+>    都能拉到任意 channel 的历史消息，属越权读取；
+> 2. `/ws` 的 hello 此前自己解 JWT，只认 user token 且**绕过 `token_type` 校验**
+>    （refresh token 也能换到 WS 会话），现已统一走 `TokenService` 的完整校验。
+
 **能力域标签对照**：
 
 | 标签 | 能力域 | 落在哪一刀 |
