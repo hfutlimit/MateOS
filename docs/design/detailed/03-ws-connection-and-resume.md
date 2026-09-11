@@ -63,9 +63,11 @@ Agent 进程
 
 // ─── E7 拥有（Execution 域）───
 { "type": "execution.dispatch",   "payload": {
-    "execution_id", "collaboration_request_id"?, "work_item_ref"?,
+    "execution_id", "attempt_no",            // attempt_no 必带：SDK 靠 (execution_id, attempt_no) 幂等（detailed/10 §4）
+    "collaboration_request_id"?,
+    "work_item_ref"?,                        // 对象 {provider_key, work_item_id, external_ref}，不是裸 id
     "input": { prompt, params },
-    "context": { memory_refs, recent_messages, permissions },
+    "context": { memory_refs, recent_messages, permissions, refs },
     "deadline_s", "idempotency_key"
 }}
 

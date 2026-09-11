@@ -77,9 +77,15 @@
 > `input` 归一为 `{prompt, params}`、`deadline_s` 为相对秒。
 > DB 里存的自由形态快照 → 契约形状的映射集中在 `ExecutionPayloadMapper`（推送/轮询共用一份）。
 >
-> **`SYSTEM_DESIGN` §6.5 与本文档 §6.5/detailed-03 的 wire 矛盾已逐项裁决**，
-> 明细与依据见 `contracts/README.md` §4（含仍需回改文档的 4 项：§6.5 类型清单与 `attempt_no`、
-> §2 旧 monorepo 结构、§8 `/api/v1` 前缀）。
+> **`SYSTEM_DESIGN` §6.5 与 detailed/03 §2 的 wire 矛盾已逐项裁决**，
+> 明细与依据见 `contracts/README.md` §4。
+>
+> 文档回改：§6.5 类型清单 / `attempt_no` / `work_item_ref` 形状、§3 旧 monorepo 服务拆分、
+> detailed/03 §2 的 dispatch payload —— **已回改**。
+> 剩下 3 项属「改哪边都要动已冻结的东西」，已登记到
+> `docs/review/2026-09-11-待拍板项.md` 并在原位标注为待拍板：
+> envelope 的 `v` 字段、REST `/api/v1` 前缀、`contracts/openapi/` 的产出方式。
+> **在 P2（前缀）与 P3（OpenAPI 方式）裁决前不要写 OpenAPI**。
 
 **能力域标签对照**：
 

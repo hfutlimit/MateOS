@@ -69,12 +69,21 @@ dotnet test tests/MateOS.UnitTests/MateOS.UnitTests.csproj --filter "FullyQualif
 
 已同步的实现侧改动：`ExecutionContext` 增加 `refs`、`WorkItemRef.ExternalRef` 改为可空、HTTP inbox 与 WS 推送共用 `ExecutionDispatchPayload`（原先 inbox 用 `context_refs`/裸 `work_item_ref`/`deadline_at_ms`，与推送形状不同）。
 
-### 4.1 仍需回改文档的项（不在本目录范围内）
+### 4.1 文档回改状态
 
-- `SYSTEM_DESIGN` §6.5：类型清单补命名空间前缀；补 `attempt_no`；补 `work_item_ref` 形状。
-- `SYSTEM_DESIGN` §2 仓库结构：写的是 `packages/contracts/` 与 `services/orchestrator|memory|work-management`，与「模块化单体」裁决及 `detailed/09` §4 的根级 `contracts/` 冲突——§2 是旧 monorepo 残留。
-- `SYSTEM_DESIGN` §8：写 `Client ↔ API = REST /api/v1`，而实现**没有** `/api/v1` 前缀（端点是 `/auth/*`、`/channels/*` …）。要么加前缀，要么改文档——属产品决定。
-- `detailed/03` §2：`execution.dispatch` payload 补 `attempt_no`。
+已回改（本次）：
+
+- `SYSTEM_DESIGN` §6.5：类型清单补命名空间前缀（`execution.dispatch` / `execution.event` / `execution.result`）、补 `attempt_no`、补 `work_item_ref` 对象形状、补 `context.refs`。
+- `SYSTEM_DESIGN` §3「服务拆分」：原写 `packages/contracts` + `services/orchestrator|memory|work-management|runtime`，与 §1「模块化单体」裁决及 `detailed/09` §4 的根级 `contracts/` 冲突——§3 是旧 monorepo 残留，已改为 .NET 单体布局。
+- `detailed/03` §2：`execution.dispatch` payload 补 `attempt_no` 与 `work_item_ref` 形状说明。
+
+**仍需 owner 裁决**（不是文档笔误，改哪边都要动已冻结的东西）→ 已登记到 `docs/review/2026-09-11-待拍板项.md`：
+
+- envelope 是否加 `v` 版本字段（§6.5 有、实现无）
+- REST 是否加 `/api/v1` 前缀（§8 有、实现无）
+- `openapi/` 的产出方式（运行时生成 / 手写 / codegen）
+
+两处均已在该文档原位标注为「待拍板」，不再是**静默**矛盾。
 
 ## 5. 待补（尚未落地，此处显式记录而不是假装覆盖）
 

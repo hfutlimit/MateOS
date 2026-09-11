@@ -133,19 +133,30 @@ MVP 不做微服务。单体 + 独立 Worker 进程；触发以下任一条件�
 
 ## 3. 服务拆分
 
+> **v0.5 拍板：模块化单体，不是微服务。** 下面的布局与 `detailed/09` §4 一致（该处是实施口径）。
+> §3.1 的「模块」= 单体内的命名空间 / 目录边界，**不是**可独立部署的服务。
+> 旧版曾按 `packages/contracts` + `services/{orchestrator,memory,work-management,runtime}` 拆分，
+> 那与「.NET 单体」裁决直接冲突，已废弃。
+
 ```
 apps/
-  web/              # Next.js 前端
-  api/              # ASP.NET Core 单体（含 WS 中间件 + BackgroundService relay）
-packages/
-  contracts/        # OpenAPI + JSON Schema（WorkItem / Execution / Connector envelope），前端 TS 类型由契约生成
-  config/           # eslint/tsconfig + EditorConfig
+  web/                  # Next.js 前端
+src/                    # .NET solution（mateos.slnx）
+  MateOS.Api/           # 宿主 + 端点 + WS 中间件 + BackgroundService relay
+  MateOS.Domain/        # 领域模型 / 状态机 / 不变量（无 EF、无 HTTP）
+  MateOS.Contracts/     # Connector 协议 DTO（与 contracts/schemas 对拍）
+  # MateOS.Application / MateOS.Infrastructure 按需拆出；
+  # S1–S3 尚未拆（端点内直接编排），拆分时机见 detailed/09 §4
+contracts/              # 协议 SSOT：schemas/（JSON Schema）+ openapi/（待落）
 services/
-  orchestrator/     # Trigger → CollaborationRequest → Decision
-  memory/           # Memory 索引/检索/审批
-  work-management/  # WorkItem 域 + Provider 适配（Built-in + Jira）
-  runtime/          # Agent Runtime Gateway + Execution Domain
+  agent-stub/           # S1 的 stub Agent（detailed/10，待落）
+tests/
+  MateOS.UnitTests/ MateOS.IntegrationTests/ e2e/
+ops/postgres/migrations/  # 显式 SQL 迁移（唯一副本，嵌入资源打进 API）
+docs/
 ```
+
+> `contracts/` 的 wire 事实源地位与「两份设计文档冲突时如何裁决」见 `contracts/README.md`。
 
 ### 3.1 模块职责
 
@@ -751,19 +762,22 @@ retry / reconnect / crash recovery / timeout / cancel / streaming / artifact 全
 
 ```jsonc
 // 通用 envelope
-{ "v": 1, "type": "hello|heartbeat|status|dispatch|event|result|error|execution.resume_request|execution.resume_ack", "id": "uuid", "ts": 0, "payload": {} }
+// ⚠️ v 字段：本节此前写 "v": 1，但详细设计与实现都不带该字段（整条 E3 channel envelope 也不带）。
+//    给所有帧加 v 属协议版本升级，属**待拍板项**，不是可以顺手改的小事 —— 见 contracts/README.md §4。
+{ "type": "hello|heartbeat|status|execution.dispatch|execution.event|execution.result|execution.error|execution.resume_request|execution.resume_ack", "id": "uuid", "ts": 0, "payload": {} }
 
-// E7 拥有
-{ "type": "dispatch", "payload": {
+// E7 拥有（命名空间前缀 execution.*；与 E4 的 collaboration.* 严格分离）
+{ "type": "execution.dispatch", "payload": {
     "execution_id": "...",
+    "attempt_no": 1,                        // 必带：SDK 靠 (execution_id, attempt_no) 幂等去重
     "collaboration_request_id": "..."?,     // optional，可无 WorkItem 触发
-    "work_item_ref": {"provider_key":"builtin", "work_item_id":"..."}?,   // optional
+    "work_item_ref": {"provider_key":"builtin", "work_item_id":"...", "external_ref": null}?,   // optional，对象而非裸 id
     "input": { "prompt": "...", "params": {} },
-    "context": { "memory_refs": [], "recent_messages": [], "permissions": {} },
+    "context": { "memory_refs": [], "recent_messages": [], "permissions": {}, "refs": {} },
     "deadline_s": 600, "idempotency_key": "..."
 }}
 
-{ "type": "event", "payload": {
+{ "type": "execution.event", "payload": {
     "execution_id": "...", "attempt_no": 1,
     "event_type": "STDOUT|PROGRESS|TOOL_CALL|LLM_TICK|ARTIFACT|ERROR",
     "provider_event_id": "evt-uuid-123",    // 协议级幂等键（v0.3.1 新增）
@@ -771,7 +785,7 @@ retry / reconnect / crash recovery / timeout / cancel / streaming / artifact 全
     "payload": { "content": "...", "meta": {} }
 }}
 
-{ "type": "result", "payload": {
+{ "type": "execution.result", "payload": {
     "execution_id": "...", "attempt_no": 1,
     "status": "SUCCEEDED|FAILED|CANCELLED",   // 不携带 decision
     "output": { "markdown": "...", "code": "..." },
@@ -835,7 +849,7 @@ retry / reconnect / crash recovery / timeout / cancel / streaming / artifact 全
 
 | 边界 | 协议 |
 | --- | --- |
-| Client ↔ API | REST `/api/v1` + JWT |
+| Client ↔ API | REST + JWT（⚠️ 本节此前写 `/api/v1`，但实现**没有**版本前缀，端点是 `/auth/*`、`/channels/*`…。加前缀还是改文档属**待拍板项**——在决定前不要按 `/api/v1` 写客户端） |
 | Client ↔ Gateway | WSS + JSON envelope |
 | Client ↔ Gateway · 消息级续传 | `resume(last_seq)`（E3 §5.3，消息 seq 游标）—— **与 execution 级 resume 不同名空间** |
 | Agent ↔ Runtime · 执行级续传 | `execution.resume_request` / `execution.resume_ack`（E7，attempt 内连续位点） |
