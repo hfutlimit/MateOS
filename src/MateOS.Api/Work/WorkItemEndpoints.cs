@@ -1,4 +1,5 @@
 using System.Text.Json;
+using MateOS.Api.Agents;
 using MateOS.Api.Auth;
 using MateOS.Api.Http;
 using MateOS.Api.Observability;
@@ -1094,6 +1095,7 @@ public static class WorkItemEndpoints
         MateOSDbContext db,
         WorkspaceAuthorizer authorizer,
         OutboxWriter outboxWriter,
+        AgentDispatchNotifier notifier,
         AuditWriter audit,
         HttpContext http,
         CancellationToken ct)
@@ -1140,6 +1142,10 @@ public static class WorkItemEndpoints
 
         WorkDelivery.AssignmentResult result = await WorkDelivery.AssignAsync(
             db, outboxWriter, audit, http, target, agent, http.RequireUserId(), deadlineS, ct);
+
+        // 指派事务已提交 → 推送。重复指派时 result.Idempotent=true，
+        // 此时也推一次是有价值的：Agent 可能正在重连，或上一次推送根本没送到。
+        await notifier.PushDispatchAsync(result.ExecutionId, source: "work-assign", ct);
 
         return Results.Ok(new
         {

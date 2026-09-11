@@ -3,11 +3,24 @@ using System.Text.Json;
 namespace MateOS.Domain.Channel;
 
 /// <summary>
-/// WS message type 清单（M2-WS 范围：E3 channel 域）。
+/// WS message type 清单（E3 channel 域 + E7 execution 域）。
 /// </summary>
 /// <remarks>
-/// 完整 execution 协议（E4 / E7 域）见 detailed/03，本枚举**只**覆盖 M2 阶段：
-/// channel 消息流广播 + 续传。M3b（E7 connector transport）会扩展此枚举。
+/// <para>
+/// 完整 execution 协议（E4 / E7 域）见 detailed/03 §2。当前已实现的部分：
+/// <list type="bullet">
+///   <item>E3：channel 订阅 / 续传 / <c>message.created</c> 广播（M2-WS）</item>
+///   <item>E7 出站：<c>execution.dispatch</c>（M3b Phase 2，替代 Agent 轮询 inbox）</item>
+/// </list>
+/// </para>
+/// <para>
+/// 尚未实现的 E7 入站面（<c>execution.dispatch_ack</c> / <c>execution.event</c> /
+/// <c>execution.result</c> / <c>execution.resume_request</c>）与 E4 的
+/// <c>collaboration.request</c> / <c>collaboration.decision</c> 走既有 HTTP 端点，
+/// 待下一阶段迁移。**不要**在没有对应 handler 的情况下先把 type 加进来：
+/// envelope 校验一旦放行，消息会掉进"不该由 client 发"的分支，
+/// 排查时看到的是一句误导性的错误。
+/// </para>
 /// </remarks>
 public enum WsMessageType
 {
@@ -22,9 +35,12 @@ public enum WsMessageType
     Unsubscribe,
     Resume,
 
-    // ─── 服务端推送（server → client）───
+    // ─── 服务端推送：E3 channel 域 ───
     MessageCreated,
     ChannelArchived,
+
+    // ─── 服务端推送：E7 execution 域（M3b Phase 2）───
+    ExecutionDispatch,
 
     // ─── 错误 ───
     Error,
@@ -41,6 +57,7 @@ public static class WsMessageTypeMap
     public const string ResumeValue = "resume";
     public const string MessageCreatedValue = "message.created";
     public const string ChannelArchivedValue = "channel.archived";
+    public const string ExecutionDispatchValue = "execution.dispatch";
     public const string ErrorValue = "error";
 
     public static string ToWireValue(this WsMessageType type) => type switch
@@ -54,6 +71,7 @@ public static class WsMessageTypeMap
         WsMessageType.Resume => ResumeValue,
         WsMessageType.MessageCreated => MessageCreatedValue,
         WsMessageType.ChannelArchived => ChannelArchivedValue,
+        WsMessageType.ExecutionDispatch => ExecutionDispatchValue,
         WsMessageType.Error => ErrorValue,
         _ => throw new ArgumentOutOfRangeException(nameof(type), type, "未映射的 WsMessageType"),
     };
@@ -71,6 +89,7 @@ public static class WsMessageTypeMap
             case ResumeValue: type = WsMessageType.Resume; return true;
             case MessageCreatedValue: type = WsMessageType.MessageCreated; return true;
             case ChannelArchivedValue: type = WsMessageType.ChannelArchived; return true;
+            case ExecutionDispatchValue: type = WsMessageType.ExecutionDispatch; return true;
             case ErrorValue: type = WsMessageType.Error; return true;
             default:
                 type = (WsMessageType)(-1);

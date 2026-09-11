@@ -85,4 +85,29 @@ public sealed class WsSender
 
         await Task.WhenAll(tasks);
     }
+
+    /// <summary>
+    /// 向某个 Agent 的全部活跃会话推 envelope。
+    /// </summary>
+    /// <returns>
+    /// 至少有一个会话成功写入返回 <c>true</c>；无会话或全部写失败返回 <c>false</c>
+    /// （调用方据此决定是否退回 Agent 轮询）。
+    /// </returns>
+    public async Task<bool> SendToAgentAsync(Guid agentId, object envelope, CancellationToken ct)
+    {
+        IReadOnlyCollection<string> sessions = _registry.GetAgentSubscribers(agentId);
+
+        if (sessions.Count == 0)
+        {
+            return false;
+        }
+
+        Task<bool>[] tasks = sessions
+            .Select(sessionId => SendAsync(sessionId, envelope, ct))
+            .ToArray();
+
+        bool[] results = await Task.WhenAll(tasks);
+
+        return results.Any(ok => ok);
+    }
 }

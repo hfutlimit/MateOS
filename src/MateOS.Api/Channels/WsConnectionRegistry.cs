@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
 
+using MateOS.Domain.Channel;
+
 namespace MateOS.Api.Channels;
 
 /// <summary>
@@ -14,7 +16,10 @@ public sealed class WsConnection
     /// <summary>本地分配的唯一 session id（鉴权后写入）。</summary>
     public required string SessionId { get; init; }
 
-    /// <summary>鉴权后的用户 id（HUMAN / AGENT 都共用此 id 字段）。</summary>
+    /// <summary>主体类型：人（access token）还是 Agent（agent_token）。</summary>
+    public required WsActorType ActorType { get; init; }
+
+    /// <summary>鉴权后的主体 id：HUMAN → user_id；AGENT → agent_id。</summary>
     public required Guid ActorId { get; init; }
 
     /// <summary>原始 WebSocket（IO 由 middleware 处理）。</summary>
@@ -36,8 +41,13 @@ public sealed class WsConnection
 /// <list type="bullet">
 ///   <item>按 <c>session_id</c> → <see cref="WsConnection"/></item>
 ///   <item>按 <c>channel_id</c> → <c>Set&lt;session_id&gt;</c>（广播时直接拿到该 channel 的全部连接）</item>
-///   <item>按 <c>actor_id</c> → <c>Set&lt;session_id&gt;</c>（同一用户多端连接）</item>
+///   <item>按 <c>user_id</c> → <c>Set&lt;session_id&gt;</c>（同一用户多端连接，仅 HUMAN）</item>
+///   <item>按 <c>agent_id</c> → <c>Set&lt;session_id&gt;</c>（仅 AGENT，出站推送执行指令用）</item>
 /// </list>
+/// </para>
+/// <para>
+/// <b>人 / Agent 索引必须分开</b>：两个 id 都是 UUID 且语义独立，
+/// 只按 id 索引会让 <c>execution.dispatch</c> 有机会推给人的浏览器。
 /// </para>
 /// <para>
 /// 线程安全：所有数据结构都是 <see cref="ConcurrentDictionary{TKey, TValue}"/>，
@@ -48,7 +58,8 @@ public sealed class WsConnectionRegistry
 {
     private readonly ConcurrentDictionary<string, WsConnection> _bySession = new();
     private readonly ConcurrentDictionary<Guid, ConcurrentDictionary<string, byte>> _byChannel = new();
-    private readonly ConcurrentDictionary<Guid, ConcurrentDictionary<string, byte>> _byActor = new();
+    private readonly ConcurrentDictionary<Guid, ConcurrentDictionary<string, byte>> _byUser = new();
+    private readonly ConcurrentDictionary<Guid, ConcurrentDictionary<string, byte>> _byAgent = new();
 
     /// <summary>注册一个新连接。</summary>
     public void Register(WsConnection connection)
@@ -61,8 +72,11 @@ public sealed class WsConnectionRegistry
                 $"WS session_id 重复：{connection.SessionId}");
         }
 
+        ConcurrentDictionary<Guid, ConcurrentDictionary<string, byte>> index =
+            connection.ActorType is WsActorType.AGENT ? _byAgent : _byUser;
+
         ConcurrentDictionary<string, byte> actorSet =
-            _byActor.GetOrAdd(connection.ActorId, _ => new ConcurrentDictionary<string, byte>());
+            index.GetOrAdd(connection.ActorId, _ => new ConcurrentDictionary<string, byte>());
 
         actorSet.TryAdd(connection.SessionId, 0);
     }
@@ -89,13 +103,16 @@ public sealed class WsConnectionRegistry
             connection.SubscribedChannels.Clear();
         }
 
-        if (_byActor.TryGetValue(connection.ActorId, out ConcurrentDictionary<string, byte>? actorSubs))
+        ConcurrentDictionary<Guid, ConcurrentDictionary<string, byte>> index =
+            connection.ActorType is WsActorType.AGENT ? _byAgent : _byUser;
+
+        if (index.TryGetValue(connection.ActorId, out ConcurrentDictionary<string, byte>? actorSubs))
         {
             actorSubs.TryRemove(sessionId, out _);
 
             if (actorSubs.IsEmpty)
             {
-                _byActor.TryRemove(connection.ActorId, out _);
+                index.TryRemove(connection.ActorId, out _);
             }
         }
 
@@ -162,6 +179,27 @@ public sealed class WsConnectionRegistry
 
         return Array.Empty<string>();
     }
+
+    /// <summary>
+    /// 取该 Agent 的全部活跃 session id 快照（一个 Agent 可能多进程 / 多端重连）。
+    /// </summary>
+    /// <remarks>只返回 AGENT 类型的会话：人的会话即便 id 相同也不会命中。</remarks>
+    public IReadOnlyCollection<string> GetAgentSubscribers(Guid agentId)
+    {
+        if (_byAgent.TryGetValue(agentId, out ConcurrentDictionary<string, byte>? subs))
+        {
+            return subs.Keys.ToArray();
+        }
+
+        return Array.Empty<string>();
+    }
+
+    /// <summary>该 Agent 当前是否有活跃 WS 会话（无会话时出站推送只能退回轮询）。</summary>
+    public bool HasAgentSession(Guid agentId) =>
+        _byAgent.TryGetValue(agentId, out ConcurrentDictionary<string, byte>? subs) && !subs.IsEmpty;
+
+    /// <summary>当前活跃的 Agent 会话数（供 metrics / 诊断）。</summary>
+    public int ActiveAgentSessionCount => _byAgent.Count;
 
     public WsConnection? GetBySession(string sessionId) =>
         _bySession.TryGetValue(sessionId, out WsConnection? conn) ? conn : null;

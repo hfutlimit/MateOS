@@ -18,6 +18,7 @@ public sealed class WsEnvelopeTests
     [InlineData("resume")]
     [InlineData("message.created")]
     [InlineData("channel.archived")]
+    [InlineData("execution.dispatch")]
     [InlineData("error")]
     public void TryParse应支持所有合法type(string wire)
     {
@@ -149,6 +150,18 @@ public sealed class WsEnvelopeTests
     {
         using JsonDocument doc = JsonDocument.Parse("""{}""");
         string? error = WsEnvelope.ValidateClientRequest(WsMessageType.MessageCreated, doc.RootElement);
+        Assert.NotNull(error);
+        Assert.Contains("不应作为 client request", error);
+    }
+
+    /// <summary>
+    /// 出站指令不能由客户端伪造回灌：否则 Agent 可以把一条 dispatch 当成自己收到的指令。
+    /// </summary>
+    [Fact]
+    public void 不应接受execution_dispatch作为client_request()
+    {
+        using JsonDocument doc = JsonDocument.Parse("""{}""");
+        string? error = WsEnvelope.ValidateClientRequest(WsMessageType.ExecutionDispatch, doc.RootElement);
         Assert.NotNull(error);
         Assert.Contains("不应作为 client request", error);
     }

@@ -1,5 +1,6 @@
 using System.Net.WebSockets;
 using MateOS.Api.Channels;
+using MateOS.Domain.Channel;
 
 namespace MateOS.UnitTests.Channel;
 
@@ -124,7 +125,92 @@ public sealed class WsConnectionRegistryTests
         Assert.Single(registry.GetChannelSubscribers(channelId));
     }
 
-    private static WsConnection MakeConnection(Guid actorId)
+    // ───────────────── 人 / Agent 会话隔离（M3b Phase 2）─────────────────
+
+    [Fact]
+    public void Agent会话应按agentId索引()
+    {
+        WsConnectionRegistry registry = new();
+        Guid agentId = Guid.NewGuid();
+        WsConnection agent = MakeConnection(agentId, WsActorType.AGENT);
+
+        registry.Register(agent);
+
+        Assert.True(registry.HasAgentSession(agentId));
+        Assert.Equal([agent.SessionId], registry.GetAgentSubscribers(agentId));
+        Assert.Equal(1, registry.ActiveAgentSessionCount);
+    }
+
+    /// <summary>
+    /// 关键不变量：人 id 与 agent id 都是 UUID 且语义独立，
+    /// 只按 id 索引会让 execution.dispatch 推给人的浏览器。
+    /// </summary>
+    [Fact]
+    public void 同一id的人会话不得被人格化为Agent会话()
+    {
+        WsConnectionRegistry registry = new();
+        Guid sharedId = Guid.NewGuid();
+        WsConnection human = MakeConnection(sharedId, WsActorType.HUMAN);
+
+        registry.Register(human);
+
+        Assert.False(registry.HasAgentSession(sharedId));
+        Assert.Empty(registry.GetAgentSubscribers(sharedId));
+        Assert.Equal(0, registry.ActiveAgentSessionCount);
+    }
+
+    [Fact]
+    public void 同一Agent多session应都被追踪且注销只移除自己()
+    {
+        WsConnectionRegistry registry = new();
+        Guid agentId = Guid.NewGuid();
+        WsConnection a = MakeConnection(agentId, WsActorType.AGENT);
+        WsConnection b = MakeConnection(agentId, WsActorType.AGENT);
+
+        registry.Register(a);
+        registry.Register(b);
+
+        Assert.Equal(2, registry.GetAgentSubscribers(agentId).Count);
+
+        registry.Unregister(a.SessionId);
+
+        Assert.Equal([b.SessionId], registry.GetAgentSubscribers(agentId));
+
+        // 最后一个会话注销后索引应被清空，HasAgentSession 回到 false
+        registry.Unregister(b.SessionId);
+
+        Assert.False(registry.HasAgentSession(agentId));
+        Assert.Equal(0, registry.ActiveAgentSessionCount);
+    }
+
+    [Fact]
+    public void 人与Agent会话可并存且互不干扰()
+    {
+        WsConnectionRegistry registry = new();
+        Guid humanId = Guid.NewGuid();
+        Guid agentId = Guid.NewGuid();
+        Guid channelId = Guid.NewGuid();
+
+        WsConnection human = MakeConnection(humanId, WsActorType.HUMAN);
+        WsConnection agent = MakeConnection(agentId, WsActorType.AGENT);
+
+        registry.Register(human);
+        registry.Register(agent);
+        registry.Subscribe(human.SessionId, channelId);
+        registry.Subscribe(agent.SessionId, channelId);
+
+        // channel 索引不区分类型（消息流对人、Agent 都可见）
+        Assert.Equal(2, registry.GetChannelSubscribers(channelId).Count);
+
+        // actor 索区分类型
+        Assert.Equal([agent.SessionId], registry.GetAgentSubscribers(agentId));
+        Assert.False(registry.HasAgentSession(humanId));
+        Assert.Equal(1, registry.ActiveAgentSessionCount);
+    }
+
+    private static WsConnection MakeConnection(
+        Guid actorId,
+        WsActorType actorType = WsActorType.HUMAN)
     {
         WebSocket socket = WebSocket.CreateFromStream(
             stream: Stream.Null,
@@ -133,6 +219,7 @@ public sealed class WsConnectionRegistryTests
         return new WsConnection
         {
             SessionId = Guid.NewGuid().ToString("N"),
+            ActorType = actorType,
             ActorId = actorId,
             Socket = socket,
         };

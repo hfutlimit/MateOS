@@ -1,11 +1,13 @@
-using System.IdentityModel.Tokens.Jwt;
 using System.Net.WebSockets;
+using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
 using MateOS.Api.Auth;
 using MateOS.Api.Persistence;
+using MateOS.Domain.Agent;
 using MateOS.Domain.Channel;
 using Microsoft.EntityFrameworkCore;
+using DbAgent = MateOS.Api.Persistence.Agent;
 using DbChannel = MateOS.Api.Persistence.Channel;
 
 namespace MateOS.Api.Channels;
@@ -15,17 +17,19 @@ namespace MateOS.Api.Channels;
 /// </summary>
 /// <remarks>
 /// <para>
-/// 鉴权模式（M2 简化）：
-/// <list type="number">
-///   <item>客户端先建立 WebSocket</item>
-///   <item>首个 <c>hello</c> 帧 payload 带 <c>access_token</c>（JWT）</item>
-///   <item>服务端校验 → 返 <c>hello_ack</c> + session_id</item>
-/// </list>
-/// 这种模式适合浏览器（不能用 Authorization header）与 stub SDK（统一走 query 或 hello 帧）。
+/// 鉴权模式：客户端先建立 WebSocket，首个 <c>hello</c> 帧在 payload 里带
+/// <c>access_token</c>（人）<b>或</b> <c>agent_token</c>（Agent）——两者必须且只能给一个。
+/// 服务端校验后返 <c>hello_ack</c>（含 <c>session_id</c> / <c>actor_type</c> / <c>actor_id</c>）。
+/// 这种模式适合浏览器（不能用 Authorization header）与 Agent SDK（统一走 hello 帧）。
 /// </para>
 /// <para>
-/// 完整消息类型（M2 范围）：hello / hello_ack / hello_nack / heartbeat /
-/// subscribe / unsubscribe / resume / message.created / channel.archived / error。
+/// 会话主体分 HUMAN / AGENT 两类，鉴权与订阅可见性都按类型分支：
+/// 人查 <c>project_members</c>，Agent 查 <c>agent_project_membership</c>。
+/// </para>
+/// <para>
+/// 已实现的消息类型：
+/// hello / hello_ack / hello_nack / heartbeat / subscribe / unsubscribe / resume /
+/// message.created / channel.archived / <c>execution.dispatch</c>（出站）/ error。
 /// </para>
 /// </remarks>
 public static class WsEndpoint
@@ -46,6 +50,7 @@ public static class WsEndpoint
         WsConnectionRegistry registry,
         WsSender sender,
         MateOSDbContext db,
+        TokenService tokenService,
         ILoggerFactory loggerFactory,
         CancellationToken ct)
     {
@@ -82,11 +87,11 @@ public static class WsEndpoint
                 return;
             }
 
-            Guid? actorId = ResolveToken(db, hello.AccessToken, log);
+            (WsActorType ActorType, Guid ActorId)? actor = await ResolveActorAsync(db, tokenService, hello, log);
 
-            if (actorId is null)
+            if (actor is null)
             {
-                await CloseWithAsync(socket, WebSocketCloseStatus.PolicyViolation, "invalid access_token", log);
+                await CloseWithAsync(socket, WebSocketCloseStatus.PolicyViolation, "invalid token", log);
                 return;
             }
 
@@ -94,7 +99,8 @@ public static class WsEndpoint
             connection = new WsConnection
             {
                 SessionId = Guid.NewGuid().ToString("N"),
-                ActorId = actorId.Value,
+                ActorType = actor.Value.ActorType,
+                ActorId = actor.Value.ActorId,
                 Socket = socket,
             };
             registry.Register(connection);
@@ -108,13 +114,16 @@ public static class WsEndpoint
                 payload = new
                 {
                     session_id = connection.SessionId,
+                    actor_type = connection.ActorType.ToDbValue(),
+                    actor_id = connection.ActorId,
                     heartbeat_interval_sec = WsEnvelope.HeartbeatIntervalSec,
                     max_frames_per_sec = WsEnvelope.MaxFramesPerSec,
                     server_time_ms = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
                 },
             }, ct);
 
-            log.LogInformation("WS 连接建立 session={SessionId} actor={ActorId}", connection.SessionId, connection.ActorId);
+            log.LogInformation("WS 连接建立 session={SessionId} actorType={ActorType} actor={ActorId}",
+                connection.SessionId, connection.ActorType, connection.ActorId);
         }
         catch (Exception ex)
         {
@@ -249,7 +258,7 @@ public static class WsEndpoint
 
     // ── helpers ──
 
-    private sealed record HelloPayload(string? AccessToken);
+    private sealed record HelloPayload(string? AccessToken, string? AgentToken);
 
     private static HelloPayload? ParseHello(JsonElement frame)
     {
@@ -265,46 +274,96 @@ public static class WsEndpoint
             return null;
         }
 
-        if (!payload.TryGetProperty("access_token", out JsonElement tokenElement) ||
-            tokenElement.ValueKind != JsonValueKind.String)
+        string? accessToken = null;
+        string? agentToken = null;
+
+        if (payload.TryGetProperty("access_token", out JsonElement accessElement))
         {
-            return null;
-        }
-
-        return new HelloPayload(tokenElement.GetString());
-    }
-
-    private static Guid? ResolveToken(MateOSDbContext db, string? accessToken, ILogger log)
-    {
-        if (string.IsNullOrWhiteSpace(accessToken))
-        {
-            return null;
-        }
-
-        // 复用 JWT 解析：仅当 token 是有效 access token 且能找到 user 时返 user_id
-        // 注：M2 阶段不实现 agent_token 解析（E2 上线后）
-        try
-        {
-            var handler = new JwtSecurityTokenHandler();
-            handler.InboundClaimTypeMap.Clear();
-            var jwt = handler.ReadJwtToken(accessToken);
-
-            string? subject = jwt.Subject;
-
-            if (!Guid.TryParse(subject, out Guid userId))
+            if (accessElement.ValueKind != JsonValueKind.String)
             {
                 return null;
             }
 
-            bool exists = db.Users.Any(u => u.Id == userId);
-
-            return exists ? userId : null;
+            accessToken = accessElement.GetString();
         }
-        catch (Exception ex)
+
+        if (payload.TryGetProperty("agent_token", out JsonElement agentElement))
         {
-            log.LogDebug(ex, "WS hello token 解析失败");
+            if (agentElement.ValueKind != JsonValueKind.String)
+            {
+                return null;
+            }
+
+            agentToken = agentElement.GetString();
+        }
+
+        bool hasAccess = !string.IsNullOrWhiteSpace(accessToken);
+        bool hasAgent = !string.IsNullOrWhiteSpace(agentToken);
+
+        // 必须且只能提供一种：两个都给会让"这个会话是谁"出现两种解释，
+        // 而后续的鉴权判定（project member vs agent membership）完全依赖它。
+        if (hasAccess == hasAgent)
+        {
             return null;
         }
+
+        return new HelloPayload(accessToken, agentToken);
+    }
+
+    /// <summary>
+    /// 解析 hello 帧的令牌，返回会话主体（类型 + id）；失败返回 <c>null</c>。
+    /// </summary>
+    /// <remarks>
+    /// 两条路径都走 <see cref="TokenService"/> 的完整校验（签名 / iss / aud / exp / token_type），
+    /// 不自己解 JWT：M2 阶段手写解析只认 user token，且绕过了 token_type 校验。
+    /// </remarks>
+    private static async Task<(WsActorType ActorType, Guid ActorId)?> ResolveActorAsync(
+        MateOSDbContext db,
+        TokenService tokenService,
+        HelloPayload hello,
+        ILogger log)
+    {
+        if (!string.IsNullOrWhiteSpace(hello.AgentToken))
+        {
+            ClaimsPrincipal? principal = tokenService.ValidateAgentToken(hello.AgentToken!);
+
+            if (principal?.GetAgentId() is not { } agentId)
+            {
+                log.LogDebug("WS hello agent_token 校验失败");
+                return null;
+            }
+
+            DbAgent? agent = await db.Agents.FirstOrDefaultAsync(a => a.Id == agentId);
+
+            if (agent is null)
+            {
+                log.LogDebug("WS hello 引用了不存在的 agent {AgentId}", agentId);
+                return null;
+            }
+
+            // DISABLED = 已停用；再让它建立执行通道就等于绕过生命周期闸门。
+            // PAUSED 允许连接：暂停只表达「不接新工作」，不代表必须断线。
+            if (AgentLifecycleMap.TryParse(agent.Lifecycle, out AgentLifecycle lifecycle)
+                && lifecycle is AgentLifecycle.Disabled)
+            {
+                log.LogInformation("WS hello 被拒：agent {AgentId} lifecycle=DISABLED", agentId);
+                return null;
+            }
+
+            return (WsActorType.AGENT, agentId);
+        }
+
+        ClaimsPrincipal? userPrincipal = tokenService.ValidateAccessToken(hello.AccessToken!);
+
+        if (userPrincipal?.GetUserId() is not { } userId)
+        {
+            log.LogDebug("WS hello access_token 校验失败");
+            return null;
+        }
+
+        bool exists = await db.Users.AnyAsync(u => u.Id == userId);
+
+        return exists ? (WsActorType.HUMAN, userId) : null;
     }
 
     private static async Task<JsonElement?> ReceiveFrameAsync(
@@ -394,10 +453,7 @@ public static class WsEndpoint
             return;
         }
 
-        bool isProjectMember = await db.ProjectMembers
-            .AnyAsync(pm => pm.ProjectId == channel.ProjectId && pm.UserId == connection.ActorId, ct);
-
-        if (!isProjectMember)
+        if (!await IsChannelReadableAsync(db, connection, channel.ProjectId, ct))
         {
             await sender.SendAsync(connection.SessionId, new
             {
@@ -474,6 +530,20 @@ public static class WsEndpoint
             return;
         }
 
+        // resume 也必须过同一道闸：否则任何已认证的主体都能拉到任意 channel 的消息
+        // （M2 阶段漏了这一步，等于越权读取）。
+        if (!await IsChannelReadableAsync(db, connection, channel.ProjectId, ct))
+        {
+            await sender.SendAsync(connection.SessionId, new
+            {
+                id = Guid.NewGuid().ToString("N"),
+                type = WsMessageTypeMap.ErrorValue,
+                ts = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                payload = new { code = "NOT_AUTHORIZED", channel_id = channelId },
+            }, ct);
+            return;
+        }
+
         long startSeq = sinceSeq == 0 ? ChannelSeq.FirstSeq : sinceSeq + 1;
 
         var rows = await db.Messages
@@ -521,6 +591,23 @@ public static class WsEndpoint
             },
         }, ct);
     }
+
+    /// <summary>
+    /// 该会话能否读取指定 project 的 channel。
+    /// </summary>
+    /// <remarks>
+    /// 人与 Agent 的可见性是<b>两套</b>关系表（project_members / agent_project_membership），
+    /// 不能只看其中一张：agent_token 的 sub 是 agent_id，拿它去查 project_members
+    /// 永远查不到，于是「Agent 读不到自己项目的频道」这种静默失效很难被发现。
+    /// </remarks>
+    private static Task<bool> IsChannelReadableAsync(
+        MateOSDbContext db,
+        WsConnection connection,
+        Guid projectId,
+        CancellationToken ct) =>
+        connection.ActorType is WsActorType.AGENT
+            ? db.AgentProjectMembers.AnyAsync(m => m.ProjectId == projectId && m.AgentId == connection.ActorId, ct)
+            : db.ProjectMembers.AnyAsync(m => m.ProjectId == projectId && m.UserId == connection.ActorId, ct);
 
     private static async Task CloseWithAsync(
         WebSocket socket,

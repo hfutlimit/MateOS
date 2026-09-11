@@ -99,6 +99,9 @@ builder.Services.AddHostedService<OutboxRelayWorker>();
 // ── E2 Agent Registry ──
 builder.Services.AddSingleton(_ => new AesGcmCredentialCipher(credentialKey));
 
+// ── E7 dispatch 实时推送（M3b Phase 2）──
+builder.Services.AddScoped<AgentDispatchNotifier>();
+
 // ─────────────────────────── HTTP JSON 契约 ───────────────────────────
 
 builder.Services.ConfigureHttpJsonOptions(options =>

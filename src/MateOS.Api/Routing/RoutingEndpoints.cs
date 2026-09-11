@@ -1,4 +1,5 @@
 using System.Text.Json;
+using MateOS.Api.Agents;
 using MateOS.Api.Auth;
 using MateOS.Api.Http;
 using MateOS.Api.Observability;
@@ -244,6 +245,7 @@ public static class RoutingEndpoints
         CreateDecisionRequest request,
         MateOSDbContext db,
         OutboxWriter outboxWriter,
+        AgentDispatchNotifier notifier,
         IHttpClientFactory httpClientFactory,
         AuditWriter audit,
         HttpContext http,
@@ -362,6 +364,13 @@ public static class RoutingEndpoints
             }));
 
         await db.SaveChangesAsync(ct);
+
+        // 放在 CR=ACCEPTED 提交之后：先推后提交的话，Agent 可能在 CR 仍是 PENDING
+        // （甚至被回滚）时就开始执行。
+        if (acceptedExecutionId is { } pushedExecutionId)
+        {
+            await notifier.PushDispatchAsync(pushedExecutionId, source: "e4-accept", ct);
+        }
 
         await db.Entry(cr).ReloadAsync(ct);
         return Results.Ok(new

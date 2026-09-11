@@ -215,6 +215,24 @@ internal sealed class WsTestClient : IAsyncDisposable
         });
     }
 
+    /// <summary>
+    /// 用 <c>agent_token</c> 建立 Agent 会话（M3b Phase 2）。
+    /// </summary>
+    /// <remarks>
+    /// 与 <see cref="HelloAsync"/> 互斥：服务端要求 hello 帧里 access_token / agent_token
+    /// 只能给一个，两个都给会被当作「会话主体有两种解释」直接拒掉。
+    /// </remarks>
+    public async Task HelloAsAgentAsync(string agentToken)
+    {
+        await SendJsonAsync(new
+        {
+            id = Guid.NewGuid().ToString("N"),
+            type = "hello",
+            ts = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+            payload = new { agent_token = agentToken },
+        });
+    }
+
     public async Task ResumeAsync(Guid channelId, long sinceSeq)
     {
         await SendJsonAsync(new

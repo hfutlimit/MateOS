@@ -67,12 +67,28 @@ public sealed record ExecutionAttemptSummary(
     string? TerminalErrorCode,
     string? TerminalMessage);
 
+/// <summary>
+/// 一条待执行的 dispatch。
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>这个形状必须与 WS 推送的 <c>execution.dispatch</c> payload 逐字段一致</b>
+/// （见 <see cref="AgentDispatchNotifier"/>）：轮询与推送是同一份事实的两条投递通道，
+/// SDK 只应有一份解析代码。任何一边改字段，另一边必须同时改。
+/// </para>
+/// <para>
+/// <c>deadline_s</c> 用<b>相对秒数</b>而不是绝对时间戳：Agent 与 Runtime 的时钟未必同步，
+/// 绝对时间会让快时钟的 Agent 提前放弃、慢时钟的 Agent 超时还在跑。
+/// </para>
+/// </remarks>
 public sealed record DispatchEnvelope(
     Guid ExecutionId,
     int AttemptNo,
+    Guid? CollaborationRequestId,
+    Guid? WorkItemRef,
     JsonElement Input,
     JsonElement? ContextRefs,
-    long? DeadlineAtMs,
+    long? DeadlineS,
     string IdempotencyKey);
 
 /// <summary>
@@ -121,6 +137,7 @@ public static class ExecutionEndpoints
     private static async Task<IResult> CreateExecutionAsync(
         CreateAgentExecutionRequest request,
         MateOSDbContext db,
+        AgentDispatchNotifier notifier,
         AuditWriter audit,
         HttpContext http,
         CancellationToken ct)
@@ -234,6 +251,10 @@ public static class ExecutionEndpoints
 
         await db.SaveChangesAsync(ct);
 
+        // 提交后再推：事务未落地就推，等于给 Agent 发一条可能不存在的指令。
+        // 推不出去不是错误——Agent 仍可轮询 inbox（M3b Phase 2 兜底路径）。
+        await notifier.PushDispatchAsync(executionId, source: "e7-create", ct);
+
         return Results.Created(
             $"/internal/agent-executions/{executionId}",
             new { execution = ToSummary(execution), idempotent = false });
@@ -282,9 +303,13 @@ public static class ExecutionEndpoints
                 return new DispatchEnvelope(
                     ExecutionId: e.Id,
                     AttemptNo: x.AttemptNo,
+                    CollaborationRequestId: e.CollaborationRequestId,
+                    WorkItemRef: e.WorkItemRef,
                     Input: input,
                     ContextRefs: context,
-                    DeadlineAtMs: e.DeadlineAt?.ToUnixTimeMilliseconds(),
+                    DeadlineS: e.DeadlineAt is { } deadline
+                        ? Math.Max(0, (long)(deadline - DateTimeOffset.UtcNow).TotalSeconds)
+                        : null,
                     IdempotencyKey: x.IdempotencyKey);
             })
             .ToList();
