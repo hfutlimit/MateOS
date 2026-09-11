@@ -17,7 +17,7 @@ MateOS 是一个面向软件开发团队的 AI 原生团队协作平台（V1 = A
 | Cache / Presence | Redis 7 |
 | Execution | MateOS Agent Runtime（自研，永久自洽） |
 | Implementation | **S1 → S2 → S3 vertical slices** |
-| Stage | **S1 主链路已落地**（M1+M2+M2-WS+M3a+M3b+M4a+M4b+M7）：8 个 feat commit，445 unit / 集成全过；用户可端到端 @Agent → 工作 → 结果回 Channel |
+| Stage | **S1+S2 已落地**（M1+M2+M2-WS+M3a+M3b+M4a+M4b+M7+E5+E6 + Needs You + Memory 写链路）：11 个 feat commit，495 unit / 集成全过；User Promise「@Agent → 工作 → 记忆 → 审批」业务闭环 |
 
 > 本表是唯一需要维护的「技术基线」。**不要在此堆叠文档版本号**：PRD / SYSTEM_DESIGN / UI DS 的版本只在各自文件头与更新记录里维护；detailed / epic / 原型不单独发行版本号，用日期 + commit 追溯。避免出现「文件头 v0.5、changelog v0.7、commit v0.8」这类交叉版本噪音。
 
@@ -120,11 +120,11 @@ docs/
 | 刀 | 用户看到的价值 | 覆盖能力域 | 状态 |
 | --- | --- | --- | --- |
 | **S1 — Ask the Team** | 在 Channel 里 @Agent，Agent 接手、工作、把结果回到原 Channel | E1/E3/E2/E7（transport + Execution 主干）/E4/E6 最小/E10 基础；Agent 端用 **stub** | ✅ **主链路已落地** |
-| **S2 — Shared Knowledge** | Agent 申请记忆 → 人审 → 之后的 Agent 自动用上这条知识 | E5 + E6（propose/approve）+ Needs You → Approval | ⏳ 下一切 |
+| **S2 — Shared Knowledge** | Agent 申请记忆 → 人审 → 之后的 Agent 自动用上这条知识 | E5 + E6（propose/approve）+ Needs You → Approval | ✅ **业务闭环已落地** |
 | **S3 — Work Delivery** | 建 WorkItem → Agent 接手推进 → 产出与状态回流到 Work | E8 + Built-in Provider + Work 页面 + WorkItem↔Execution | ⏳ |
 | V1+ | Jira（Work Management Provider） | E9 | ⏳ |
 
-**S1 主链路 8 个 feat commit**（远端 main）：
+**S1+S2 累计 11 个 feat commit**（远端 main）：
 
 | Commit | 能力域 | 单测 | 主要内容 |
 | --- | --- | --- | --- |
@@ -135,7 +135,10 @@ docs/
 | `85dd6f3` | M3b Connector | 343 (+45) | agent_token JWT 鉴权 + dispatch inbox + events cursor + result CAS 终态 |
 | `16f0519` | M4a Authorization | 388 (+45) | 8 perm_key + 3 态 effect + 三层合并（Channel > Project > Default） |
 | `303c7e7` | M4b Routing | 429 (+41) | triggers + CR 6 态 + Decision 4 态 + ACCEPT 同步调 E7 创建 Execution |
-| `0e89ce2` | M7 Outbox | **445 (+16)** | transactional outbox + relay worker + 指数退避 + capacity invariant |
+| `0e89ce2` | M7 Outbox | 445 (+16) | transactional outbox + relay worker + 指数退避 + capacity invariant |
+| `c546144` | S2 Memory | 485 (+40) | memory_proposals + memory_items + 4 类型 + Source 三件套 + 全文检索 |
+| `9f78430` | S2 Needs You 收口 | 495 (+10) | 跨 4 事实源聚合 timeline（INFORMATION/APPROVAL/DECISION/PROBLEMS） |
+| `bfd39dc` | S2 Memory 写链路 | 495 | Memory Proposal 申请/审批/拒绝时写 channel message（MEMORY_REQUEST + SYSTEM）+ WS 推 |
 
 **S1 跑通端到端链路**（参考 `docs/design/detailed/01-single-agent-task-lifecycle.md` + `detailed/03-ws-connection-and-resume.md`）：
 
