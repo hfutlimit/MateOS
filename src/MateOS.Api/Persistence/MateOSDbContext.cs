@@ -40,6 +40,8 @@ public sealed class MateOSDbContext(DbContextOptions<MateOSDbContext> options) :
     public DbSet<Trigger> Triggers => Set<Trigger>();
     public DbSet<CollaborationRequest> CollaborationRequests => Set<CollaborationRequest>();
     public DbSet<DecisionRecord> DecisionRecords => Set<DecisionRecord>();
+    public DbSet<MemoryProposal> MemoryProposals => Set<MemoryProposal>();
+    public DbSet<MemoryItem> MemoryItems => Set<MemoryItem>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -71,6 +73,8 @@ public sealed class MateOSDbContext(DbContextOptions<MateOSDbContext> options) :
         modelBuilder.Entity<Trigger>().ToTable("triggers");
         modelBuilder.Entity<CollaborationRequest>().ToTable("collaboration_requests");
         modelBuilder.Entity<DecisionRecord>().ToTable("decision_records");
+        modelBuilder.Entity<MemoryProposal>().ToTable("memory_proposals");
+        modelBuilder.Entity<MemoryItem>().ToTable("memory_items");
 
         // ── 主键 ──
         modelBuilder.Entity<User>().HasKey(x => x.Id);
@@ -97,6 +101,8 @@ public sealed class MateOSDbContext(DbContextOptions<MateOSDbContext> options) :
         modelBuilder.Entity<Trigger>().HasKey(x => x.Id);
         modelBuilder.Entity<CollaborationRequest>().HasKey(x => x.Id);
         modelBuilder.Entity<DecisionRecord>().HasKey(x => x.Id);
+        modelBuilder.Entity<MemoryProposal>().HasKey(x => x.Id);
+        modelBuilder.Entity<MemoryItem>().HasKey(x => x.Id);
 
         // 成员表是复合主键（同一用户在同一层级只有一条成员记录）
         modelBuilder.Entity<OrganizationMember>().HasKey(x => new { x.OrganizationId, x.UserId });

@@ -1,6 +1,7 @@
 ﻿using System.Net;
 
 using MateOS.Domain.Agent;
+using MateOS.Domain.Memory;
 using MateOS.Domain.Routing;
 
 namespace MateOS.Api.Persistence;
@@ -417,4 +418,53 @@ public sealed class DecisionRecord
     public string ActorType { get; set; } = string.Empty;
     public Guid ActorId { get; set; }
     public DateTimeOffset DecidedAt { get; set; }
+}
+
+// ============================================================================
+// E5 Shared Memory（迁移 007）
+// ============================================================================
+
+/// <summary>Memory Proposal（E5 §3）—— 申请阶段事实源。</summary>
+public sealed class MemoryProposal
+{
+    public Guid Id { get; set; }
+    public Guid? ProjectId { get; set; }
+    public string Type { get; set; } = string.Empty;
+    public string? ScopeType { get; set; }  // generated column
+    public string Title { get; set; } = string.Empty;
+    public string Content { get; set; } = string.Empty;
+    public string Status { get; set; } = MemoryStatusMap.ProposedValue;
+    public string SourceType { get; set; } = string.Empty;
+    public Guid? SourceChannelId { get; set; }
+    public long? SourceMessageSeq { get; set; }
+    public Guid? SourceMessageId { get; set; }
+    public Guid? ProposedByAgentId { get; set; }
+    public Guid? ProposedByUserId { get; set; }
+    public Guid? ApprovedBy { get; set; }
+    public Guid? RejectedBy { get; set; }
+    public string? RejectReason { get; set; }
+    public string IdempotencyKey { get; set; } = string.Empty;
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset? ApprovedAt { get; set; }
+}
+
+/// <summary>Memory Item（E5 §3）—— 已批准事实源（proposal_id UNIQUE）。</summary>
+public sealed class MemoryItem
+{
+    public Guid Id { get; set; }
+    public Guid ProposalId { get; set; }
+    public Guid? ProjectId { get; set; }
+    public Guid? OwnerUserId { get; set; }
+    public string Type { get; set; } = string.Empty;
+    public string? ScopeType { get; set; }
+    public string Title { get; set; } = string.Empty;
+    public string Content { get; set; } = string.Empty;
+    public string SearchText { get; set; } = string.Empty;
+    public string SourceType { get; set; } = string.Empty;
+    public Guid? SourceChannelId { get; set; }
+    public long? SourceMessageSeq { get; set; }
+    public Guid ApprovedBy { get; set; }
+    public int Version { get; set; } = 1;
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
 }

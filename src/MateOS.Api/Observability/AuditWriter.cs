@@ -83,6 +83,11 @@ public static class AuditActions
     public const string OutboxEventPublished = "OUTBOX_EVENT_PUBLISHED";
     public const string OutboxEventDead = "OUTBOX_EVENT_DEAD";
     public const string CapacityInvariantViolation = "CAPACITY_INVARIANT_VIOLATION";
+
+    // ── E5 Shared Memory ──
+    public const string MemoryProposalCreated = "MEMORY_PROPOSAL_CREATED";
+    public const string MemoryApproved = "MEMORY_APPROVED";
+    public const string MemoryRejected = "MEMORY_REJECTED";
 }
 
 /// <summary>一条待写入的审计记录。</summary>

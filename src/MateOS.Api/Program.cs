@@ -3,6 +3,7 @@ using System.Text;
 using MateOS.Api.Agents;
 using MateOS.Api.Auth;
 using MateOS.Api.Channels;
+using MateOS.Api.Memory;
 using MateOS.Api.Observability;
 using MateOS.Api.Outbox;
 using MateOS.Api.Permissions;
@@ -168,6 +169,7 @@ app.MapAgentEndpoints();
 app.MapExecutionEndpoints();
 app.MapPermissionEndpoints();
 app.MapRoutingEndpoints();
+app.MapMemoryEndpoints();
 app.MapWs();
 
 app.Run();
