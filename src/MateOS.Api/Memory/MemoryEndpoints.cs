@@ -1,14 +1,20 @@
+using System.Text.Json;
 using MateOS.Api.Auth;
+using MateOS.Api.Channels;
 using MateOS.Api.Http;
 using MateOS.Api.Observability;
 using MateOS.Api.Persistence;
 using MateOS.Api.Workspace;
+using MateOS.Domain.Agent;
+using MateOS.Domain.Channel;
 using MateOS.Domain.Identity;
 using MateOS.Domain.Memory;
 using Microsoft.EntityFrameworkCore;
 using Project = MateOS.Api.Persistence.Project;
 using DbMemoryProposal = MateOS.Api.Persistence.MemoryProposal;
 using DbMemoryItem = MateOS.Api.Persistence.MemoryItem;
+using DbMessage = MateOS.Api.Persistence.Message;
+using DbChannel = MateOS.Api.Persistence.Channel;
 
 namespace MateOS.Api.Memory;
 
@@ -93,6 +99,7 @@ public static class MemoryEndpoints
     private static async Task<IResult> ProposeAsync(
         ProposeMemoryRequest request,
         MateOSDbContext db,
+        WsSender wsSender,
         AuditWriter audit,
         HttpContext http,
         CancellationToken ct)
@@ -227,7 +234,78 @@ public static class MemoryEndpoints
 
         await db.SaveChangesAsync(ct);
 
+        // T+5（detailed/05 §3.3）：写消息流 MEMORY_REQUEST 投影 + WS 推 message.created
+        // V1 简化：仅 source_channel_id 非空时（project memory）写；PERSONAL 无 channel 跳过
+        if (proposal.SourceChannelId is { } srcChannelId)
+        {
+            long proposalMessageSeq = await AllocateChannelSeqAsync(db, srcChannelId, ct);
+            string proposalContentJson = JsonSerializer.Serialize(new
+            {
+                memory_proposal_ref = proposalId,
+            });
+            DateTimeOffset proposalMsgNow = DateTimeOffset.UtcNow;
+
+            var proposalMessage = new DbMessage
+            {
+                Id = Guid.NewGuid(),
+                ChannelId = srcChannelId,
+                Seq = proposalMessageSeq,
+                SenderType = MessageSenderTypeMap.HumanDbValue,
+                SenderId = proposerUserId,
+                ContentType = MessageContentTypeMap.MemoryRequestDbValue,
+                Content = proposalContentJson,
+                Mentions = null,
+                ParentSeq = null,
+                ClientMsgId = null,
+                TraceId = http.GetTraceId(),
+                CreatedAt = proposalMsgNow,
+            };
+
+            db.Messages.Add(proposalMessage);
+            await db.SaveChangesAsync(ct);
+
+            await wsSender.BroadcastToChannelAsync(srcChannelId, new
+            {
+                id = Guid.NewGuid().ToString("N"),
+                type = WsMessageTypeMap.MessageCreatedValue,
+                ts = proposalMsgNow.ToUnixTimeMilliseconds(),
+                payload = new
+                {
+                    channel_id = srcChannelId,
+                    message = new
+                    {
+                        proposalMessage.Id,
+                        proposalMessage.Seq,
+                        proposalMessage.SenderType,
+                        proposalMessage.SenderId,
+                        proposalMessage.ContentType,
+                        content = JsonDocument.Parse(proposalMessage.Content).RootElement,
+                        proposalMessage.ParentSeq,
+                        proposalMessage.ClientMsgId,
+                        proposalMessage.CreatedAt,
+                    },
+                },
+            }, ct);
+        }
+
         return Results.Created($"/memory/proposals/{proposalId}", ToProposalSummary(proposal, idempotent: false));
+    }
+
+    /// <summary>
+    /// 事务内原子分配 channel seq（与 M2 Channel 投影保持同口径；F2 走 UPDATE ... RETURNING）。
+    /// </summary>
+    private static async Task<long> AllocateChannelSeqAsync(
+        MateOSDbContext db, Guid channelId, CancellationToken ct)
+    {
+        long nextSeq = await db.Database
+            .SqlQuery<long>(
+                $@"UPDATE channel_seq_counters
+                   SET next_seq = next_seq + 1
+                   WHERE channel_id = {channelId}
+                   RETURNING next_seq - 1")
+            .SingleAsync(ct);
+
+        return nextSeq;
     }
 
     // ───────────────────────── List proposals ─────────────────────────
@@ -287,6 +365,7 @@ public static class MemoryEndpoints
         Guid proposalId,
         ApproveMemoryRequest request,
         MateOSDbContext db,
+        WsSender wsSender,
         WorkspaceAuthorizer authorizer,
         AuditWriter audit,
         HttpContext http,
@@ -385,6 +464,59 @@ public static class MemoryEndpoints
 
         await db.SaveChangesAsync(ct);
 
+        // T+12（detailed/05 §3.3）：写 SYSTEM 通知消息到 source_channel
+        if (proposal.SourceChannelId is { } srcChannelId)
+        {
+            long notificationSeq = await AllocateChannelSeqAsync(db, srcChannelId, ct);
+            DateTimeOffset msgNow = DateTimeOffset.UtcNow;
+            string contentJson = JsonSerializer.Serialize(new
+            {
+                text = $"✅ 已写入项目记忆：{proposal.Title}",
+            });
+
+            var notification = new DbMessage
+            {
+                Id = Guid.NewGuid(),
+                ChannelId = srcChannelId,
+                Seq = notificationSeq,
+                SenderType = MessageSenderTypeMap.SystemDbValue,
+                SenderId = null,
+                ContentType = MessageContentTypeMap.SystemDbValue,
+                Content = contentJson,
+                Mentions = null,
+                ParentSeq = null,
+                ClientMsgId = null,
+                TraceId = http.GetTraceId(),
+                CreatedAt = msgNow,
+            };
+
+            db.Messages.Add(notification);
+            await db.SaveChangesAsync(ct);
+
+            await wsSender.BroadcastToChannelAsync(srcChannelId, new
+            {
+                id = Guid.NewGuid().ToString("N"),
+                type = WsMessageTypeMap.MessageCreatedValue,
+                ts = msgNow.ToUnixTimeMilliseconds(),
+                payload = new
+                {
+                    channel_id = srcChannelId,
+                    message = new
+                    {
+                        notification.Id,
+                        notification.Seq,
+                        notification.SenderType,
+                        notification.SenderId,
+                        notification.ContentType,
+                        content = JsonDocument.Parse(notification.Content).RootElement,
+                        notification.ParentSeq,
+                        notification.ClientMsgId,
+                        notification.CreatedAt,
+                    },
+                },
+            }, ct);
+        }
+
         await db.Entry(proposal).ReloadAsync(ct);
         return Results.Ok(ToProposalSummary(proposal, idempotent: false));
     }
@@ -395,6 +527,7 @@ public static class MemoryEndpoints
         Guid proposalId,
         RejectMemoryRequest request,
         MateOSDbContext db,
+        WsSender wsSender,
         WorkspaceAuthorizer authorizer,
         AuditWriter audit,
         HttpContext http,
@@ -468,6 +601,61 @@ public static class MemoryEndpoints
             AuditActorTypes.User, userId, AuditActions.MemoryRejected,
             TargetType: "memory_proposal", TargetId: proposalId,
             Detail: new { reason = request.Reason }));
+
+        await db.SaveChangesAsync(ct);
+
+        // T+12 同样写 SYSTEM 通知消息
+        if (proposal.SourceChannelId is { } srcChannelId)
+        {
+            long notificationSeq = await AllocateChannelSeqAsync(db, srcChannelId, ct);
+            DateTimeOffset msgNow = DateTimeOffset.UtcNow;
+            string contentJson = JsonSerializer.Serialize(new
+            {
+                text = $"❌ 已拒绝记忆申请：{proposal.Title}（{request.Reason}）",
+            });
+
+            var notification = new DbMessage
+            {
+                Id = Guid.NewGuid(),
+                ChannelId = srcChannelId,
+                Seq = notificationSeq,
+                SenderType = MessageSenderTypeMap.SystemDbValue,
+                SenderId = null,
+                ContentType = MessageContentTypeMap.SystemDbValue,
+                Content = contentJson,
+                Mentions = null,
+                ParentSeq = null,
+                ClientMsgId = null,
+                TraceId = http.GetTraceId(),
+                CreatedAt = msgNow,
+            };
+
+            db.Messages.Add(notification);
+            await db.SaveChangesAsync(ct);
+
+            await wsSender.BroadcastToChannelAsync(srcChannelId, new
+            {
+                id = Guid.NewGuid().ToString("N"),
+                type = WsMessageTypeMap.MessageCreatedValue,
+                ts = msgNow.ToUnixTimeMilliseconds(),
+                payload = new
+                {
+                    channel_id = srcChannelId,
+                    message = new
+                    {
+                        notification.Id,
+                        notification.Seq,
+                        notification.SenderType,
+                        notification.SenderId,
+                        notification.ContentType,
+                        content = JsonDocument.Parse(notification.Content).RootElement,
+                        notification.ParentSeq,
+                        notification.ClientMsgId,
+                        notification.CreatedAt,
+                    },
+                },
+            }, ct);
+        }
 
         await db.Entry(proposal).ReloadAsync(ct);
         return Results.Ok(ToProposalSummary(proposal, idempotent: false));
