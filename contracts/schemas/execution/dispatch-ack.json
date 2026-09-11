@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mateos.local/schemas/execution/dispatch-ack.json",
+  "title": "execution.dispatch_ack payload",
+  "description": "Agent → Runtime：dispatch 送达收据（detailed/03 §7.2）。只有一个含义——dispatch 已送达并被接收。没有 accepted=false 分支，不会触发重路由：业务接受已在 collaboration.decision 阶段完成。",
+  "type": "object",
+  "required": ["execution_id", "attempt_no", "received", "protocol_error"],
+  "additionalProperties": false,
+  "properties": {
+    "execution_id": { "type": "string", "format": "uuid" },
+    "attempt_no": { "type": "integer", "minimum": 1 },
+    "received": {
+      "type": "boolean",
+      "description": "恒为 true。刻意不允许 false：容量已在 Resolver 阶段由 lease 预占，dispatch 阶段出现「本地已满」属 invariant 破坏，按送达失败路径处理，不回 Resolver 重路由。"
+    },
+    "protocol_error": {
+      "type": ["string", "null"],
+      "enum": ["UNKNOWN_EXECUTION", "STALE_ATTEMPT", null],
+      "description": "仅协议层异常。Runtime 记指标并丢弃，不改状态、不重派。"
+    }
+  }
+}

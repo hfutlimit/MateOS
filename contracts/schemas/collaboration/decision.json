@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mateos.local/schemas/collaboration/decision.json",
+  "title": "collaboration.decision payload",
+  "description": "Agent → Runtime：决策结果（detailed/03 §2）。ACCEPT =「我要不要接这个工作」（业务接受），与 execution.dispatch_ack（transport 收据）是两件事。",
+  "type": "object",
+  "required": ["collaboration_request_id", "decision", "reason", "analysis", "needs"],
+  "additionalProperties": false,
+  "properties": {
+    "collaboration_request_id": { "type": "string", "format": "uuid" },
+    "decision": {
+      "enum": ["ACCEPT", "REJECT", "NEED_CONTEXT", "DELEGATE"],
+      "description": "DELEGATE 是保留枚举位，V1 不实现（detailed/10 §6）。"
+    },
+    "reason": {
+      "type": ["string", "null"],
+      "description": "必填语义（01 §T+11）：拒收必须说明原因，否则人类无法在 Needs You 里做判断。"
+    },
+    "analysis": {
+      "description": "ACCEPT 时必须提供的三件套（能力 / 上下文分 / 权限）；其他决策可为 null。",
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "required": ["capability", "context_score", "permission"],
+          "additionalProperties": false,
+          "properties": {
+            "capability": { "type": "boolean" },
+            "context_score": {
+              "type": ["number", "null"],
+              "minimum": 0,
+              "maximum": 100
+            },
+            "permission": { "type": "boolean" }
+          }
+        }
+      ]
+    },
+    "needs": {
+      "type": ["array", "null"],
+      "items": { "type": "string" },
+      "description": "decision=NEED_CONTEXT 时需要人类补充什么。"
+    }
+  }
+}

@@ -1,6 +1,7 @@
 using System.Text.Json;
 using MateOS.Api.Auth;
 using MateOS.Api.Http;
+using MateOS.Contracts.Protocol;
 using MateOS.Api.Observability;
 using MateOS.Api.Outbox;
 using MateOS.Api.Persistence;
@@ -67,29 +68,9 @@ public sealed record ExecutionAttemptSummary(
     string? TerminalErrorCode,
     string? TerminalMessage);
 
-/// <summary>
-/// 一条待执行的 dispatch。
-/// </summary>
-/// <remarks>
-/// <para>
-/// <b>这个形状必须与 WS 推送的 <c>execution.dispatch</c> payload 逐字段一致</b>
-/// （见 <see cref="AgentDispatchNotifier"/>）：轮询与推送是同一份事实的两条投递通道，
-/// SDK 只应有一份解析代码。任何一边改字段，另一边必须同时改。
-/// </para>
-/// <para>
-/// <c>deadline_s</c> 用<b>相对秒数</b>而不是绝对时间戳：Agent 与 Runtime 的时钟未必同步，
-/// 绝对时间会让快时钟的 Agent 提前放弃、慢时钟的 Agent 超时还在跑。
-/// </para>
-/// </remarks>
-public sealed record DispatchEnvelope(
-    Guid ExecutionId,
-    int AttemptNo,
-    Guid? CollaborationRequestId,
-    Guid? WorkItemRef,
-    JsonElement Input,
-    JsonElement? ContextRefs,
-    long? DeadlineS,
-    string IdempotencyKey);
+// dispatch 的出参直接用契约层的 ExecutionDispatchPayload（MateOS.Contracts.Protocol），
+// 不在此另造 DTO：轮询与 WS 推送是同一份事实的两条投递通道，形状由
+// contracts/schemas/execution/dispatch.json 约束，SDK 只应有一份解析代码。
 
 /// <summary>
 /// E7 内部 API：execution dispatch + event 上报 + result 上报 + dispatch_ack + status 上报。
@@ -283,7 +264,7 @@ public static class ExecutionEndpoints
 
         if (inbox.Count == 0)
         {
-            return Results.Ok(Array.Empty<DispatchEnvelope>());
+            return Results.Ok(Array.Empty<ExecutionDispatchPayload>());
         }
 
         // 拉对应的 execution + input
@@ -291,30 +272,46 @@ public static class ExecutionEndpoints
             .Where(e => inbox.Select(x => x.ExecutionId).Contains(e.Id))
             .ToDictionaryAsync(e => e.Id, ct);
 
-        List<DispatchEnvelope> envelopes = inbox
+        // work_item_ref 要带 provider_key / external_ref，批量取回避免 N+1
+        List<Guid> workItemIds = execs.Values
+            .Where(e => e.WorkItemRef is not null)
+            .Select(e => e.WorkItemRef!.Value)
+            .Distinct()
+            .ToList();
+
+        Dictionary<Guid, WorkItemRef> workItemRefs = (await db.WorkItems
+                .AsNoTracking()
+                .Where(w => workItemIds.Contains(w.Id))
+                .Select(w => new { w.Id, w.ProviderKey, w.ExternalRef })
+                .ToListAsync(ct))
+            .ToDictionary(
+                w => w.Id,
+                w => new WorkItemRef(w.ProviderKey, w.Id.ToString(), w.ExternalRef));
+
+        List<ExecutionDispatchPayload> dispatches = inbox
             .Where(x => execs.ContainsKey(x.ExecutionId))
             .Select(x =>
             {
                 DbAgentExecution e = execs[x.ExecutionId];
-                JsonElement input = JsonDocument.Parse(string.IsNullOrEmpty(e.Input) ? "{}" : e.Input).RootElement;
-                JsonElement? context = string.IsNullOrEmpty(e.ContextRefs)
-                    ? null
-                    : JsonDocument.Parse(e.ContextRefs).RootElement;
-                return new DispatchEnvelope(
+
+                return new ExecutionDispatchPayload(
                     ExecutionId: e.Id,
                     AttemptNo: x.AttemptNo,
                     CollaborationRequestId: e.CollaborationRequestId,
-                    WorkItemRef: e.WorkItemRef,
-                    Input: input,
-                    ContextRefs: context,
+                    WorkItemRef: e.WorkItemRef is { } workItemId
+                                  && workItemRefs.TryGetValue(workItemId, out WorkItemRef? itemRef)
+                        ? itemRef
+                        : null,
+                    Input: ExecutionPayloadMapper.ToInput(e.Input),
+                    Context: ExecutionPayloadMapper.ToContext(e.ContextRefs),
                     DeadlineS: e.DeadlineAt is { } deadline
-                        ? Math.Max(0, (long)(deadline - DateTimeOffset.UtcNow).TotalSeconds)
+                        ? (int)Math.Clamp((long)(deadline - DateTimeOffset.UtcNow).TotalSeconds, 0, int.MaxValue)
                         : null,
                     IdempotencyKey: x.IdempotencyKey);
             })
             .ToList();
 
-        return Results.Ok(envelopes);
+        return Results.Ok(dispatches);
     }
 
     // ──────────────────────────── Dispatch ACK ────────────────────────────

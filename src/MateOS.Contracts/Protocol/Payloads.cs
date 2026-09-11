@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using System.Text.Json.Serialization;
 
 namespace MateOS.Contracts.Protocol;
 
@@ -29,8 +30,16 @@ public sealed record Envelope(string Type, Guid Id, long Ts, JsonNode? Payload);
 /// <summary>协作参与方引用。</summary>
 public sealed record ActorRef(string Type, Guid Id);
 
-/// <summary>WorkItem 引用。<c>execution</c> 可独立存在，故所有引用点均可空（I2）。</summary>
-public sealed record WorkItemRef(string ProviderKey, string WorkItemId, string ExternalRef);
+/// <summary>
+/// WorkItem 引用。<c>execution</c> 可独立存在，故所有引用点均可空（I2）。
+/// </summary>
+/// <remarks>
+/// 用<b>对象</b>而不是裸 id：Agent 需要知道这条工作来自哪个 Provider
+/// （builtin 与 jira 的后续动作完全不同）。
+/// <paramref name="ExternalRef"/> 可空 —— builtin 没有外部标识
+/// （契约 schema：<c>contracts/schemas/execution/dispatch.json#/$defs/work_item_ref</c>）。
+/// </remarks>
+public sealed record WorkItemRef(string ProviderKey, string WorkItemId, string? ExternalRef);
 
 /// <summary>请求上下文的引用集合（01 §T+6，不含各自的事实内容）。</summary>
 public sealed record CollaborationContextRefs(
@@ -78,10 +87,22 @@ public sealed record CollaborationResolvedPayload(
 public sealed record ExecutionInput(string? Prompt, JsonNode? Params);
 
 /// <summary>执行上下文快照（dispatch 时冻结，resume 时原样回传）。</summary>
+/// <remarks>
+/// <para>
+/// 前三个字段是 <b>V2 的注入位</b>（记忆引用 / 近期消息 / 权限快照），S1 阶段恒为 <c>null</c>：
+/// 设计原则是「上下文注入走引用」，注入本身尚未实现。
+/// </para>
+/// <para>
+/// <paramref name="Refs"/> 是<b>原始引用集合的透传位</b>
+/// （channel_id / message_seq / project_id / work_item_id）。
+/// 刻意保留：在注入落地前，若只留前三个字段，这些引用会无处安放而被丢掉。
+/// </para>
+/// </remarks>
 public sealed record ExecutionContext(
     IReadOnlyList<Guid>? MemoryRefs,
     JsonNode? RecentMessages,
-    JsonNode? Permissions);
+    JsonNode? Permissions,
+    JsonNode? Refs);
 
 /// <summary>
 /// Runtime → Agent：派发一次执行。
@@ -114,7 +135,15 @@ public sealed record ExecutionDispatchAckPayload(
     bool Received,
     string? ProtocolError)
 {
-    /// <summary>是否携带协议层异常（未知 execution / 过期 attempt）。</summary>
+    /// <summary>
+    /// 是否携带协议层异常（未知 execution / 过期 attempt）。
+    /// </summary>
+    /// <remarks>
+    /// <b>必须 <see cref="JsonIgnoreAttribute"/></b>：这是给服务端判别用的派生便利属性，
+    /// 不属于 wire 契约。不标的话会被序列化成 <c>is_protocol_error</c>，
+    /// 而 schema 是 <c>additionalProperties: false</c> —— 契约校验会（也确实）失败。
+    /// </remarks>
+    [JsonIgnore]
     public bool IsProtocolError => !string.IsNullOrEmpty(ProtocolError);
 }
 

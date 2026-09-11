@@ -76,13 +76,24 @@ public sealed class WsDispatchPushTests(MateOsApiFixture fixture) : IClassFixtur
         JsonElement payload = frame.Value.GetProperty("payload");
         Assert.Equal(executionId, payload.GetProperty("execution_id").GetGuid());
         Assert.Equal(1, payload.GetProperty("attempt_no").GetInt32());
-        Assert.Equal(itemId, payload.GetProperty("work_item_ref").GetGuid());
         Assert.NotEqual(Guid.Empty, payload.GetProperty("collaboration_request_id").GetGuid());
         Assert.False(string.IsNullOrEmpty(payload.GetProperty("idempotency_key").GetString()));
-        Assert.Equal("推送给 agent 的活", payload.GetProperty("input").GetProperty("title").GetString());
+
+        // work_item_ref 是对象而非裸 id：Agent 必须能知道走哪个 Provider
+        JsonElement workItemRef = payload.GetProperty("work_item_ref");
+        Assert.Equal("builtin", workItemRef.GetProperty("provider_key").GetString());
+        Assert.Equal(itemId.ToString(), workItemRef.GetProperty("work_item_id").GetString());
+        Assert.Equal(JsonValueKind.Null, workItemRef.GetProperty("external_ref").ValueKind);
+
+        // input 是契约形状 { prompt, params }；WorkItem 指派时 prompt 取标题
+        Assert.Equal("推送给 agent 的活", payload.GetProperty("input").GetProperty("prompt").GetString());
+
+        // context 保留原始引用透传位
+        Assert.Equal(itemId.ToString(),
+            payload.GetProperty("context").GetProperty("refs").GetProperty("work_item_id").GetString());
 
         // 相对秒数：时钟不同步也不该让 Agent 提前放弃
-        Assert.True(payload.GetProperty("deadline_s").GetInt64() is > 0 and <= 300);
+        Assert.True(payload.GetProperty("deadline_s").GetInt32() is > 0 and <= 300);
 
         // ④ 同一份事实的另一条通道（轮询 inbox）必须给出同样的形状
         HttpClient asAgent = fixture.CreateClient();
@@ -96,9 +107,16 @@ public sealed class WsDispatchPushTests(MateOsApiFixture fixture) : IClassFixtur
 
         Assert.Equal(executionId, inboxItem.GetProperty("execution_id").GetGuid());
         Assert.Equal(payload.GetProperty("attempt_no").GetInt32(), inboxItem.GetProperty("attempt_no").GetInt32());
-        Assert.Equal(payload.GetProperty("work_item_ref").GetGuid(), inboxItem.GetProperty("work_item_ref").GetGuid());
         Assert.Equal(payload.GetProperty("idempotency_key").GetString(),
             inboxItem.GetProperty("idempotency_key").GetString());
+
+        // 两条通道给出的形状必须一致（SDK 只应有一份解析代码）
+        Assert.Equal(
+            payload.GetProperty("work_item_ref").GetRawText(),
+            inboxItem.GetProperty("work_item_ref").GetRawText());
+        Assert.Equal(
+            payload.GetProperty("input").GetRawText(),
+            inboxItem.GetProperty("input").GetRawText());
     }
 
     // ───────────────────────── E7-PUSH-002 ─────────────────────────

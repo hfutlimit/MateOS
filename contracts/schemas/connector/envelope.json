@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mateos.local/schemas/connector/envelope.json",
+  "title": "MateOS Connector Envelope",
+  "description": "Runtime ↔ Agent Connector 的通用外层信封（detailed/03 §2）。字段顺序无关；payload 形状由各消息自己的 schema 约束。",
+  "type": "object",
+  "required": ["id", "type", "ts", "payload"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "协议级幂等键。UUIDv4；接受带连字符（D 格式）与 32 位无连字符（N 格式）两种写法——服务端自身生成的是 N 格式，客户端常见 D 格式，两者都必须被接受。",
+      "pattern": "^[0-9a-fA-F]{8}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{12}$"
+    },
+    "type": {
+      "description": "消息类型。命名空间严格分离：collaboration.* 属 E4，execution.* 属 E7（SYSTEM_DESIGN §6.5）。",
+      "enum": [
+        "hello",
+        "hello_ack",
+        "hello_nack",
+        "heartbeat",
+        "collaboration.request",
+        "collaboration.decision",
+        "collaboration.cancelled",
+        "collaboration.resolved",
+        "execution.dispatch",
+        "execution.dispatch_ack",
+        "execution.event",
+        "execution.result",
+        "execution.error",
+        "execution.cancel",
+        "execution.resume_request",
+        "execution.resume_ack",
+        "status"
+      ]
+    },
+    "ts": {
+      "type": "integer",
+      "description": "Unix 毫秒时间戳。",
+      "minimum": 0
+    },
+    "payload": {
+      "type": "object",
+      "description": "消息载荷。按 type 取 contracts/schemas/<domain>/<message>.json 校验。"
+    }
+  }
+}

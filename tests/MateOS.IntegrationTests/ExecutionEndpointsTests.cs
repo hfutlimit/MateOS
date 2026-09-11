@@ -4,6 +4,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using MateOS.Api.Agents;
 using MateOS.Api.Auth;
+using MateOS.Contracts.Protocol;
 
 namespace MateOS.IntegrationTests;
 
@@ -80,7 +81,7 @@ public sealed class ExecutionEndpointsTests(MateOsApiFixture fixture) : IClassFi
         HttpResponseMessage inboxResp = await agentClient.GetAsync(
             $"/agents/{agent.Id}/executions/inbox");
         await EnsureSuccessAsync(inboxResp);
-        var inbox = (await inboxResp.Content.ReadFromJsonAsync<List<DispatchEnvelope>>())!;
+        var inbox = (await inboxResp.Content.ReadFromJsonAsync<List<ExecutionDispatchPayload>>())!;
         Assert.Single(inbox);
         Assert.Equal(executionId, inbox[0].ExecutionId);
         Assert.Equal("idemp-001", inbox[0].IdempotencyKey);

@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mateos.local/schemas/execution/resume-ack.json",
+  "title": "execution.resume_ack payload",
+  "description": "Runtime → Agent：断线重连后的续传位点（detailed/03 §3.3，v0.4.3 反向协议：Agent 问、Runtime 答）。",
+  "type": "object",
+  "required": ["execution_id", "attempt_no", "last_persisted_seq", "snapshot"],
+  "additionalProperties": false,
+  "properties": {
+    "execution_id": { "type": "string", "format": "uuid" },
+    "attempt_no": { "type": "integer", "minimum": 1 },
+    "last_persisted_seq": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "连续位点（contiguous cursor），不是 MAX(seq)。Agent 必须从 last_persisted_seq + 1 续发；用 MAX(seq) 会让中断期间丢失的 seq 永久缺口。"
+    },
+    "snapshot": {
+      "description": "dispatch 的冻结快照，原样回传；attempt 已不存在时为 null。",
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/dispatch_snapshot" }
+      ]
+    }
+  },
+  "$defs": {
+    "dispatch_snapshot": {
+      "type": "object",
+      "required": ["execution_id", "input", "context", "deadline_s"],
+      "additionalProperties": false,
+      "properties": {
+        "execution_id": { "type": "string", "format": "uuid" },
+        "input": { "$ref": "#/$defs/execution_input" },
+        "context": { "$ref": "#/$defs/execution_context" },
+        "deadline_s": { "type": ["integer", "null"], "minimum": 0 }
+      }
+    },
+    "execution_input": {
+      "description": "与 execution/dispatch.json 中的定义一致。刻意各自自包含（不用跨文件 $ref）：跨文件解析依赖 schema 注册顺序，会让校验结果受加载方式影响；两份定义的一致性由 ConnectorContractTests 对同一组 C# 契约记录做双向校验来保证。",
+      "type": "object",
+      "required": ["prompt", "params"],
+      "additionalProperties": false,
+      "properties": {
+        "prompt": { "type": ["string", "null"] },
+        "params": { "type": ["object", "array", "null"] }
+      }
+    },
+    "execution_context": {
+      "description": "与 execution/dispatch.json 中的定义一致（同上：刻意自包含）。",
+      "type": "object",
+      "required": ["memory_refs", "recent_messages", "permissions", "refs"],
+      "additionalProperties": false,
+      "properties": {
+        "memory_refs": {
+          "type": ["array", "null"],
+          "items": { "type": "string" }
+        },
+        "recent_messages": { "type": ["object", "array", "null"] },
+        "permissions": { "type": ["object", "null"] },
+        "refs": { "type": ["object", "null"] }
+      }
+    }
+  }
+}

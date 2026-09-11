@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mateos.local/schemas/execution/dispatch.json",
+  "title": "execution.dispatch payload",
+  "description": "Runtime → Agent：派发一次执行（detailed/03 §2 + §7.2）。推送（WS）与轮询（GET /agents/{id}/executions/inbox）返回的形状逐字段一致。",
+  "type": "object",
+  "required": [
+    "execution_id",
+    "attempt_no",
+    "collaboration_request_id",
+    "work_item_ref",
+    "input",
+    "context",
+    "deadline_s",
+    "idempotency_key"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "execution_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "由 E7 生成；Agent 永不自报。"
+    },
+    "attempt_no": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "客户端必须按 (execution_id, attempt_no) 幂等：重复收到同一 attempt 只重绑会话并再回 dispatch_ack，不得重复执行（detailed/10 §4）。"
+    },
+    "collaboration_request_id": {
+      "type": ["string", "null"],
+      "description": "可空：执行可由非 CollaborationRequest 的路径发起（如 WorkItem 直接指派、API 调用）。"
+    },
+    "work_item_ref": {
+      "description": "关联的 WorkItem 引用；无关联时为 null。用对象而非裸 id —— Agent 需要知道走哪个 Provider。",
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/work_item_ref" }
+      ]
+    },
+    "input": { "$ref": "#/$defs/execution_input" },
+    "context": { "$ref": "#/$defs/execution_context" },
+    "deadline_s": {
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "description": "相对秒数，不是绝对时间戳：Agent 与 Runtime 的时钟未必同步，绝对时间会让快时钟的 Agent 提前放弃。"
+    },
+    "idempotency_key": {
+      "type": "string",
+      "minLength": 1,
+      "description": "与轮询 inbox 返回的同一字段同源（agent_dispatch_inbox.idempotency_key）。"
+    }
+  },
+  "$defs": {
+    "work_item_ref": {
+      "type": "object",
+      "required": ["provider_key", "work_item_id", "external_ref"],
+      "additionalProperties": false,
+      "properties": {
+        "provider_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "ProviderKey 是 string（E8 §4 去硬编码），如 'builtin' | 'jira'。"
+        },
+        "work_item_id": {
+          "type": "string",
+          "description": "MateOS 侧 work_items.id。"
+        },
+        "external_ref": {
+          "type": ["string", "null"],
+          "description": "外部系统标识（Jira issue key 等）；builtin 时为 null。"
+        }
+      }
+    },
+    "execution_input": {
+      "type": "object",
+      "required": ["prompt", "params"],
+      "additionalProperties": false,
+      "properties": {
+        "prompt": {
+          "type": ["string", "null"],
+          "description": "给 Agent 的自然语言指令。mention 触发时是被 @ 的那条消息正文；WorkItem 指派时是标题。"
+        },
+        "params": {
+          "description": "结构化参数。无参数时为 {} 或 null。",
+          "type": ["object", "array", "null"]
+        }
+      }
+    },
+    "execution_context": {
+      "type": "object",
+      "required": ["memory_refs", "recent_messages", "permissions", "refs"],
+      "additionalProperties": false,
+      "properties": {
+        "memory_refs": {
+          "type": ["array", "null"],
+          "items": { "type": "string" },
+          "description": "已批准记忆的引用（E5）。S1 阶段恒为 null —— 设计原则是「上下文注入走引用」，注入尚未实现。"
+        },
+        "recent_messages": {
+          "type": ["object", "array", "null"],
+          "description": "近期消息引用。S1 阶段恒为 null。"
+        },
+        "permissions": {
+          "type": ["object", "null"],
+          "description": "本次执行携带的权限快照（E6）。S1 阶段恒为 null。"
+        },
+        "refs": {
+          "type": ["object", "null"],
+          "description": "原始引用集合（channel_id / message_seq / project_id / work_item_id 等）。刻意保留透传位：上三个字段是 V2 的注入位，在注入实现前不能丢信息。"
+        }
+      }
+    }
+  }
+}
