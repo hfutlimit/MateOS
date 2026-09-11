@@ -38,6 +38,17 @@ public static class AuditActions
     public const string ProjectCreated = "PROJECT_CREATED";
     public const string ProjectUpdated = "PROJECT_UPDATED";
     public const string ProjectDeleted = "PROJECT_DELETED";
+
+    // ── E3 Channel & Messaging ──
+    public const string ChannelCreated = "CHANNEL_CREATED";
+    public const string ChannelUpdated = "CHANNEL_UPDATED";
+    public const string ChannelArchived = "CHANNEL_ARCHIVED";
+    public const string ChannelMemberAdded = "CHANNEL_MEMBER_ADDED";
+    public const string ChannelMemberRemoved = "CHANNEL_MEMBER_REMOVED";
+    public const string MessagePosted = "MESSAGE_POSTED";
+    public const string MessageDeleted = "MESSAGE_DELETED";
+    public const string AttachmentPresigned = "ATTACHMENT_PRESIGNED";
+    public const string AttachmentConfirmed = "ATTACHMENT_CONFIRMED";
 }
 
 /// <summary>一条待写入的审计记录。</summary>

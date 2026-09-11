@@ -68,7 +68,8 @@ public sealed class MateOsApiFixture : WebApplicationFactory<Program>
 
         await db.Database.ExecuteSqlRawAsync("""
             TRUNCATE users, organizations, organization_members, teams, team_members,
-                     projects, project_members, audit_logs, outbox_events
+                     projects, project_members, audit_logs, outbox_events,
+                     channels, channel_members, channel_seq_counters, messages, attachments
             RESTART IDENTITY CASCADE;
             """);
 

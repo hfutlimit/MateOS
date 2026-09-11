@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using System.Text;
 using MateOS.Api.Auth;
+using MateOS.Api.Channels;
 using MateOS.Api.Observability;
 using MateOS.Api.Persistence;
 using MateOS.Api.Workspace;
@@ -118,6 +119,7 @@ app.MapGet("/health", () => Results.Ok(new { status = "ok", service = "mateos-ap
 app.MapAuthEndpoints();
 app.MapMeEndpoints();
 app.MapWorkspaceEndpoints();
+app.MapChannelEndpoints();
 
 app.Run();
 

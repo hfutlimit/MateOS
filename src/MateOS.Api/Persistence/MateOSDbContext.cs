@@ -22,6 +22,11 @@ public sealed class MateOSDbContext(DbContextOptions<MateOSDbContext> options) :
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
     public DbSet<OutboxEvent> OutboxEvents => Set<OutboxEvent>();
     public DbSet<SchemaMigration> SchemaMigrations => Set<SchemaMigration>();
+    public DbSet<Channel> Channels => Set<Channel>();
+    public DbSet<ChannelMember> ChannelMembers => Set<ChannelMember>();
+    public DbSet<ChannelSeqCounter> ChannelSeqCounters => Set<ChannelSeqCounter>();
+    public DbSet<Message> Messages => Set<Message>();
+    public DbSet<Attachment> Attachments => Set<Attachment>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -36,6 +41,11 @@ public sealed class MateOSDbContext(DbContextOptions<MateOSDbContext> options) :
         modelBuilder.Entity<AuditLog>().ToTable("audit_logs");
         modelBuilder.Entity<OutboxEvent>().ToTable("outbox_events");
         modelBuilder.Entity<SchemaMigration>().ToTable("schema_migrations");
+        modelBuilder.Entity<Channel>().ToTable("channels");
+        modelBuilder.Entity<ChannelMember>().ToTable("channel_members");
+        modelBuilder.Entity<ChannelSeqCounter>().ToTable("channel_seq_counters");
+        modelBuilder.Entity<Message>().ToTable("messages");
+        modelBuilder.Entity<Attachment>().ToTable("attachments");
 
         // ── 主键 ──
         modelBuilder.Entity<User>().HasKey(x => x.Id);
@@ -45,6 +55,11 @@ public sealed class MateOSDbContext(DbContextOptions<MateOSDbContext> options) :
         modelBuilder.Entity<AuditLog>().HasKey(x => x.Id);
         modelBuilder.Entity<OutboxEvent>().HasKey(x => x.Id);
         modelBuilder.Entity<SchemaMigration>().HasKey(x => x.Name);
+        modelBuilder.Entity<Channel>().HasKey(x => x.Id);
+        modelBuilder.Entity<ChannelMember>().HasKey(x => new { x.ChannelId, x.MemberType, x.MemberId });
+        modelBuilder.Entity<ChannelSeqCounter>().HasKey(x => x.ChannelId);
+        modelBuilder.Entity<Message>().HasKey(x => new { x.ChannelId, x.Seq });
+        modelBuilder.Entity<Attachment>().HasKey(x => x.Id);
 
         // 成员表是复合主键（同一用户在同一层级只有一条成员记录）
         modelBuilder.Entity<OrganizationMember>().HasKey(x => new { x.OrganizationId, x.UserId });
@@ -79,6 +94,16 @@ public sealed class MateOSDbContext(DbContextOptions<MateOSDbContext> options) :
         modelBuilder.Entity<ProjectMember>()
             .HasOne<User>().WithMany().HasForeignKey(x => x.UserId);
 
+        // E3 Channel：channel_members + messages 都依赖 channels
+        modelBuilder.Entity<Channel>()
+            .HasOne<Project>().WithMany().HasForeignKey(x => x.ProjectId);
+        modelBuilder.Entity<ChannelMember>()
+            .HasOne<Channel>().WithMany().HasForeignKey(x => x.ChannelId);
+        modelBuilder.Entity<ChannelSeqCounter>()
+            .HasOne<Channel>().WithMany().HasForeignKey(x => x.ChannelId);
+        modelBuilder.Entity<Message>()
+            .HasOne<Channel>().WithMany().HasForeignKey(x => x.ChannelId);
+
         // ── 列类型（PostgreSQL 专有类型必须显式声明）──
         // 邮箱唯一且大小写不敏感（E1 F8）
         modelBuilder.Entity<User>().Property(x => x.Email).HasColumnType("citext");
@@ -87,6 +112,10 @@ public sealed class MateOSDbContext(DbContextOptions<MateOSDbContext> options) :
         modelBuilder.Entity<AuditLog>().Property(x => x.Ip).HasColumnType("inet");
 
         modelBuilder.Entity<OutboxEvent>().Property(x => x.Payload).HasColumnType("jsonb");
+
+        // E3：messages / channel.content 等 JSONB 列
+        modelBuilder.Entity<Message>().Property(x => x.Content).HasColumnType("jsonb");
+        modelBuilder.Entity<Message>().Property(x => x.Mentions).HasColumnType("jsonb");
 
         // ── 全局列名 → snake_case ──
         // EF 默认用属性名原样，而 DDL 是 snake_case；漏掉任何一个都会在运行期报列不存在。
