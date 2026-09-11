@@ -67,6 +67,10 @@ public static class AuditActions
     public const string ExecutionDispatchAcked = "EXECUTION_DISPATCH_ACKED";
     public const string ExecutionResult = "EXECUTION_RESULT";
     public const string ExecutionEvent = "EXECUTION_EVENT";
+
+    // ── E6 Authorization & Approval ──
+    public const string PermissionCreated = "PERMISSION_CREATED";
+    public const string PermissionDeleted = "PERMISSION_DELETED";
 }
 
 /// <summary>一条待写入的审计记录。</summary>

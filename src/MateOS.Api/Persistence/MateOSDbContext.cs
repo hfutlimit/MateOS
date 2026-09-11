@@ -36,6 +36,7 @@ public sealed class MateOSDbContext(DbContextOptions<MateOSDbContext> options) :
     public DbSet<ExecutionAttempt> ExecutionAttempts => Set<ExecutionAttempt>();
     public DbSet<ExecutionEvent> ExecutionEvents => Set<ExecutionEvent>();
     public DbSet<AgentDispatchInbox> AgentDispatchInbox => Set<AgentDispatchInbox>();
+    public DbSet<Permission> Permissions => Set<Permission>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -63,6 +64,7 @@ public sealed class MateOSDbContext(DbContextOptions<MateOSDbContext> options) :
         modelBuilder.Entity<ExecutionAttempt>().ToTable("execution_attempts");
         modelBuilder.Entity<ExecutionEvent>().ToTable("execution_events");
         modelBuilder.Entity<AgentDispatchInbox>().ToTable("agent_dispatch_inbox");
+        modelBuilder.Entity<Permission>().ToTable("permissions");
 
         // ── 主键 ──
         modelBuilder.Entity<User>().HasKey(x => x.Id);
@@ -85,6 +87,7 @@ public sealed class MateOSDbContext(DbContextOptions<MateOSDbContext> options) :
         modelBuilder.Entity<ExecutionAttempt>().HasKey(x => x.Id);
         modelBuilder.Entity<ExecutionEvent>().HasKey(x => x.Id);
         modelBuilder.Entity<AgentDispatchInbox>().HasKey(x => x.Id);
+        modelBuilder.Entity<Permission>().HasKey(x => x.Id);
 
         // 成员表是复合主键（同一用户在同一层级只有一条成员记录）
         modelBuilder.Entity<OrganizationMember>().HasKey(x => new { x.OrganizationId, x.UserId });

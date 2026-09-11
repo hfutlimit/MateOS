@@ -346,3 +346,20 @@ public sealed class AgentDispatchInbox
     public DateTimeOffset DispatchedAt { get; set; }
     public DateTimeOffset? AckedAt { get; set; }
 }
+
+// ============================================================================
+// E6 Authorization & Approval（迁移 005）
+// ============================================================================
+
+/// <summary>权限 override（E6 §3）。</summary>
+public sealed class Permission
+{
+    public Guid Id { get; set; }
+    public string ScopeType { get; set; } = string.Empty;
+    public Guid ScopeId { get; set; }
+    public string SubjectType { get; set; } = string.Empty;
+    public Guid SubjectId { get; set; }
+    public string PermKey { get; set; } = string.Empty;
+    public string Effect { get; set; } = string.Empty;
+    public DateTimeOffset CreatedAt { get; set; }
+}

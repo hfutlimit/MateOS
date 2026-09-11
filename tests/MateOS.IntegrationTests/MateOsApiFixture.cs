@@ -84,7 +84,8 @@ public sealed class MateOsApiFixture : WebApplicationFactory<Program>
                      projects, project_members, audit_logs, outbox_events,
                      channels, channel_members, channel_seq_counters, messages, attachments,
                      credentials, agents, agent_project_membership, agent_tokens,
-                     agent_executions, execution_attempts, execution_events, agent_dispatch_inbox
+                     agent_executions, execution_attempts, execution_events, agent_dispatch_inbox,
+                     permissions
             RESTART IDENTITY CASCADE;
             """);
 
