@@ -61,6 +61,26 @@
 > 2. `/ws` 的 hello 此前自己解 JWT，只认 user token 且**绕过 `token_type` 校验**
 >    （refresh token 也能换到 WS 会话），现已统一走 `TokenService` 的完整校验。
 
+> **协议 SSOT 已落地（`contracts/`）**：
+> `contracts/schemas/`（connector envelope + execution.dispatch / dispatch_ack / resume_ack
+> + collaboration.decision）取代「只写在散文里」的协议表述；
+> `ConnectorContractTests` 把 `MateOS.Contracts` 的契约记录序列化后喂给 JSON Schema 校验，
+> 于是**实现与契约分叉 = 测试失败**，而不是等客户端集成才发现。
+>
+> 落地时抓到的真实缺陷：`ExecutionDispatchAckPayload.IsProtocolError` 未标 `[JsonIgnore]`，
+> 会多序列化出 `is_protocol_error`（schema 为 `additionalProperties: false`）。
+>
+> **同步收敛的实现侧形状**（原先推送与轮询两条通道形状不同）：
+> HTTP inbox 此前用 `context_refs` / 裸 `work_item_ref` / `deadline_at_ms`，
+> 现与 WS 推送共用契约类型 `ExecutionDispatchPayload`：
+> `context`（+ `refs` 透传位）、`work_item_ref` 为对象（`provider_key` + `work_item_id` + `external_ref`）、
+> `input` 归一为 `{prompt, params}`、`deadline_s` 为相对秒。
+> DB 里存的自由形态快照 → 契约形状的映射集中在 `ExecutionPayloadMapper`（推送/轮询共用一份）。
+>
+> **`SYSTEM_DESIGN` §6.5 与本文档 §6.5/detailed-03 的 wire 矛盾已逐项裁决**，
+> 明细与依据见 `contracts/README.md` §4（含仍需回改文档的 4 项：§6.5 类型清单与 `attempt_no`、
+> §2 旧 monorepo 结构、§8 `/api/v1` 前缀）。
+
 **能力域标签对照**：
 
 | 标签 | 能力域 | 落在哪一刀 |

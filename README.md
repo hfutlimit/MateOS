@@ -17,7 +17,7 @@ MateOS 是一个面向软件开发团队的 AI 原生团队协作平台（V1 = A
 | Cache / Presence | Redis 7 |
 | Execution | MateOS Agent Runtime（自研，永久自洽） |
 | Implementation | **S1 → S2 → S3 vertical slices** |
-| Stage | **S1+S2+S3 已落地 + M3b Phase 2**（M1+M2+M2-WS+M3a+M3b+M4a+M4b+M7+E5+E6 + Needs You + Memory 写链路 + E8 Work Delivery + E7 dispatch 实时推送）：13 个 feat commit，**547 unit 全过**；User Promise「@Agent → 工作 → 记忆 → 审批」+「WorkItem → Agent 推进 → 产出回流」双闭环 |
+| Stage | **S1+S2+S3 已落地 + M3b Phase 2 + 协议 SSOT**（M1+M2+M2-WS+M3a+M3b+M4a+M4b+M7+E5+E6 + Needs You + Memory 写链路 + E8 Work Delivery + E7 dispatch 实时推送 + `contracts/` schema 校验）：15 个 feat commit，**572 unit 全过**；User Promise「@Agent → 工作 → 记忆 → 审批」+「WorkItem → Agent 推进 → 产出回流」双闭环 |
 
 > 本表是唯一需要维护的「技术基线」。**不要在此堆叠文档版本号**：PRD / SYSTEM_DESIGN / UI DS 的版本只在各自文件头与更新记录里维护；detailed / epic / 原型不单独发行版本号，用日期 + commit 追溯。避免出现「文件头 v0.5、changelog v0.7、commit v0.8」这类交叉版本噪音。
 
@@ -60,6 +60,10 @@ MateOS
 - `docs/design/future/` = **V2 愿景，不作 S1–S3 依据**（`autonomous-delivery/` 已迁入并冻结）。
 - `docs/spec/domain-model-v0.3.md` = 领域模型 + 不变量，并含 **User-facing Vocabulary**（内部模型 ↔ 用户语言）。
 - `docs/review/` = 评审结论与待拍板项，不是 spec。
+- **`contracts/` = wire 层事实源**（JSON Schema + 待落的 OpenAPI）。它与上面两份**不同层级**：
+  PRD / SYSTEM_DESIGN 管「语义该是什么」，`contracts/` 管「字节长什么样」。
+  两份设计文档在 wire 形状上互相矛盾时，裁决记录在 `contracts/README.md` §4（含逐项依据），
+  并有一条测试把 C# 契约记录与 schema 对拍——**不要把这类裁决散回散文里**。
 
 ## 文档结构
 
@@ -109,7 +113,8 @@ docs/
 - 数据库：PostgreSQL 16 + pgvector
 - 缓存：Redis 7（presence / pub/sub / 限流 / slot lease）
 - 异步：**PostgreSQL transactional outbox + `SKIP LOCKED` relay**（无独立 MQ）
-- 契约：OpenAPI 3.1 + JSON Schema（`contracts/`）为协议事实源，TS / C# 由此生成或校验
+- 契约：**JSON Schema（`contracts/schemas/`）已落地且可执行校验**（`ConnectorContractTests` 把 C# 契约记录序列化后喂给 schema，分叉即测试失败）；
+  OpenAPI 3.1（`contracts/openapi/`）与 TS 类型生成**待落地**，取舍见 `contracts/README.md` §5
 - 可观测：S1 起只做结构化日志 + trace_id + audit + `/metrics`；OTel + Prometheus + Grafana + Loki 推后
 - 沙箱 / 部署：Docker（V3 启用）；Docker Compose → K8s
 
