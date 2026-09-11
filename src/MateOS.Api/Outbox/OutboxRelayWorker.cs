@@ -3,8 +3,10 @@ using MateOS.Api.Agents;
 using MateOS.Api.Channels;
 using MateOS.Api.Persistence;
 using MateOS.Domain.Outbox;
+using MateOS.Domain.Work;
 using Microsoft.EntityFrameworkCore;
 using DbOutboxEvent = MateOS.Api.Persistence.OutboxEvent;
+using DbWorkComment = MateOS.Api.Persistence.WorkComment;
 
 namespace MateOS.Api.Outbox;
 
@@ -179,6 +181,9 @@ internal static class ExecutionCompletedHandler
         long? messageSeq = payload.TryGetProperty("message_seq", out JsonElement ms) && ms.ValueKind == JsonValueKind.Number
             ? ms.GetInt64() : null;
 
+        // S3：Work Delivery 回流——execution 关联了 work_item 时把结果推回 Work 面
+        await WorkItemExecutionFeedback.HandleAsync(db, executionId, statusStr, outputMarkdown, ct);
+
         // v0.4.3 详细设计 01 §1 T+23：E4 收到 execution.completed → E3 写 AGENT_OUTPUT 投影
         // V1 简化：仅 status=SUCCEEDED + 有 channel_id 时写 channel message
         if (statusStr != "SUCCEEDED" || channelId is null || messageSeq is null)
@@ -218,4 +223,96 @@ internal static class ExecutionCompletedHandler
             },
         }, ct);
     }
+}
+
+/// <summary>
+/// S3 Work Delivery 回流：execution 终态 → WorkItem 状态前推 + SYSTEM 评论。
+/// </summary>
+/// <remarks>
+/// <para>
+/// 与 <see cref="ExecutionCompletedHandler"/> 共用 relay 的同一个 DbContext 与事务：
+/// 「outbox 事件置 PUBLISHED」与「work item 回流」要么一起提交要么一起回滚，
+/// 因此 relay 崩溃重试不会产生重复评论。
+/// </para>
+/// <para>
+/// 刻意<b>不</b>把 WorkItem 直接推到 DONE：Agent 说「做完了」不等于人认可交付。
+/// 前推到 IN_REVIEW，把判断权留给 Needs You / 人。这是 Human Attention 模型的一致性要求。
+/// </para>
+/// </remarks>
+internal static class WorkItemExecutionFeedback
+{
+    private const int MaxCommentChars = 2000;
+
+    public static async Task HandleAsync(
+        MateOSDbContext db,
+        Guid executionId,
+        string? status,
+        string? outputMarkdown,
+        CancellationToken ct)
+    {
+        AgentExecution? execution = await db.AgentExecutions
+            .FirstOrDefaultAsync(e => e.Id == executionId, ct);
+
+        if (execution?.WorkItemRef is not { } workItemId)
+        {
+            return;
+        }
+
+        WorkItem? item = await db.WorkItems.FirstOrDefaultAsync(w => w.Id == workItemId, ct);
+
+        if (item is null)
+        {
+            return;
+        }
+
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        string body;
+
+        switch (status)
+        {
+            case "SUCCEEDED":
+            {
+                if (WorkItemStatusMap.TryParse(item.Status, out WorkItemStatus current)
+                    && current is WorkItemStatus.IN_PROGRESS)
+                {
+                    item.Status = WorkItemStatusMap.InReviewValue;
+                    item.CanonicalStatusCategory = WorkItemStatus.IN_REVIEW.ToCanonicalCategoryDbValue();
+                }
+
+                string excerpt = string.IsNullOrWhiteSpace(outputMarkdown)
+                    ? "（无输出）"
+                    : Truncate(outputMarkdown, MaxCommentChars);
+
+                body = $"Agent 执行完成，work item 进入 IN_REVIEW 等待人确认。\n\nexecution: {executionId}\n\n{excerpt}";
+                break;
+            }
+
+            case "FAILED":
+            {
+                // 失败不改变 work item 状态：Agent 失败是执行层事实，
+                // 「这张卡该怎么办」是人的判断（重派 / 拆分 / 关掉）。
+                body = $"Agent 执行失败，work item 状态保持 {item.Status}，等待人介入。\n\nexecution: {executionId}";
+                break;
+            }
+
+            default:
+                // CANCELLED 不回流：通常是人的主动取消，不需要再解释一遍
+                return;
+        }
+
+        item.UpdatedAt = now;
+
+        db.WorkComments.Add(new DbWorkComment
+        {
+            Id = Guid.NewGuid(),
+            WorkItemId = item.Id,
+            AuthorType = WorkCommentAuthorTypeMap.SystemValue,
+            AuthorId = null,
+            Body = body,
+            CreatedAt = now,
+        });
+    }
+
+    private static string Truncate(string value, int max) =>
+        value.Length <= max ? value : value[..max] + " …";
 }

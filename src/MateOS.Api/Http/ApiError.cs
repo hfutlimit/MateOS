@@ -19,6 +19,12 @@ public static class ApiErrors
     public const string Conflict = "CONFLICT";
     public const string WouldOrphanOrganization = "WOULD_ORPHAN_ORGANIZATION";
 
+    /// <summary>E8 §5.1：project 没有 active Work Management Provider（422，不是 500）。</summary>
+    public const string NoActiveWorkProvider = "NO_ACTIVE_WORK_PROVIDER";
+
+    /// <summary>E8 §5.1：binding 引用了未注册的 provider_key（422）。</summary>
+    public const string UnknownWorkProvider = "UNKNOWN_WORK_PROVIDER";
+
     public static IResult BadRequest(string code, string message) =>
         Results.BadRequest(new ApiError(code, message));
 

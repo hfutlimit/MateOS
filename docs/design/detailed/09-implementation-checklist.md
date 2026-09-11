@@ -32,6 +32,19 @@
 | **S2** | Agent 申请记忆 → 人类在 **Needs You → Approval** 批准 → 下一次 dispatch 能注入这条记忆 | E5 全量 + E6 的 `propose_memory` / `approve_memory` + Needs You 的 Approval 分类（v0.7：不再有独立审批中心页面） | Work Management、Jira |
 | **S3** | PO 建 WorkItem → @agent 执行 → 结果回帖并更新 WorkItem 状态 | E8 WorkItem 域 + Built-in Provider + Work 页面 + WorkItem ↔ Execution 关联（含独立 Execution 的 UI 出口） | Jira Provider（V1+）、Mission / WorkUnit（`future/`） |
 
+> **进度（2026-09-11）**：S1 ✅ / S2 ✅ / S3 ✅（**后端主链路**；P-Work 前端页面未做）。
+> S3 落点：`ops/postgres/migrations/008_work_item.sql`（v0.4.3 口径：`work_items.binding_id` 为路由事实源、
+> webhook 独立表）+ `src/MateOS.Domain/Work/`（类型 / 状态机 / canonical category / Provider 抽象 + Registry）
+> + `src/MateOS.Api/Work/`（BuiltInProvider / 13 端点 / WorkDelivery 指派链路）
+> + `Outbox` 的 execution 终态 → WorkItem 回流（SUCCEEDED 前推 IN_REVIEW，FAILED 只评论不改状态）。
+> E8 集成测试 10 条见 `tests/MateOS.IntegrationTests/WorkItemEndpointsTests.cs`（需 PG/Redis 才能执行）。
+>
+> **与本文档的两点口径偏差（已实施，需回写 spec）**：
+> 1. `search_text` 用 `TEXT` + 表达式 GIN（与 007 memory_items 一致），不是 `tsvector`；检索加 `ILIKE` 兜底，
+>    因为 `'simple'` 配置不切分 CJK，纯 tsquery 搜不到中文子串。
+> 2. `no active Work Management Provider` / `provider_key 未注册` 返回 **400**（`ApiErrors.BadRequest`）而非 §5.1 写的 422，
+>    与本仓库既有错误码风格（全部 400/403/404/409）保持一致。
+
 **能力域标签对照**：
 
 | 标签 | 能力域 | 落在哪一刀 |

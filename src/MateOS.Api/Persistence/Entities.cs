@@ -468,3 +468,132 @@ public sealed class MemoryItem
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 }
+
+// ============================================================================
+// E8 Work Management Core（迁移 008）
+// ============================================================================
+
+/// <summary>
+/// Provider Connection（E8 §3 v0.4.2：Org/Owner 级，多 Project 复用同一 Jira Site）。
+/// </summary>
+/// <remarks>
+/// v0.4.3 起 webhook_* 字段不再挂在此表（见 <see cref="WorkManagementWebhook"/>）：
+/// connection 是 tenant + OAuth 维度，webhook 是 subscription 维度。
+/// </remarks>
+public sealed class WorkManagementConnection
+{
+    public Guid Id { get; set; }
+    public string ProviderKey { get; set; } = string.Empty;
+    public Guid OrgId { get; set; }
+    public Guid OwnerUserId { get; set; }
+    public string? DisplayLabel { get; set; }
+
+    /// <summary>密文 = nonce(12) || ciphertext || tag(16)，与应用层 credential 同口径。</summary>
+    public byte[]? AccessTokenEncrypted { get; set; }
+
+    public byte[]? RefreshTokenEncrypted { get; set; }
+    public DateTimeOffset? ExpiresAt { get; set; }
+
+    /// <summary>site URL / scopes 等。</summary>
+    public string? Meta { get; set; }
+
+    public DateTimeOffset CreatedAt { get; set; }
+}
+
+/// <summary>
+/// Provider Binding（Project × Provider）。<b>路由的唯一事实源</b>（E8 §5.1）。
+/// </summary>
+public sealed class WorkItemBinding
+{
+    public Guid Id { get; set; }
+    public Guid ProjectId { get; set; }
+    public string ProviderKey { get; set; } = string.Empty;
+    public Guid? ConnectionId { get; set; }
+    public string? ExternalProjectRef { get; set; }
+
+    /// <summary>status mapping 等 Provider 私有配置。</summary>
+    public string? Settings { get; set; }
+
+    public bool IsActive { get; set; } = true;
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+}
+
+/// <summary>
+/// WorkItem（E8 §3 单一表）。Built-in 时是事实源；Jira 时是本地同步表示。
+/// </summary>
+public sealed class WorkItem
+{
+    public Guid Id { get; set; }
+    public Guid ProjectId { get; set; }
+    public string Type { get; set; } = string.Empty;
+    public string Title { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public string Status { get; set; } = string.Empty;
+
+    /// <summary>由 status 派生（F8），绝不手填。</summary>
+    public string CanonicalStatusCategory { get; set; } = string.Empty;
+
+    public string? AssigneeType { get; set; }
+    public Guid? AssigneeId { get; set; }
+    public DateTimeOffset? DueAt { get; set; }
+    public string CreatedByType { get; set; } = string.Empty;
+    public Guid CreatedById { get; set; }
+
+    /// <summary>v0.4.3：路由事实源。UPDATE 一律用它，不看 active binding。</summary>
+    public Guid BindingId { get; set; }
+
+    /// <summary>冗余字段，便于按 provider 过滤（identity 仍以 binding_id 为准）。</summary>
+    public string ProviderKey { get; set; } = string.Empty;
+
+    public string? ExternalRef { get; set; }
+    public string? ExternalUrl { get; set; }
+    public string? ProviderStatus { get; set; }
+    public DateTimeOffset? ProviderUpdatedAt { get; set; }
+    public string? ProviderMeta { get; set; }
+
+    /// <summary>V1 简化：TEXT + 表达式 GIN 索引（与 memory_items 同口径）。</summary>
+    public string SearchText { get; set; } = string.Empty;
+
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+}
+
+/// <summary>WorkComment（E8 §3）。</summary>
+public sealed class WorkComment
+{
+    public Guid Id { get; set; }
+    public Guid WorkItemId { get; set; }
+    public string AuthorType { get; set; } = string.Empty;
+    public Guid? AuthorId { get; set; }
+    public string Body { get; set; } = string.Empty;
+    public DateTimeOffset CreatedAt { get; set; }
+}
+
+/// <summary>WorkRelation（E8 §3）。写入时同步写反向行，两端视图才不矛盾。</summary>
+public sealed class WorkRelation
+{
+    public Guid Id { get; set; }
+    public Guid FromWorkItemId { get; set; }
+    public Guid ToWorkItemId { get; set; }
+    public string RelationType { get; set; } = string.Empty;
+    public DateTimeOffset CreatedAt { get; set; }
+}
+
+/// <summary>
+/// Webhook 注册（E8 §3 v0.4.3 独立表，挂 binding 维度；E9 Jira 消费，S3 只落 schema）。
+/// </summary>
+public sealed class WorkManagementWebhook
+{
+    public Guid Id { get; set; }
+    public Guid BindingId { get; set; }
+    public Guid ConnectionId { get; set; }
+    public string ExternalWebhookId { get; set; } = string.Empty;
+    public string? FilterJql { get; set; }
+    public string? FilterEvents { get; set; }
+    public DateTimeOffset ExpiresAt { get; set; }
+    public DateTimeOffset? LastRefreshedAt { get; set; }
+    public string? RefreshStatus { get; set; }
+    public string? LastError { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+}

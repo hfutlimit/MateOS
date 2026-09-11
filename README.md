@@ -17,7 +17,7 @@ MateOS 是一个面向软件开发团队的 AI 原生团队协作平台（V1 = A
 | Cache / Presence | Redis 7 |
 | Execution | MateOS Agent Runtime（自研，永久自洽） |
 | Implementation | **S1 → S2 → S3 vertical slices** |
-| Stage | **S1+S2 已落地**（M1+M2+M2-WS+M3a+M3b+M4a+M4b+M7+E5+E6 + Needs You + Memory 写链路）：11 个 feat commit，495 unit / 集成全过；User Promise「@Agent → 工作 → 记忆 → 审批」业务闭环 |
+| Stage | **S1+S2+S3 已落地**（M1+M2+M2-WS+M3a+M3b+M4a+M4b+M7+E5+E6 + Needs You + Memory 写链路 + E8 Work Delivery）：11 个 feat commit + 本轮 S3，**541 unit 全过**；User Promise「@Agent → 工作 → 记忆 → 审批」+「WorkItem → Agent 推进 → 产出回流」双闭环 |
 
 > 本表是唯一需要维护的「技术基线」。**不要在此堆叠文档版本号**：PRD / SYSTEM_DESIGN / UI DS 的版本只在各自文件头与更新记录里维护；detailed / epic / 原型不单独发行版本号，用日期 + commit 追溯。避免出现「文件头 v0.5、changelog v0.7、commit v0.8」这类交叉版本噪音。
 
@@ -121,7 +121,7 @@ docs/
 | --- | --- | --- | --- |
 | **S1 — Ask the Team** | 在 Channel 里 @Agent，Agent 接手、工作、把结果回到原 Channel | E1/E3/E2/E7（transport + Execution 主干）/E4/E6 最小/E10 基础；Agent 端用 **stub** | ✅ **主链路已落地** |
 | **S2 — Shared Knowledge** | Agent 申请记忆 → 人审 → 之后的 Agent 自动用上这条知识 | E5 + E6（propose/approve）+ Needs You → Approval | ✅ **业务闭环已落地** |
-| **S3 — Work Delivery** | 建 WorkItem → Agent 接手推进 → 产出与状态回流到 Work | E8 + Built-in Provider + Work 页面 + WorkItem↔Execution | ⏳ |
+| **S3 — Work Delivery** | 建 WorkItem → Agent 接手推进 → 产出与状态回流到 Work | E8 + Built-in Provider + Work 页面 + WorkItem↔Execution | ✅ **主链路已落地**（Work 前端页面待做） |
 | V1+ | Jira（Work Management Provider） | E9 | ⏳ |
 
 **S1+S2 累计 11 个 feat commit**（远端 main）：
@@ -140,6 +140,10 @@ docs/
 | `9f78430` | S2 Needs You 收口 | 495 (+10) | 跨 4 事实源聚合 timeline（INFORMATION/APPROVAL/DECISION/PROBLEMS） |
 | `bfd39dc` | S2 Memory 写链路 | 495 | Memory Proposal 申请/审批/拒绝时写 channel message（MEMORY_REQUEST + SYSTEM）+ WS 推 |
 
+**S3 本轮改动（工作区，未提交）**：`008_work_item.sql` 迁移 + `MateOS.Domain/Work/`（类型 / 状态机 / Provider 抽象 + Registry）
++ `MateOS.Api/Work/`（BuiltInProvider / 13 端点 / WorkDelivery）+ outbox 回流 + 45 个新单测 + 10 条 E8 集成测试；
+单测 495 → **541**。
+
 **S1 跑通端到端链路**（参考 `docs/design/detailed/01-single-agent-task-lifecycle.md` + `detailed/03-ws-connection-and-resume.md`）：
 
 ```
@@ -156,6 +160,48 @@ Stub Agent inbox 轮询 ──▶ dispatch_ack ──▶ E7 RUNNING
                                 │
                                 └─▶ result SUCCEEDED ──▶ outbox event → relay → WS message.created
 ```
+
+**S3 跑通端到端链路**（参考 `docs/design/detailed/06-workitem-provider-sync.md` + E8 epic）：
+
+```
+PO ──POST /projects/{id}/work-items──▶ work_items（binding = active binding，默认 builtin）
+                                        │
+                                        └─▶ POST /work-items/{id}/assign { agent_id }
+                                                │
+                                                ├─▶ Trigger(WORK_ITEM) + CR(ACCEPTED) + DecisionRecord   ← 同一事务
+                                                ├─▶ Execution(work_item_ref = work_item_id) + Attempt + inbox
+                                                └─▶ WorkItem: assignee=AGENT / status=IN_PROGRESS
+                                                        │
+Stub Agent 轮询 ──▶ dispatch_ack ──▶ RUNNING ──▶ events ──▶ result
+                                                        │
+                                                        └─▶ outbox execution.completed → relay
+                                                                ├─▶ WorkItem: IN_PROGRESS → IN_REVIEW
+                                                                ├─▶ SYSTEM 评论（含产出摘要）
+                                                                └─▶ WS message.created（Channel 侧）
+```
+
+**S3 已落地的 13 个端点**（全部 `RequireAuthorization`，project member 作用域）：
+
+| Method | Path | 说明 |
+| --- | --- | --- |
+| GET | `/work-management/providers` | 已注册 Provider 目录（`ProviderRegistry.List()`） |
+| GET | `/projects/{id}/work-management/bindings` | binding 列表（含 active 标记） |
+| POST | `/projects/{id}/work-management/bindings` | 切换 Provider（project owner；老 active 先下台再上台，同事务） |
+| GET / POST | `/projects/{id}/work-items` | 列表（status/type/assignee 过滤）/ 创建（走 active binding） |
+| GET | `/work-items/search?project_id=&q=` | 全文 + 中文子串搜索 |
+| GET / PATCH | `/work-items/{id}` | 详情 / 修改（走 work_item.binding） |
+| POST | `/work-items/{id}/transition` | 状态机迁移 |
+| GET / POST | `/work-items/{id}/comments` | 评论 |
+| POST | `/work-items/{id}/relations` | 关联（自动写反向行） |
+| GET | `/work-items/{id}/executions` | WorkItem → Execution 正向可见 |
+| POST | `/work-items/{id}/assign` | **Work Delivery 主链路**：指派 Agent → CR + Execution，幂等 |
+
+**S3 的不变量（DB 强制，不靠应用层自觉）**：同 project 只能有一条 `is_active` binding（partial unique index）；
+`(binding_id, external_ref)` 唯一；`work_relations` 自关联与非同 project 关联被拒；`assignee_type` / `assignee_id` 成对；
+`canonical_status_category` 由 `status` 派生（代码层，禁止手填）。
+
+> **wire 契约统一 snake_case**：REST 响应 / WS envelope / outbox payload / JSONB 内容四处同形。
+> 全局策略在 `Program.cs` 的 `ConfigureHttpJsonOptions`；query 参数对新增端点显式声明 snake_case 名。
 
 **M1–M9 仅作能力域映射标签，不是实施顺序**（明细见 `docs/design/detailed/09-implementation-checklist.md`）：M1=E1、M2=E3+WS+relay、M3a=E2、M3b=Connector、M4a=E6、M4b=E4、M5=E5、M6=E8、M7=E7 完整、M8=E10 完整、M9=集成压测。
 

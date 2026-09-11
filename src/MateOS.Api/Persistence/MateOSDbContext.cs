@@ -42,6 +42,12 @@ public sealed class MateOSDbContext(DbContextOptions<MateOSDbContext> options) :
     public DbSet<DecisionRecord> DecisionRecords => Set<DecisionRecord>();
     public DbSet<MemoryProposal> MemoryProposals => Set<MemoryProposal>();
     public DbSet<MemoryItem> MemoryItems => Set<MemoryItem>();
+    public DbSet<WorkManagementConnection> WorkManagementConnections => Set<WorkManagementConnection>();
+    public DbSet<WorkItemBinding> WorkItemBindings => Set<WorkItemBinding>();
+    public DbSet<WorkItem> WorkItems => Set<WorkItem>();
+    public DbSet<WorkComment> WorkComments => Set<WorkComment>();
+    public DbSet<WorkRelation> WorkRelations => Set<WorkRelation>();
+    public DbSet<WorkManagementWebhook> WorkManagementWebhooks => Set<WorkManagementWebhook>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -75,6 +81,12 @@ public sealed class MateOSDbContext(DbContextOptions<MateOSDbContext> options) :
         modelBuilder.Entity<DecisionRecord>().ToTable("decision_records");
         modelBuilder.Entity<MemoryProposal>().ToTable("memory_proposals");
         modelBuilder.Entity<MemoryItem>().ToTable("memory_items");
+        modelBuilder.Entity<WorkManagementConnection>().ToTable("work_management_connections");
+        modelBuilder.Entity<WorkItemBinding>().ToTable("work_item_bindings");
+        modelBuilder.Entity<WorkItem>().ToTable("work_items");
+        modelBuilder.Entity<WorkComment>().ToTable("work_comments");
+        modelBuilder.Entity<WorkRelation>().ToTable("work_relations");
+        modelBuilder.Entity<WorkManagementWebhook>().ToTable("work_management_webhooks");
 
         // ── 主键 ──
         modelBuilder.Entity<User>().HasKey(x => x.Id);
@@ -103,6 +115,12 @@ public sealed class MateOSDbContext(DbContextOptions<MateOSDbContext> options) :
         modelBuilder.Entity<DecisionRecord>().HasKey(x => x.Id);
         modelBuilder.Entity<MemoryProposal>().HasKey(x => x.Id);
         modelBuilder.Entity<MemoryItem>().HasKey(x => x.Id);
+        modelBuilder.Entity<WorkManagementConnection>().HasKey(x => x.Id);
+        modelBuilder.Entity<WorkItemBinding>().HasKey(x => x.Id);
+        modelBuilder.Entity<WorkItem>().HasKey(x => x.Id);
+        modelBuilder.Entity<WorkComment>().HasKey(x => x.Id);
+        modelBuilder.Entity<WorkRelation>().HasKey(x => x.Id);
+        modelBuilder.Entity<WorkManagementWebhook>().HasKey(x => x.Id);
 
         // 成员表是复合主键（同一用户在同一层级只有一条成员记录）
         modelBuilder.Entity<OrganizationMember>().HasKey(x => new { x.OrganizationId, x.UserId });
@@ -200,6 +218,43 @@ public sealed class MateOSDbContext(DbContextOptions<MateOSDbContext> options) :
         modelBuilder.Entity<CollaborationRequest>().Property(x => x.RequiredCapabilities).HasColumnType("jsonb");
         modelBuilder.Entity<CollaborationRequest>().Property(x => x.ContextRefs).HasColumnType("jsonb");
         modelBuilder.Entity<DecisionRecord>().Property(x => x.Needs).HasColumnType("jsonb");
+
+        // E8：Work Management 关系 + JSONB
+        // 关系不只是装饰：EF 靠它们决定同一次 SaveChanges 的 INSERT 顺序。
+        // work_items.binding_id 是 NOT NULL，漏了这条关系就会随机撞 23503。
+        modelBuilder.Entity<WorkManagementConnection>()
+            .HasOne<Organization>().WithMany().HasForeignKey(x => x.OrgId);
+        modelBuilder.Entity<WorkManagementConnection>()
+            .HasOne<User>().WithMany().HasForeignKey(x => x.OwnerUserId);
+
+        modelBuilder.Entity<WorkItemBinding>()
+            .HasOne<Project>().WithMany().HasForeignKey(x => x.ProjectId);
+        modelBuilder.Entity<WorkItemBinding>()
+            .HasOne<WorkManagementConnection>().WithMany().HasForeignKey(x => x.ConnectionId);
+
+        modelBuilder.Entity<WorkItem>()
+            .HasOne<Project>().WithMany().HasForeignKey(x => x.ProjectId);
+        modelBuilder.Entity<WorkItem>()
+            .HasOne<WorkItemBinding>().WithMany().HasForeignKey(x => x.BindingId);
+
+        modelBuilder.Entity<WorkComment>()
+            .HasOne<WorkItem>().WithMany().HasForeignKey(x => x.WorkItemId);
+
+        // 同一张表两条外键：必须显式声明，否则 EF 会把 from/to 认成同一关系
+        modelBuilder.Entity<WorkRelation>()
+            .HasOne<WorkItem>().WithMany().HasForeignKey(x => x.FromWorkItemId);
+        modelBuilder.Entity<WorkRelation>()
+            .HasOne<WorkItem>().WithMany().HasForeignKey(x => x.ToWorkItemId);
+
+        modelBuilder.Entity<WorkManagementWebhook>()
+            .HasOne<WorkItemBinding>().WithMany().HasForeignKey(x => x.BindingId);
+        modelBuilder.Entity<WorkManagementWebhook>()
+            .HasOne<WorkManagementConnection>().WithMany().HasForeignKey(x => x.ConnectionId);
+
+        modelBuilder.Entity<WorkManagementConnection>().Property(x => x.Meta).HasColumnType("jsonb");
+        modelBuilder.Entity<WorkItemBinding>().Property(x => x.Settings).HasColumnType("jsonb");
+        modelBuilder.Entity<WorkItem>().Property(x => x.ProviderMeta).HasColumnType("jsonb");
+        modelBuilder.Entity<WorkManagementWebhook>().Property(x => x.FilterEvents).HasColumnType("jsonb");
 
         // ── 全局列名 → snake_case ──
         // EF 默认用属性名原样，而 DDL 是 snake_case；漏掉任何一个都会在运行期报列不存在。

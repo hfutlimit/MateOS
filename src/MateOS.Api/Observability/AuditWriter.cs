@@ -88,6 +88,15 @@ public static class AuditActions
     public const string MemoryProposalCreated = "MEMORY_PROPOSAL_CREATED";
     public const string MemoryApproved = "MEMORY_APPROVED";
     public const string MemoryRejected = "MEMORY_REJECTED";
+
+    // ── E8 Work Management Core ──
+    public const string WorkItemCreated = "WORK_ITEM_CREATED";
+    public const string WorkItemUpdated = "WORK_ITEM_UPDATED";
+    public const string WorkItemStatusChanged = "WORK_ITEM_STATUS_CHANGED";
+    public const string WorkItemAssigned = "WORK_ITEM_ASSIGNED";
+    public const string WorkCommentAdded = "WORK_COMMENT_ADDED";
+    public const string WorkRelationCreated = "WORK_RELATION_CREATED";
+    public const string WorkProviderBindingChanged = "WORK_PROVIDER_BINDING_CHANGED";
 }
 
 /// <summary>一条待写入的审计记录。</summary>
