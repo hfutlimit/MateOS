@@ -2,6 +2,7 @@ using System.Text.Json;
 using MateOS.Api.Auth;
 using MateOS.Api.Http;
 using MateOS.Api.Observability;
+using MateOS.Api.Outbox;
 using MateOS.Api.Persistence;
 using MateOS.Domain.Agent;
 using MateOS.Domain.Routing;
@@ -242,6 +243,7 @@ public static class RoutingEndpoints
         Guid crId,
         CreateDecisionRequest request,
         MateOSDbContext db,
+        OutboxWriter outboxWriter,
         IHttpClientFactory httpClientFactory,
         AuditWriter audit,
         HttpContext http,
@@ -296,6 +298,18 @@ public static class RoutingEndpoints
         if (decision is CrDecision.ACCEPT)
         {
             acceptedExecutionId = await DispatchExecutionAsync(cr, db, httpClientFactory, http, ct);
+
+            // M7 outbox：fallback 兜底事件（即使 E4 同步创建已成功，relay 也会 idempotency 去重）
+            if (acceptedExecutionId is { } execId)
+            {
+                outboxWriter.Append(
+                    db,
+                    aggregateType: "collaboration",
+                    aggregateId: cr.Id,
+                    eventType: Domain.Outbox.OutboxEventType.CollaborationAccepted,
+                    payload: new { cr_id = cr.Id, execution_id = execId, agent_id = cr.TargetAgentId },
+                    idempotencyKey: $"collab.accepted:{cr.Id}");
+            }
         }
 
         // CAS 终态守卫（避免 PENDING/RUNNING 状态被乱改）

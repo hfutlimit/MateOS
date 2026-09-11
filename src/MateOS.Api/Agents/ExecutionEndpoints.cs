@@ -2,6 +2,7 @@ using System.Text.Json;
 using MateOS.Api.Auth;
 using MateOS.Api.Http;
 using MateOS.Api.Observability;
+using MateOS.Api.Outbox;
 using MateOS.Api.Persistence;
 using MateOS.Domain.Agent;
 using Microsoft.EntityFrameworkCore;
@@ -473,6 +474,7 @@ public static class ExecutionEndpoints
         Guid executionId,
         ReportExecutionResultRequest request,
         MateOSDbContext db,
+        OutboxWriter outboxWriter,
         AuditWriter audit,
         HttpContext http,
         CancellationToken ct)
@@ -566,8 +568,34 @@ public static class ExecutionEndpoints
             TargetType: "agent_execution", TargetId: executionId,
             Detail: new { status = targetStatus.ToDbValue(), envelope_id = request.EnvelopeId }));
 
+        // M7 outbox：写 execution.completed 事件（relay 后续推 E3 AGENT_OUTPUT 投影 + WS）
+        if (targetStatus == ExecutionStatus.SUCCEEDED)
+        {
+            outboxWriter.Append(
+                db,
+                aggregateType: "execution",
+                aggregateId: executionId,
+                eventType: Domain.Outbox.OutboxEventType.ExecutionCompleted,
+                payload: new
+                {
+                    execution_id = executionId,
+                    agent_id = agentId,
+                    status = targetStatus.ToDbValue(),
+                    output_markdown = ExtractMarkdownFromOutput(request.Output),
+                },
+                idempotencyKey: $"execution.completed:{executionId}:{request.EnvelopeId}");
+        }
+
         await db.Entry(execution).ReloadAsync(ct);
         return Results.Ok(ToSummary(execution));
+    }
+
+    private static string? ExtractMarkdownFromOutput(JsonElement? output)
+    {
+        if (output is null) return null;
+        if (output.Value.ValueKind != JsonValueKind.Object) return null;
+        if (!output.Value.TryGetProperty("markdown", out JsonElement md)) return null;
+        return md.ValueKind == JsonValueKind.String ? md.GetString() : null;
     }
 
     // ──────────────────────────── 详情查询 ────────────────────────────

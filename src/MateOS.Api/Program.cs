@@ -4,6 +4,7 @@ using MateOS.Api.Agents;
 using MateOS.Api.Auth;
 using MateOS.Api.Channels;
 using MateOS.Api.Observability;
+using MateOS.Api.Outbox;
 using MateOS.Api.Permissions;
 using MateOS.Api.Persistence;
 using MateOS.Api.Routing;
@@ -75,6 +76,10 @@ builder.Services.AddScoped<WorkspaceAuthorizer>();
 builder.Services.AddSingleton<WsConnectionRegistry>();
 builder.Services.AddSingleton<WsSender>();
 builder.Services.AddHostedService<WsHeartbeatWatchdog>();
+
+// ── M7 Outbox 主干 ──
+builder.Services.AddSingleton<OutboxWriter>();
+builder.Services.AddHostedService<OutboxRelayWorker>();
 
 // ── E2 Agent Registry ──
 builder.Services.AddSingleton(_ => new AesGcmCredentialCipher(credentialKey));

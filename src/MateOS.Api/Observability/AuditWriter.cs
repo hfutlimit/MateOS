@@ -77,6 +77,12 @@ public static class AuditActions
     public const string CollaborationRequestCreated = "COLLABORATION_REQUEST_CREATED";
     public const string DecisionRecorded = "DECISION_RECORDED";
     public const string ExecutionDispatchedFromCr = "EXECUTION_DISPATCHED_FROM_CR";
+
+    // ── M7 Outbox / 主干 ──
+    public const string OutboxEventEnqueued = "OUTBOX_EVENT_ENQUEUED";
+    public const string OutboxEventPublished = "OUTBOX_EVENT_PUBLISHED";
+    public const string OutboxEventDead = "OUTBOX_EVENT_DEAD";
+    public const string CapacityInvariantViolation = "CAPACITY_INVARIANT_VIOLATION";
 }
 
 /// <summary>一条待写入的审计记录。</summary>
