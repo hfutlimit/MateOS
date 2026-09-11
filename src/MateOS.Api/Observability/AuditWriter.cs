@@ -49,6 +49,18 @@ public static class AuditActions
     public const string MessageDeleted = "MESSAGE_DELETED";
     public const string AttachmentPresigned = "ATTACHMENT_PRESIGNED";
     public const string AttachmentConfirmed = "ATTACHMENT_CONFIRMED";
+
+    // ── E2 Agent Registry ──
+    public const string CredentialCreated = "CREDENTIAL_CREATED";
+    public const string CredentialDeleted = "CREDENTIAL_DELETED";
+    public const string AgentCreated = "AGENT_CREATED";
+    public const string AgentUpdated = "AGENT_UPDATED";
+    public const string AgentLifecycleChanged = "AGENT_LIFECYCLE_CHANGED";
+    public const string AgentActivityReported = "AGENT_ACTIVITY_REPORTED";
+    public const string AgentTokenIssued = "AGENT_TOKEN_ISSUED";
+    public const string AgentTokenRevoked = "AGENT_TOKEN_REVOKED";
+    public const string AgentAddedToProject = "AGENT_ADDED_TO_PROJECT";
+    public const string AgentRemovedFromProject = "AGENT_REMOVED_FROM_PROJECT";
 }
 
 /// <summary>一条待写入的审计记录。</summary>

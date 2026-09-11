@@ -1,4 +1,5 @@
 using System.Text;
+using MateOS.Domain.Agent;
 using Microsoft.EntityFrameworkCore;
 
 namespace MateOS.Api.Persistence;
@@ -27,6 +28,10 @@ public sealed class MateOSDbContext(DbContextOptions<MateOSDbContext> options) :
     public DbSet<ChannelSeqCounter> ChannelSeqCounters => Set<ChannelSeqCounter>();
     public DbSet<Message> Messages => Set<Message>();
     public DbSet<Attachment> Attachments => Set<Attachment>();
+    public DbSet<Credential> Credentials => Set<Credential>();
+    public DbSet<Agent> Agents => Set<Agent>();
+    public DbSet<AgentProjectMember> AgentProjectMembers => Set<AgentProjectMember>();
+    public DbSet<AgentToken> AgentTokens => Set<AgentToken>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -46,6 +51,10 @@ public sealed class MateOSDbContext(DbContextOptions<MateOSDbContext> options) :
         modelBuilder.Entity<ChannelSeqCounter>().ToTable("channel_seq_counters");
         modelBuilder.Entity<Message>().ToTable("messages");
         modelBuilder.Entity<Attachment>().ToTable("attachments");
+        modelBuilder.Entity<Credential>().ToTable("credentials");
+        modelBuilder.Entity<Agent>().ToTable("agents");
+        modelBuilder.Entity<AgentProjectMember>().ToTable("agent_project_membership");
+        modelBuilder.Entity<AgentToken>().ToTable("agent_tokens");
 
         // ── 主键 ──
         modelBuilder.Entity<User>().HasKey(x => x.Id);
@@ -60,6 +69,10 @@ public sealed class MateOSDbContext(DbContextOptions<MateOSDbContext> options) :
         modelBuilder.Entity<ChannelSeqCounter>().HasKey(x => x.ChannelId);
         modelBuilder.Entity<Message>().HasKey(x => new { x.ChannelId, x.Seq });
         modelBuilder.Entity<Attachment>().HasKey(x => x.Id);
+        modelBuilder.Entity<Credential>().HasKey(x => x.Id);
+        modelBuilder.Entity<Agent>().HasKey(x => x.Id);
+        modelBuilder.Entity<AgentProjectMember>().HasKey(x => new { x.AgentId, x.ProjectId });
+        modelBuilder.Entity<AgentToken>().HasKey(x => x.Id);
 
         // 成员表是复合主键（同一用户在同一层级只有一条成员记录）
         modelBuilder.Entity<OrganizationMember>().HasKey(x => new { x.OrganizationId, x.UserId });
@@ -116,6 +129,21 @@ public sealed class MateOSDbContext(DbContextOptions<MateOSDbContext> options) :
         // E3：messages / channel.content 等 JSONB 列
         modelBuilder.Entity<Message>().Property(x => x.Content).HasColumnType("jsonb");
         modelBuilder.Entity<Message>().Property(x => x.Mentions).HasColumnType("jsonb");
+
+        // E2：credentials / agents 关系 + JSONB 列
+        modelBuilder.Entity<Credential>()
+            .HasOne<User>().WithMany().HasForeignKey(x => x.UserId);
+        modelBuilder.Entity<Agent>()
+            .HasOne<User>().WithMany().HasForeignKey(x => x.OwnerUserId);
+        modelBuilder.Entity<Agent>()
+            .HasOne<Credential>().WithMany().HasForeignKey(x => x.CredentialId);
+        modelBuilder.Entity<AgentProjectMember>()
+            .HasOne<Agent>().WithMany().HasForeignKey(x => x.AgentId);
+        modelBuilder.Entity<AgentProjectMember>()
+            .HasOne<Project>().WithMany().HasForeignKey(x => x.ProjectId);
+
+        modelBuilder.Entity<Credential>().Property(x => x.Meta).HasColumnType("jsonb");
+        modelBuilder.Entity<Agent>().Property(x => x.Capabilities).HasColumnType("jsonb");
 
         // ── 全局列名 → snake_case ──
         // EF 默认用属性名原样，而 DDL 是 snake_case；漏掉任何一个都会在运行期报列不存在。

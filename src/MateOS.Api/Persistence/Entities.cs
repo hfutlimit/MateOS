@@ -1,14 +1,16 @@
-using System.Net;
+﻿using System.Net;
+
+using MateOS.Domain.Agent;
 
 namespace MateOS.Api.Persistence;
 
-/// <summary>自然人；Agent 的 owner（E1 §3）。</summary>
+/// <summary>鑷劧浜猴紱Agent 鐨?owner锛圗1 搂3锛夈€?/summary>
 public sealed class User
 {
     public Guid Id { get; set; }
     public string Email { get; set; } = string.Empty;
 
-    /// <summary>argon2id 编码串（含 salt 与参数），绝不回显（README 工作约定）。</summary>
+    /// <summary>argon2id 缂栫爜涓诧紙鍚?salt 涓庡弬鏁帮級锛岀粷涓嶅洖鏄撅紙README 宸ヤ綔绾﹀畾锛夈€?/summary>
     public string PasswordHash { get; set; } = string.Empty;
 
     public string DisplayName { get; set; } = string.Empty;
@@ -17,19 +19,19 @@ public sealed class User
     public DateTimeOffset UpdatedAt { get; set; }
 }
 
-/// <summary>顶层租户；不是权限作用域（权限最小到 Project）。</summary>
+/// <summary>椤跺眰绉熸埛锛涗笉鏄潈闄愪綔鐢ㄥ煙锛堟潈闄愭渶灏忓埌 Project锛夈€?/summary>
 public sealed class Organization
 {
     public Guid Id { get; set; }
     public string Name { get; set; } = string.Empty;
 
-    /// <summary>仅信息性，不参与权限判定（v0.4.2 删除 owner_id 双事实源）。</summary>
+    /// <summary>浠呬俊鎭€э紝涓嶅弬涓庢潈闄愬垽瀹氾紙v0.4.2 鍒犻櫎 owner_id 鍙屼簨瀹炴簮锛夈€?/summary>
     public Guid? CreatedBy { get; set; }
 
     public DateTimeOffset CreatedAt { get; set; }
 }
 
-/// <summary>Org owner 角色的<b>唯一</b>事实源（E1 §3.1）。</summary>
+/// <summary>Org owner 瑙掕壊鐨?b>鍞竴</b>浜嬪疄婧愶紙E1 搂3.1锛夈€?/summary>
 public sealed class OrganizationMember
 {
     public Guid OrganizationId { get; set; }
@@ -54,7 +56,7 @@ public sealed class TeamMember
     public DateTimeOffset JoinedAt { get; set; }
 }
 
-/// <summary>Context Boundary：成员 / 记忆 / 工作 / Provider 绑定的作用域。</summary>
+/// <summary>Context Boundary锛氭垚鍛?/ 璁板繂 / 宸ヤ綔 / Provider 缁戝畾鐨勪綔鐢ㄥ煙銆?/summary>
 public sealed class Project
 {
     public Guid Id { get; set; }
@@ -73,7 +75,7 @@ public sealed class ProjectMember
     public DateTimeOffset JoinedAt { get; set; }
 }
 
-/// <summary>I10：所有写操作留审计。</summary>
+/// <summary>I10锛氭墍鏈夊啓鎿嶄綔鐣欏璁°€?/summary>
 public sealed class AuditLog
 {
     public long Id { get; set; }
@@ -85,14 +87,14 @@ public sealed class AuditLog
     public string? Detail { get; set; }
     public string? TraceId { get; set; }
 
-    /// <summary>列类型 <c>inet</c>。Npgsql 对 inet 的原生映射目标是 <see cref="IPAddress"/>，不是 string。</summary>
+    /// <summary>鍒楃被鍨?<c>inet</c>銆侼pgsql 瀵?inet 鐨勫師鐢熸槧灏勭洰鏍囨槸 <see cref="IPAddress"/>锛屼笉鏄?string銆?/summary>
     public IPAddress? Ip { get; set; }
 
     public string? UserAgent { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
 }
 
-/// <summary>Transactional outbox（D7）。必须与业务写在同一事务内。</summary>
+/// <summary>Transactional outbox锛圖7锛夈€傚繀椤讳笌涓氬姟鍐欏湪鍚屼竴浜嬪姟鍐呫€?/summary>
 public sealed class OutboxEvent
 {
     public Guid Id { get; set; }
@@ -109,7 +111,7 @@ public sealed class OutboxEvent
     public DateTimeOffset CreatedAt { get; set; }
 }
 
-/// <summary>显式 SQL 迁移的记账表（由迁移器自行 bootstrap，不属任何业务迁移）。</summary>
+/// <summary>鏄惧紡 SQL 杩佺Щ鐨勮璐﹁〃锛堢敱杩佺Щ鍣ㄨ嚜琛?bootstrap锛屼笉灞炰换浣曚笟鍔¤縼绉伙級銆?/summary>
 public sealed class SchemaMigration
 {
     public string Name { get; set; } = string.Empty;
@@ -117,10 +119,10 @@ public sealed class SchemaMigration
 }
 
 // ============================================================================
-// E3 Channel & Messaging（迁移 002）
+// E3 Channel & Messaging锛堣縼绉?002锛?
 // ============================================================================
 
-/// <summary>通信边界（E3 §1）。每个 channel 属于一个 project。</summary>
+/// <summary>閫氫俊杈圭晫锛圗3 搂1锛夈€傛瘡涓?channel 灞炰簬涓€涓?project銆?/summary>
 public sealed class Channel
 {
     public Guid Id { get; set; }
@@ -129,14 +131,14 @@ public sealed class Channel
     public string? Description { get; set; }
     public DateTimeOffset? ArchivedAt { get; set; }
 
-    /// <summary>当前最大 seq，用于断点续传（DDL：<c>last_seq BIGINT NOT NULL DEFAULT 0</c>）。</summary>
+    /// <summary>褰撳墠鏈€澶?seq锛岀敤浜庢柇鐐圭画浼狅紙DDL锛?c>last_seq BIGINT NOT NULL DEFAULT 0</c>锛夈€?/summary>
     public long LastSeq { get; set; }
 
     public DateTimeOffset? DeletedAt { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
 }
 
-/// <summary>Channel 成员（HUMAN 或 AGENT 皆可加入，E3 §2.1）。</summary>
+/// <summary>Channel 鎴愬憳锛圚UMAN 鎴?AGENT 鐨嗗彲鍔犲叆锛孍3 搂2.1锛夈€?/summary>
 public sealed class ChannelMember
 {
     public Guid ChannelId { get; set; }
@@ -146,16 +148,16 @@ public sealed class ChannelMember
     public DateTimeOffset JoinedAt { get; set; }
 }
 
-/// <summary>Channel seq 计数器（每 channel 一行；事务内 UPDATE ... RETURNING 分配）。</summary>
+/// <summary>Channel seq 璁℃暟鍣紙姣?channel 涓€琛岋紱浜嬪姟鍐?UPDATE ... RETURNING 鍒嗛厤锛夈€?/summary>
 public sealed class ChannelSeqCounter
 {
     public Guid ChannelId { get; set; }
 
-    /// <summary>下一个可分配的 seq（DDL：<c>next_seq BIGINT NOT NULL DEFAULT 1</c>）。</summary>
+    /// <summary>涓嬩竴涓彲鍒嗛厤鐨?seq锛圖DL锛?c>next_seq BIGINT NOT NULL DEFAULT 1</c>锛夈€?/summary>
     public long NextSeq { get; set; }
 }
 
-/// <summary>消息流（5 形态 projection，E3 §3 / §3.1）。</summary>
+/// <summary>娑堟伅娴侊紙5 褰㈡€?projection锛孍3 搂3 / 搂3.1锛夈€?/summary>
 public sealed class Message
 {
     public Guid Id { get; set; }
@@ -165,23 +167,23 @@ public sealed class Message
     public Guid? SenderId { get; set; }
     public string ContentType { get; set; } = string.Empty;
 
-    /// <summary>5 形态投影内容（jsonb）。DECISION / AGENT_OUTPUT / MEMORY_REQUEST 只引 entity_ref。</summary>
+    /// <summary>5 褰㈡€佹姇褰卞唴瀹癸紙jsonb锛夈€侱ECISION / AGENT_OUTPUT / MEMORY_REQUEST 鍙紩 entity_ref銆?/summary>
     public string Content { get; set; } = "{}";
 
-    /// <summary>预提取 mentions（E4 mention 解析后回填，E3 仅写）。</summary>
+    /// <summary>棰勬彁鍙?mentions锛圗4 mention 瑙ｆ瀽鍚庡洖濉紝E3 浠呭啓锛夈€?/summary>
     public string? Mentions { get; set; }
 
-    /// <summary>thread 父消息 seq（v0.4 简化，V2 独立成表）。</summary>
+    /// <summary>thread 鐖舵秷鎭?seq锛坴0.4 绠€鍖栵紝V2 鐙珛鎴愯〃锛夈€?/summary>
     public long? ParentSeq { get; set; }
 
-    /// <summary>客户端幂等键（F2 重发去重）。</summary>
+    /// <summary>瀹㈡埛绔箓绛夐敭锛團2 閲嶅彂鍘婚噸锛夈€?/summary>
     public Guid? ClientMsgId { get; set; }
     public string? TraceId { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset? DeletedAt { get; set; }
 }
 
-/// <summary>附件元数据（独立表，跨消息可复用，E3 §4 attachments）。</summary>
+/// <summary>闄勪欢鍏冩暟鎹紙鐙珛琛紝璺ㄦ秷鎭彲澶嶇敤锛孍3 搂4 attachments锛夈€?/summary>
 public sealed class Attachment
 {
     public Guid Id { get; set; }
@@ -196,4 +198,75 @@ public sealed class Attachment
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset? ConfirmedAt { get; set; }
     public DateTimeOffset? DeletedAt { get; set; }
+}
+
+// ============================================================================
+// E2 Agent Registry锛堣縼绉?003锛?
+// ============================================================================
+
+/// <summary>鍔犲瘑鍑嵁锛圗2 搂3.3 AES-256-GCM 淇″皝锛夈€?/summary>
+public sealed class Credential
+{
+    public Guid Id { get; set; }
+    public Guid UserId { get; set; }
+    public string Provider { get; set; } = string.Empty;
+    public string Label { get; set; } = string.Empty;
+
+    /// <summary>瀵嗘枃 = nonce(12) || ciphertext || tag(16)銆傚簲鐢ㄥ眰鍔犺В瀵嗐€?/summary>
+    public byte[] SecretEncrypted { get; set; } = Array.Empty<byte>();
+
+    public string? Meta { get; set; }
+    public DateTimeOffset? LastUsedAt { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+}
+
+/// <summary>Agent 瀹炰綋锛圗2 搂3 lifecycle 脳 activity 姝ｄ氦锛夈€?/summary>
+public sealed class Agent
+{
+    public Guid Id { get; set; }
+    public Guid OwnerUserId { get; set; }
+    public Guid CredentialId { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string Role { get; set; } = string.Empty;
+
+    /// <summary>canonical key JSON 鏁扮粍锛圗2 搂3.2 5 keys锛夈€?/summary>
+    public string Capabilities { get; set; } = "[]";
+
+    public string Lifecycle { get; set; } = AgentLifecycleMap.ActiveDbValue;
+    public string Activity { get; set; } = AgentActivityMap.OfflineDbValue;
+    public string? ActivityReason { get; set; }
+    public DateTimeOffset? ActivityUpdatedAt { get; set; }
+
+    public int MaxConcurrency { get; set; } = 1;
+    public decimal DailyLimitUsd { get; set; } = 5.00m;
+    public decimal MonthlyBudgetUsd { get; set; } = 50.00m;
+    public DateTimeOffset? LastHeartbeatAt { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+}
+
+/// <summary>Agent 涓?Project 鐨勫彲瑙佹€х粦瀹氾紙E2 搂3锛夈€?/summary>
+public sealed class AgentProjectMember
+{
+    public Guid AgentId { get; set; }
+    public Guid ProjectId { get; set; }
+    public Guid InvitedBy { get; set; }
+    public bool CanReadHistory { get; set; }
+    public DateTimeOffset JoinedAt { get; set; }
+}
+
+/// <summary>Agent 绛惧彂 token 鐨勪笉鍙€嗙储寮曪紙E2 搂3锛夈€?/summary>
+public sealed class AgentToken
+{
+    public Guid Id { get; set; }
+    public Guid AgentId { get; set; }
+
+    /// <summary>SHA-256 hex锛堟槑鏂囦粎鍦ㄥ垱寤哄搷搴旈噷杩斿洖涓€娆★級銆?/summary>
+    public string TokenHash { get; set; } = string.Empty;
+
+    public string? Label { get; set; }
+    public DateTimeOffset? LastSeenAt { get; set; }
+    public DateTimeOffset? ExpiresAt { get; set; }
+    public bool Revoked { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
 }

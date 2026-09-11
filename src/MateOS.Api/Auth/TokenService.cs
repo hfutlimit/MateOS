@@ -30,6 +30,7 @@ public static class MateOsClaims
 
     public const string AccessTokenType = "access";
     public const string RefreshTokenType = "refresh";
+    public const string AgentTokenType = "agent";
 }
 
 /// <summary>一对令牌。</summary>

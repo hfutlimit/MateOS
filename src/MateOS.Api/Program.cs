@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using System.Text;
+using MateOS.Api.Agents;
 using MateOS.Api.Auth;
 using MateOS.Api.Channels;
 using MateOS.Api.Observability;
@@ -31,6 +32,26 @@ string postgresConnection = builder.Configuration.GetConnectionString("Postgres"
 string redisConnection = builder.Configuration.GetConnectionString("Redis")
     ?? throw new InvalidOperationException("缺少 ConnectionStrings:Redis");
 
+// E2：Agent credential 主密钥（dev 用 env / user-secrets 注入；V2 升 Argo KMS）
+string credentialKeyBase64 = builder.Configuration["Agent:CryptoKey"]
+    ?? throw new InvalidOperationException(
+        "缺少 Agent:CryptoKey。dev 环境用 dotnet user-secrets 或 env MateOS__Agent__CryptoKey 注入（base64 of 32 bytes）。");
+byte[] credentialKey;
+try
+{
+    credentialKey = Convert.FromBase64String(credentialKeyBase64);
+}
+catch (FormatException ex)
+{
+    throw new InvalidOperationException("Agent:CryptoKey 不是合法的 base64 字符串", ex);
+}
+
+if (credentialKey.Length != 32)
+{
+    throw new InvalidOperationException(
+        $"Agent:CryptoKey 解码后必须为 32 字节（AES-256），当前 {credentialKey.Length} 字节");
+}
+
 // ─────────────────────────── 基础设施 ───────────────────────────
 
 builder.Services.AddDbContext<MateOSDbContext>(options => options.UseNpgsql(postgresConnection));
@@ -52,6 +73,9 @@ builder.Services.AddScoped<WorkspaceAuthorizer>();
 builder.Services.AddSingleton<WsConnectionRegistry>();
 builder.Services.AddSingleton<WsSender>();
 builder.Services.AddHostedService<WsHeartbeatWatchdog>();
+
+// ── E2 Agent Registry ──
+builder.Services.AddSingleton(_ => new AesGcmCredentialCipher(credentialKey));
 
 // ───────────────────────────── 认证 ─────────────────────────────
 
@@ -131,6 +155,7 @@ app.MapAuthEndpoints();
 app.MapMeEndpoints();
 app.MapWorkspaceEndpoints();
 app.MapChannelEndpoints();
+app.MapAgentEndpoints();
 app.MapWs();
 
 app.Run();
