@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using System.Text;
+using System.Text.Json;
 using MateOS.Api.Agents;
 using MateOS.Api.Auth;
 using MateOS.Api.Channels;
@@ -10,7 +11,9 @@ using MateOS.Api.Outbox;
 using MateOS.Api.Permissions;
 using MateOS.Api.Persistence;
 using MateOS.Api.Routing;
+using MateOS.Api.Work;
 using MateOS.Api.Workspace;
+using MateOS.Domain.Work;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -74,6 +77,16 @@ builder.Services.AddScoped<AuditWriter>();
 builder.Services.AddScoped<SqlMigrationRunner>();
 builder.Services.AddScoped<WorkspaceAuthorizer>();
 
+// ── E8 Work Management Provider 注册（bootstrap 注入，E8 §4）──
+// Built-in 在启动时注册；E9 Jira 在绑连接时再 Register('jira')，
+// Work Management Core 代码零改动（F4/F5）。
+builder.Services.AddSingleton<WorkManagementProviderRegistry>(_ =>
+{
+    var registry = new WorkManagementProviderRegistry();
+    registry.Register(new BuiltInWorkManagementProvider());
+    return registry;
+});
+
 // ── E3 Channel & Messaging WS 网关 ──
 builder.Services.AddSingleton<WsConnectionRegistry>();
 builder.Services.AddSingleton<WsSender>();
@@ -85,6 +98,20 @@ builder.Services.AddHostedService<OutboxRelayWorker>();
 
 // ── E2 Agent Registry ──
 builder.Services.AddSingleton(_ => new AesGcmCredentialCipher(credentialKey));
+
+// ─────────────────────────── HTTP JSON 契约 ───────────────────────────
+
+builder.Services.ConfigureHttpJsonOptions(options =>
+{
+    // wire 形态统一 snake_case：WS envelope、outbox payload、messages.content(JSONB)
+    // 三处都已经是 snake_case，REST 若保持 minimal API 默认的 camelCase，
+    // 同一份数据在两个通道上形态不同，前端要写两套解析（契约 SSOT 也失去意义）。
+    //
+    // 刻意**不**设 DefaultIgnoreCondition.WhenWritingNull：可空字段必须显式出现为 null，
+    // 否则「没有值」与「字段不存在」在客户端无法区分（例如 CR 未产生 execution 时
+    // target_execution_id 应为 null 而不是缺字段）。
+    options.SerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower;
+});
 
 // ───────────────────────────── 认证 ─────────────────────────────
 
@@ -172,6 +199,7 @@ app.MapPermissionEndpoints();
 app.MapRoutingEndpoints();
 app.MapMemoryEndpoints();
 app.MapNeedsYouEndpoints();
+app.MapWorkItemEndpoints();
 app.MapWs();
 
 app.Run();
