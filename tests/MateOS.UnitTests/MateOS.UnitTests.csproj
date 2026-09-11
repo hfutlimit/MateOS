@@ -21,6 +21,9 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\MateOS.Domain\MateOS.Domain.csproj" />
     <ProjectReference Include="..\..\src\MateOS.Contracts\MateOS.Contracts.csproj" />
+    <ProjectReference Include="..\..\src\MateOS.Api\MateOS.Api.csproj">
+      <ReferenceOutputAssembly>true</ReferenceOutputAssembly>
+    </ProjectReference>
   </ItemGroup>
 
 </Project>

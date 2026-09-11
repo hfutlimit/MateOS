@@ -729,6 +729,7 @@ public static class ChannelEndpoints
         PostMessageRequest request,
         MateOSDbContext db,
         WorkspaceAuthorizer authorizer,
+        WsSender wsSender,
         AuditWriter audit,
         HttpContext http,
         CancellationToken ct)
@@ -827,6 +828,39 @@ public static class ChannelEndpoints
             Detail: new { channel_id = id, seq = allocatedSeq, content_type = MessageContentTypeMap.HumanDbValue }));
 
         await db.SaveChangesAsync(ct);
+
+        // 推 message.created 给该 channel 的全部 WS 订阅者（E3 §4.4）
+        // 失败不阻塞 POST：HTTP 已 201，WS 漏推靠客户端的 resume(last_seq) 兜底
+        try
+        {
+            await wsSender.BroadcastToChannelAsync(id, new
+            {
+                id = Guid.NewGuid().ToString("N"),
+                type = WsMessageTypeMap.MessageCreatedValue,
+                ts = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                payload = new
+                {
+                    channel_id = id,
+                    message = new
+                    {
+                        message.Id,
+                        message.Seq,
+                        message.SenderType,
+                        message.SenderId,
+                        message.ContentType,
+                        content = JsonDocument.Parse(message.Content).RootElement,
+                        message.ParentSeq,
+                        message.ClientMsgId,
+                        message.CreatedAt,
+                    },
+                },
+            }, ct);
+        }
+        catch (Exception ex)
+        {
+            // 推送失败不能让 HTTP 请求失败
+            // （数据库已落库，客户端可走 GET since_seq= 兜底）
+        }
 
         return Results.Created(
             $"/channels/{id}/messages/{allocatedSeq}",

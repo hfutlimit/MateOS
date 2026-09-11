@@ -48,6 +48,11 @@ builder.Services.AddScoped<AuditWriter>();
 builder.Services.AddScoped<SqlMigrationRunner>();
 builder.Services.AddScoped<WorkspaceAuthorizer>();
 
+// ── E3 Channel & Messaging WS 网关 ──
+builder.Services.AddSingleton<WsConnectionRegistry>();
+builder.Services.AddSingleton<WsSender>();
+builder.Services.AddHostedService<WsHeartbeatWatchdog>();
+
 // ───────────────────────────── 认证 ─────────────────────────────
 
 builder.Services
@@ -112,6 +117,12 @@ app.UseMiddleware<TraceMiddleware>();
 app.UseAuthentication();
 app.UseAuthorization();
 
+// WS 必须在 auth 之后 + endpoint 之前
+app.UseWebSockets(new WebSocketOptions
+{
+    KeepAliveInterval = TimeSpan.FromSeconds(30),
+});
+
 // ───────────────────────────── 端点 ─────────────────────────────
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok", service = "mateos-api" })).AllowAnonymous();
@@ -120,6 +131,7 @@ app.MapAuthEndpoints();
 app.MapMeEndpoints();
 app.MapWorkspaceEndpoints();
 app.MapChannelEndpoints();
+app.MapWs();
 
 app.Run();
 
