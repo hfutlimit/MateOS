@@ -17,7 +17,7 @@ MateOS 是一个面向软件开发团队的 AI 原生团队协作平台（V1 = A
 | Cache / Presence | Redis 7 |
 | Execution | MateOS Agent Runtime（自研，永久自洽） |
 | Implementation | **S1 → S2 → S3 vertical slices** |
-| Stage | **S1+S2+S3 已落地 + M3b Phase 2 + 协议 SSOT**（M1+M2+M2-WS+M3a+M3b+M4a+M4b+M7+E5+E6 + Needs You + Memory 写链路 + E8 Work Delivery + E7 dispatch 实时推送 + `contracts/` schema 校验）：15 个 feat commit，**572 unit 全过**；User Promise「@Agent → 工作 → 记忆 → 审批」+「WorkItem → Agent 推进 → 产出回流」双闭环 |
+| Stage | **S1+S2+S3 后端主链路已落地 + M3b Phase 2/3 + 协议 SSOT**（M1+M2+M2-WS+M3a+M3b+M4a+M4b+M7+E5+E6 + Needs You + Memory 写链路 + E8 Work Delivery + E7 dispatch 实时推送 + Agent 侧 CR 收单 / 决策 / resume 续传 + `contracts/` schema 校验）：最近一笔 `10fb1d5`，**643 测试全过（572 单元 + 71 集成）**；User Promise「@Agent → 工作 → 记忆 → 审批」+「WorkItem → Agent 推进 → 产出回流」双闭环。**S1 DoD（`detailed/09` §7）剩余硬缺口：`services/agent-stub` + `tests/e2e`** |
 
 > 本表是唯一需要维护的「技术基线」。**不要在此堆叠文档版本号**：PRD / SYSTEM_DESIGN / UI DS 的版本只在各自文件头与更新记录里维护；detailed / epic / 原型不单独发行版本号，用日期 + commit 追溯。避免出现「文件头 v0.5、changelog v0.7、commit v0.8」这类交叉版本噪音。
 
@@ -228,6 +228,27 @@ PO ──POST /work-items/{id}/assign──▶ 事务提交（CR + Execution）
 - **会话主体分类型**：`project_members`（人）与 `agent_project_membership`（Agent）是两套关系表；
   注册表按 `(ActorType, ActorId)` 分别索引，`execution.dispatch` 只认 AGENT 索引——
   人 id 与 agent id 同为 UUID，只按 id 索引会把执行指令推给人的浏览器。
+
+**M3b Phase 3：Agent 侧协议闭环**（`10fb1d5`）：
+
+```
+Agent ──GET  /agents/{id}/collaboration-requests/inbox────────▶ 拉取派给自己的 PENDING CR
+        └──POST /agents/{id}/collaboration-requests/{crId}/decision──▶ ACCEPT / REJECT / NEED_CONTEXT
+                                                                       │
+                                       DecisionApplier（与 /internal 决策入口共用同一实现）
+                                                                       ▼
+                                                 CR=ACCEPTED + decision_record + Execution + dispatch
+```
+
+- **Agent 自己表态**：决策主体是 agent_token 的 `sub`；越权闸门校验 `cr.target_agent_id`——
+  缺这道闸，任何持 agent_token 的主体都能改掉别人 CR 的终态。
+- **决策落库只有一处实现**（`Routing/DecisionApplier`）：`/internal` 那条允许人代 Agent 提交，
+  但两条入口的业务事实必须逐字段一致，否则会出现「人代提交能建 Execution、Agent 自己提交建不出来」。
+- **续传位点**：`POST /agents/{id}/executions/{executionId}/resume_request` 返回**连续位点**
+  `last_persisted_seq`（不是 `MAX(seq)`）+ dispatch 冻结快照；过期 attempt 与终态 execution 显式 409，
+  而不是回一个「接着发」的位点。
+- **两条通道字节一致**：WS 与 REST 必须用同一套命名策略**与同一套 JSON 转义策略**
+  （默认 Encoder 会把中文写成 `\uXXXX`，而 HTTP 侧不转义 → 同一份 payload 在两条通道上字节不同）。
 
 > **wire 契约统一 snake_case**：REST 响应 / WS envelope / outbox payload / JSONB 内容四处同形。
 > 全局策略在 `Program.cs` 的 `ConfigureHttpJsonOptions`；query 参数对新增端点显式声明 snake_case 名。
