@@ -9,6 +9,17 @@
 | 下游 | E4（Need Context 触发记忆搜索）、E7（dispatch 注入 memory_refs）、E8（WorkItem 可选引用 memory） |
 | 状态 | Draft（v0.9 同步：type/scope_type 两维 + PERSONAL 不参与 project 过滤） |
 
+> **Review (minimax m3 · 2026-09-12) · [P1-4]**:本节残留 P6 审批中心引用,与 UI DS v0.7 取消 P6 矛盾:
+> - :226 E2E 命名 `e2e/E5-006-p6-batch`(行内代码引用)
+> - :252 实施顺序段含 "P6 / P7 UI"
+>
+> UI DS v0.7:16 / 177 / 215 明确 "取消 P6 审批中心一级页面,统一进 Needs You → Approval"。三处同步:
+> 1. :226 改名 `e2e/E5-006-needs-you-approval`
+> 2. :252 "P6 / P7 UI" 改 "Needs You → Approval UI"
+> 3. 全文 grep `P6` 段,确认无其他残留(如 :14 范围 "P6 审批中心" 也应改)
+>
+> 详见 [2026-09-12-design-review.md P1-4](../review/2026-09-12-design-review.md#p1-4--e5-实施步骤引用-p6-审批中心与-ui-ds-v07-取消-p6-冲突)。
+
 ## 1. 背景与动机
 
 团队知识的复用是 AI Coding 的核心价值。v0.4 改动很小：**memory_proposals 表从 `memory_items` 拆出**（之前是直接 status=PROPOSED 在 memory_items 里，v0.4 拆成申请与已批准两个表，避免"已批准的记忆"和"待审批的记忆"混在同一表）。

@@ -5,6 +5,8 @@
 > 2. **P1-9**：Memory approval CAS + `UNIQUE(proposal_id)` 防重复
 > 3. **P1-10**：Memory Search 用 `accessible_project_ids()` 不手写 team→project
 > 前置：[00-overview.md](./00-overview.md) / [07-permission-and-approval-orchestration.md](./07-permission-and-approval-orchestration.md)
+>
+> **Review (minimax m3 · 2026-09-12) · [P1-6]**:本节 :135 `memory_proposals.status` CHECK 含 4 值 `PROPOSED / APPROVED / REJECTED / WITHDRAWN`,但 SYSTEM_DESIGN §4.3:319-321 只列 3 个迁移(无 WITHDRAWN),§4.3:325-350 描述也无 WITHDRAWN 触发路径。detailed 05 自行加了 WITHDRAWN 终态(:386 业务用例 "status=WITHDRAWN, message removed"),与主架构不对齐。二选一:(a) 在 SD §4.3 补 WITHDRAWN 迁移规则(谁可触发、什么场景),保留 schema 4 值;(b) 删 05:135 与 05:386 WITHDRAWN,业务用例改 status=REJECTED + reason=USER_WITHDRAW。详见 [2026-09-12-design-review.md P1-6](../review/2026-09-12-design-review.md#p1-6--memory_proposalsstatus-枚举detailed-05-加-withdrawnsd-43-不提)。
 
 ## 0. 范围
 

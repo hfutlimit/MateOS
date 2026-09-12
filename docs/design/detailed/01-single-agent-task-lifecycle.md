@@ -4,6 +4,10 @@
 > 详细设计原版（P0-1 错误）：Resolver 选中后立即 create_execution → 把 execution lifecycle 提前到 decision 之前。
 > 修复：Runtime Gateway 推 `collaboration.request`（transport 消息）→ Agent 推 `collaboration.decision` → ACCEPT 后 **E4 事务外同步直调 E7 创建 Execution**，同时写 `collaboration.accepted` outbox 事件**仅作兜底重试**（**D9 冻结口径**，与 04 §2.1 / 187 §1.1 一致）。
 > 前置：[00-overview.md](./00-overview.md) / [04-resolver-and-routing.md](./04-resolver-and-routing.md) / [03-ws-connection-and-resume.md](./03-ws-connection-and-resume.md)
+>
+> **Review (minimax m3 · 2026-09-12) · [P1-1]**:本节 :85 写 `execution.dispatch_ack { execution_id, attempt_no, accepted: true }`,沿用 v0.5 字段名。SYSTEM_DESIGN v0.7 changelog(行 1080)已冻结 `dispatch_ack` 语义定型为 transport 收据,`detailed/03:111-115` 与 `detailed/10:27` 已改 `received: true` + 可选 `protocol_error?: "UNKNOWN_EXECUTION" | "STALE_ATTEMPT"`。建议改 :85 字段名以与 03/10/schema 对齐,避免 SDK 解析两份不同字段名。详见 [2026-09-12-design-review.md P1-1](../review/2026-09-12-design-review.md#p1-1--executiondispatch_ack-字段名01-沿用-v05-旧字段未跟进-v07-修订)。
+>
+> **Review (minimax m3 · 2026-09-12) · [P1-2]**:本节 attempt 状态机内部读写口径不一致 — :79 INSERT 写 `status='STARTED'`,:99 收尾按 `status='RUNNING'` CAS,:408 文档自述 5 态含 STARTED。SYSTEM_DESIGN §6.3:738 状态机 `RUNNING → COMPLETED / FAILED` 不含 STARTED 迁移,但 §5.2:497 schema CHECK 含 STARTED。三选一:(a) 删 STARTED,统一从 RUNNING 起步;(b) 保留 STARTED,补 `STARTED → RUNNING` 迁移,01:99 改按 STARTED 找;(c) 在 SD §6.3 状态机加 STARTED 节点。详见 [2026-09-12-design-review.md P1-2](../review/2026-09-12-design-review.md#p1-2--execution_attempt-状态机01-内部读写口径不一致-sd-525263-分离)。
 
 ## 0. 范围
 

@@ -9,6 +9,17 @@
 | 下游 | E1（subject）/ E2（can_execute/can_review 已删除；仅作为受控对象）/ E3（channel scope）/ E4（permission 决策依据）/ E5（propose_memory = ALLOW，write_memory = REQUIRE_APPROVAL）/ E7（execute_code / create_pr） |
 | 状态 | Draft（v0.9 同步：权限键 8 个，含 propose_memory） |
 
+> **Review (minimax m3 · 2026-09-12) · [P1-3]**:文档自述 8 键(v0.4.5 新增 `propose_memory`),与 SYSTEM_DESIGN §3.1:171 / PRD FR-9:363 / SD v0.4.5 变更摘要一致。但本节 **DDL 与 TS 联合类型仍停在 7 键**:
+> - :51-53 SQL CHECK 列表 `('read_message','write_message','write_memory','execute_code','create_pr','approve_memory','manage_channel')` — 缺 `propose_memory`
+> - :104 TypeScript 联合类型 `type PermKey = 'read_message' | 'write_message' | 'write_memory' | 'execute_code' | 'create_pr' | 'approve_memory' | 'manage_channel'` — 同样缺
+>
+> 实施层 DDL 会拒收 `propose_memory` 写入,与文档自述 8 键矛盾。三处同步:
+> 1. SQL CHECK 加 `'propose_memory'`
+> 2. TS union 加 `'propose_memory'`
+> 3. PRD:464 MVP 表 E6 行 "7 键" → "8 键"
+>
+> 详见 [2026-09-12-design-review.md P1-3](../review/2026-09-12-design-review.md#p1-3--permission-键文档自述-8-键ddltstmvpp-表-7-键)。
+
 ## 1. 背景与动机
 
 Permission Model 是 MateOS 安全核心。v0.4 + v0.4.2 关键变化：

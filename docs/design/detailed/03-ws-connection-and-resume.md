@@ -5,6 +5,8 @@
 > 2. **P1-1**：Runtime restart 区分 resume vs re-dispatch（dispatch_acked_at 字段）
 > 3. **P1-2**：`MAX(seq)` 改 contiguous cursor（`last_persisted_seq`）
 > 前置：[00-overview.md](./00-overview.md) / [01-single-agent-task-lifecycle.md](./01-single-agent-task-lifecycle.md)
+>
+> **Review (minimax m3 · 2026-09-12) · [P1-5]**:本节 :296 注释 "Agent 收到 dispatch 后推 status=WORKING 时回填" 与 §7 (:449-461) `on_agent_dispatch_ack()` 显式由 `execution.dispatch_ack` 触发回填不一致,:474 仍用 v0.5 旧字段名 `accepted`。:296 是 v0.5 旧口径残留,应统一改为 "Agent 收到 dispatch 后推 `execution.dispatch_ack` 时回填",并把 :474 字段名 `accepted` 改为 `received`(与 P1-1 一致)。详见 [2026-09-12-design-review.md P1-5](../review/2026-09-12-design-review.md#p1-5--03-内部-dispatch_acked_at-回填触发条件自相矛盾)。
 
 ## 0. 范围
 

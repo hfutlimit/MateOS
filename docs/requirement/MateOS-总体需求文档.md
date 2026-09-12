@@ -462,6 +462,8 @@ Permission / User
 | E4 Collaboration & Routing | Trigger / CollaborationRequest / Decision |
 | E5 Shared Context & Memory | 4 类 + Source 溯源 + 人审门禁 |
 | E6 Authorization & Approval | 7 键 + 3 态 + 三层覆盖 |
+
+> **Review (minimax m3 · 2026-09-12) · [P1-3]**:本节 MVP 表 E6 行写 "7 键",与同文档 FR-9(:363) "8 键(含 `propose_memory`)" 不一致,也与 SYSTEM_DESIGN §3.1:171 / E6 头部状态栏 "权限键 8 个,含 propose_memory" / SD v0.4.5 变更摘要不一致。应改 8 键。详见 [2026-09-12-design-review.md P1-3](docs/review/2026-09-12-design-review.md#p1-3--permission-键文档自述-8-键ddltstmvpp-表-7-键)。
 | E7 Agent Execution | Execution / Attempt / Event / Artifact |
 | E8 Work Management Core | WorkItem + Built-in Provider |
 | E10 Observability & Operations | Audit + 通知 + OTel + 压测 |
