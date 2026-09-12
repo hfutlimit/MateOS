@@ -37,13 +37,13 @@ public sealed class NeedsYouEndpointsTests(MateOsApiFixture fixture) : IClassFix
             Type: "PROJECT", Title: "需要审批的 memory", Content: "内容",
             SourceType: "CHANNEL_MESSAGE", SourceChannelId: channelId, SourceMessageSeq: 1L,
             SourceMessageId: Guid.NewGuid(), ProposedByAgentId: null, IdempotencyKey: "ny-1");
-        HttpResponseMessage proposeResp = await userClient.PostAsJsonAsync("/memory/proposals", proposeReq);
+        HttpResponseMessage proposeResp = await userClient.PostJsonAsync("/memory/proposals", proposeReq);
         await EnsureSuccessAsync(proposeResp);
 
         // GET /needs-you
         HttpResponseMessage resp = await userClient.GetAsync("/needs-you");
         await EnsureSuccessAsync(resp);
-        var body = (await resp.Content.ReadFromJsonAsync<NeedsYouResponse>())!;
+        var body = (await resp.Content.ReadWireAsync<NeedsYouResponse>())!;
 
         Assert.True(body.Total > 0);
         Assert.True(body.ApprovalCount >= 1);
@@ -69,12 +69,12 @@ public sealed class NeedsYouEndpointsTests(MateOsApiFixture fixture) : IClassFix
             Type: "PROJECT", Title: "x", Content: "y",
             SourceType: "CHANNEL_MESSAGE", SourceChannelId: channelId, SourceMessageSeq: 1L,
             SourceMessageId: Guid.NewGuid(), ProposedByAgentId: null, IdempotencyKey: "ny-2");
-        await EnsureSuccessAsync(await userClient.PostAsJsonAsync("/memory/proposals", proposeReq));
+        await EnsureSuccessAsync(await userClient.PostJsonAsync("/memory/proposals", proposeReq));
 
         // 过滤 APPROVAL
         HttpResponseMessage resp = await userClient.GetAsync("/needs-you?category=APPROVAL");
         await EnsureSuccessAsync(resp);
-        var body = (await resp.Content.ReadFromJsonAsync<NeedsYouResponse>())!;
+        var body = (await resp.Content.ReadWireAsync<NeedsYouResponse>())!;
 
         Assert.True(body.ApprovalCount >= 1);
         Assert.All(body.Items, i => Assert.Equal("APPROVAL", i.Category));
@@ -98,12 +98,12 @@ public sealed class NeedsYouEndpointsTests(MateOsApiFixture fixture) : IClassFix
             Type: "PROJECT", Title: "apprv", Content: "x",
             SourceType: "CHANNEL_MESSAGE", SourceChannelId: channelId, SourceMessageSeq: 1L,
             SourceMessageId: Guid.NewGuid(), ProposedByAgentId: null, IdempotencyKey: "ny-3");
-        await EnsureSuccessAsync(await userClient.PostAsJsonAsync("/memory/proposals", proposeReq));
+        await EnsureSuccessAsync(await userClient.PostJsonAsync("/memory/proposals", proposeReq));
 
         // 抓取所有 items
         HttpResponseMessage resp = await userClient.GetAsync("/needs-you");
         await EnsureSuccessAsync(resp);
-        var body = (await resp.Content.ReadFromJsonAsync<NeedsYouResponse>())!;
+        var body = (await resp.Content.ReadWireAsync<NeedsYouResponse>())!;
 
         // 排序：APPROVAL(1) 在 INFORMATION(3) 之前
         int firstApproval = -1;
@@ -138,13 +138,14 @@ public sealed class NeedsYouEndpointsTests(MateOsApiFixture fixture) : IClassFix
             Type: "PROJECT", Title: "x", Content: "y",
             SourceType: "CHANNEL_MESSAGE", SourceChannelId: channelId, SourceMessageSeq: 1L,
             SourceMessageId: Guid.NewGuid(), ProposedByAgentId: null, IdempotencyKey: "ny-4");
-        await EnsureSuccessAsync(await userClient.PostAsJsonAsync("/memory/proposals", proposeReq));
+        await EnsureSuccessAsync(await userClient.PostJsonAsync("/memory/proposals", proposeReq));
 
         HttpResponseMessage resp = await userClient.GetAsync("/needs-you/count");
         await EnsureSuccessAsync(resp);
         var json = await resp.Content.ReadAsStringAsync();
-        Assert.Contains("ApprovalCount", json);
-        Assert.Contains("ProblemsCount", json);
+        // wire 是 snake_case（REST 与 WS 同形）
+        Assert.Contains("approval_count", json);
+        Assert.Contains("problems_count", json);
         // 验证不包含 items 字段
         Assert.DoesNotContain("\"items\"", json);
     }
@@ -168,38 +169,38 @@ public sealed class NeedsYouEndpointsTests(MateOsApiFixture fixture) : IClassFix
 
     private static async Task<TokenResponse> RegisterAsync(HttpClient client, string email)
     {
-        HttpResponseMessage resp = await client.PostAsJsonAsync(
+        HttpResponseMessage resp = await client.PostJsonAsync(
             "/auth/register", new RegisterRequest(email, Password, email.Split('@')[0]));
         await EnsureSuccessAsync(resp);
-        return (await resp.Content.ReadFromJsonAsync<TokenResponse>())!;
+        return (await resp.Content.ReadWireAsync<TokenResponse>())!;
     }
 
     private static async Task<Guid> CreateProjectAsync(HttpClient client, string name)
     {
-        HttpResponseMessage orgResp = await client.PostAsJsonAsync(
-            "/organizations", new CreateOrganizationRequest($"{name}-org"));
+        HttpResponseMessage orgResp = await client.PostJsonAsync(
+            "/orgs", new CreateOrganizationRequest($"{name}-org"));
         await EnsureSuccessAsync(orgResp);
-        OrganizationSummary org = (await orgResp.Content.ReadFromJsonAsync<OrganizationSummary>())!;
+        OrganizationSummary org = (await orgResp.Content.ReadWireAsync<OrganizationSummary>())!;
 
-        HttpResponseMessage teamResp = await client.PostAsJsonAsync(
-            $"/organizations/{org.Id}/teams", new CreateTeamRequest(org.Id, $"{name}-team"));
+        HttpResponseMessage teamResp = await client.PostJsonAsync(
+            "/teams", new CreateTeamRequest(org.Id, $"{name}-team"));
         await EnsureSuccessAsync(teamResp);
-        TeamSummary team = (await teamResp.Content.ReadFromJsonAsync<TeamSummary>())!;
+        TeamSummary team = (await teamResp.Content.ReadWireAsync<TeamSummary>())!;
 
-        HttpResponseMessage projResp = await client.PostAsJsonAsync(
-            $"/teams/{team.Id}/projects", new CreateProjectRequest(team.Id, name, null, null));
+        HttpResponseMessage projResp = await client.PostJsonAsync(
+            "/projects", new CreateProjectRequest(team.Id, name, null, null));
         await EnsureSuccessAsync(projResp);
-        ProjectSummary proj = (await projResp.Content.ReadFromJsonAsync<ProjectSummary>())!;
+        ProjectSummary proj = (await projResp.Content.ReadWireAsync<ProjectSummary>())!;
 
         return proj.Id;
     }
 
     private static async Task<Guid> CreateChannelAsync(HttpClient client, Guid projectId, string name)
     {
-        HttpResponseMessage resp = await client.PostAsJsonAsync(
+        HttpResponseMessage resp = await client.PostJsonAsync(
             $"/projects/{projectId}/channels", new CreateChannelRequest(name, null));
         await EnsureSuccessAsync(resp);
-        ChannelSummary channel = (await resp.Content.ReadFromJsonAsync<ChannelSummary>())!;
+        ChannelSummary channel = (await resp.Content.ReadWireAsync<ChannelSummary>())!;
         return channel.Id;
     }
 }

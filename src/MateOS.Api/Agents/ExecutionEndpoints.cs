@@ -39,6 +39,15 @@ public sealed record ReportExecutionResultRequest(
     JsonElement? Output,
     JsonElement? Usage);
 
+/// <summary>
+/// Agent 断线重连后的续传询问（detailed/03 §3.1，v0.4.3 反向协议：Agent 问、Runtime 答）。
+/// </summary>
+/// <remarks>
+/// 两个字段都可空：Agent 刚重连时可能不知道自己手里是哪个 attempt，
+/// 由 Runtime 回权威的 <c>attempt_no</c>；<c>expected_seq</c> 只在发现 gap 时带上。
+/// </remarks>
+public sealed record ResumeRequestPayload(int? AttemptNo, long? ExpectedSeq);
+
 public sealed record ExecutionSummary(
     Guid Id,
     Guid? CollaborationRequestId,
@@ -110,6 +119,7 @@ public static class ExecutionEndpoints
         agentGroup.MapPost("/{executionId:guid}/dispatch_ack", ReportDispatchAckAsync);
         agentGroup.MapPost("/{executionId:guid}/events", ReportEventAsync);
         agentGroup.MapPost("/{executionId:guid}/result", ReportResultAsync);
+        agentGroup.MapPost("/{executionId:guid}/resume_request", ReportResumeRequestAsync);
         agentGroup.MapGet("/{executionId:guid}", GetExecutionAsync);
     }
 
@@ -555,14 +565,19 @@ public static class ExecutionEndpoints
         DateTimeOffset now = DateTimeOffset.UtcNow;
         int attemptNo = execution.ActiveAttemptNo ?? 1;
 
+        // 列是 jsonb，而参数按 text 发送：必须显式 cast，否则 PG 报
+        // 42804「column "result_output" is of type jsonb but expression is of type text」。
+        string? outputJson = request.Output?.GetRawText();
+        string? usageJson = request.Usage?.GetRawText();
+
         // CAS UPDATE：只 PENDING/RUNNING 才迁移到终态
         int rows = await db.Database.ExecuteSqlInterpolatedAsync(
             $@"UPDATE agent_executions
                SET status = {targetStatus.ToDbValue()},
                    completed_at = {now},
                    terminal_envelope_id = {request.EnvelopeId},
-                   result_output = {request.Output?.GetRawText()},
-                   result_usage = {request.Usage?.GetRawText()},
+                   result_output = {outputJson}::jsonb,
+                   result_usage = {usageJson}::jsonb,
                    active_attempt_no = NULL
                WHERE id = {executionId} AND status IN ('PENDING','RUNNING')", ct);
 
@@ -622,6 +637,91 @@ public static class ExecutionEndpoints
         if (output.Value.ValueKind != JsonValueKind.Object) return null;
         if (!output.Value.TryGetProperty("markdown", out JsonElement md)) return null;
         return md.ValueKind == JsonValueKind.String ? md.GetString() : null;
+    }
+
+    // ──────────────────────────── 续传询问 ────────────────────────────
+
+    /// <summary>
+    /// Agent 重连后问「我该从哪个 seq 接着发」。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 返回的 <c>last_persisted_seq</c> 是 <b>连续位点</b>，不是 <c>MAX(seq)</c>：
+    /// 用 MAX 的话，中断期间丢掉的那些 seq 会变成永久缺口，
+    /// 而 cursor 校验要求连续，于是这条 attempt 再也发不出任何事件。
+    /// </para>
+    /// <para>
+    /// 终态 execution 与过期 attempt 都要显式拒绝，而不是返回一个位点：
+    /// 前者是「活儿已经结束了」，后者是「你手里的是上一轮」（与 B8 迟到结果同根因）——
+    /// 两者若返回位点，Agent 会照着继续产出，把已经收尾的事实再写一遍。
+    /// </para>
+    /// </remarks>
+    private static async Task<IResult> ReportResumeRequestAsync(
+        Guid agentId,
+        Guid executionId,
+        ResumeRequestPayload request,
+        MateOSDbContext db,
+        AuditWriter audit,
+        HttpContext http,
+        CancellationToken ct)
+    {
+        Guid tokenAgentId = http.RequireAgentId();
+
+        if (tokenAgentId != agentId)
+        {
+            return ApiErrors.Forbidden(ApiErrors.NotOwner, "agent_token 与路径 agentId 不一致");
+        }
+
+        DbAgentExecution? execution = await db.AgentExecutions
+            .FirstOrDefaultAsync(e => e.Id == executionId && e.AgentId == agentId, ct);
+
+        if (execution is null)
+        {
+            return ApiErrors.NotFoundResult(ApiErrors.NotFound, "execution 不存在");
+        }
+
+        if (ExecutionStatusMap.TryParse(execution.Status, out ExecutionStatus status) && status.IsTerminal())
+        {
+            return ApiErrors.ConflictResult(ApiErrors.Conflict,
+                $"execution 已处于 {execution.Status} 终态，无需续传");
+        }
+
+        int activeAttemptNo = execution.ActiveAttemptNo ?? 1;
+
+        if (request.AttemptNo is { } askedAttemptNo && askedAttemptNo != activeAttemptNo)
+        {
+            return ApiErrors.ConflictResult(ApiErrors.Conflict,
+                $"attempt_no={askedAttemptNo} 已非当前 attempt（当前 {activeAttemptNo}），其续传位点不再有效");
+        }
+
+        DbExecutionAttempt? attempt = await db.ExecutionAttempts
+            .FirstOrDefaultAsync(a => a.ExecutionId == executionId && a.AttemptNo == activeAttemptNo, ct);
+
+        audit.Record(http, new AuditEntry(
+            AuditActorTypes.Agent, agentId, AuditActions.ExecutionResumeRequested,
+            TargetType: "agent_execution", TargetId: executionId,
+            Detail: new
+            {
+                attempt_no = activeAttemptNo,
+                last_persisted_seq = attempt?.LastPersistedSeq ?? 0,
+                expected_seq = request.ExpectedSeq,
+            }));
+
+        ExecutionDispatchSnapshot? snapshot = attempt is null
+            ? null
+            : new ExecutionDispatchSnapshot(
+                ExecutionId: executionId,
+                Input: ExecutionPayloadMapper.ToInput(execution.Input),
+                Context: ExecutionPayloadMapper.ToContext(execution.ContextRefs),
+                DeadlineS: execution.DeadlineAt is { } deadline
+                    ? (int)Math.Clamp((long)(deadline - DateTimeOffset.UtcNow).TotalSeconds, 0, int.MaxValue)
+                    : null);
+
+        return Results.Ok(new ExecutionResumeAckPayload(
+            ExecutionId: executionId,
+            AttemptNo: activeAttemptNo,
+            LastPersistedSeq: attempt?.LastPersistedSeq ?? 0,
+            Snapshot: snapshot));
     }
 
     // ──────────────────────────── 详情查询 ────────────────────────────

@@ -45,9 +45,9 @@ public sealed class MemoryEndpointsTests(MateOsApiFixture fixture) : IClassFixtu
             SourceMessageId: sourceMessageId,
             ProposedByAgentId: null,
             IdempotencyKey: "prop-1");
-        HttpResponseMessage proposeResp = await userClient.PostAsJsonAsync("/memory/proposals", proposeReq);
+        HttpResponseMessage proposeResp = await userClient.PostJsonAsync("/memory/proposals", proposeReq);
         await EnsureSuccessAsync(proposeResp);
-        var proposed = (await proposeResp.Content.ReadFromJsonAsync<MemoryProposalSummary>())!;
+        var proposed = (await proposeResp.Content.ReadWireAsync<MemoryProposalSummary>())!;
 
         Assert.Equal("PROJECT", proposed.Type);
         Assert.Equal("PROPOSED", proposed.Status);
@@ -55,10 +55,10 @@ public sealed class MemoryEndpointsTests(MateOsApiFixture fixture) : IClassFixtu
         Assert.Equal(sourceSeq, proposed.SourceMessageSeq);
 
         // approve
-        HttpResponseMessage approveResp = await userClient.PostAsJsonAsync(
+        HttpResponseMessage approveResp = await userClient.PostJsonAsync(
             $"/memory/proposals/{proposed.Id}/approve", new ApproveMemoryRequest(null));
         await EnsureSuccessAsync(approveResp);
-        var approved = (await approveResp.Content.ReadFromJsonAsync<MemoryProposalSummary>())!;
+        var approved = (await approveResp.Content.ReadWireAsync<MemoryProposalSummary>())!;
         Assert.Equal("APPROVED", approved.Status);
         Assert.NotNull(approved.ApprovedAtMs);
 
@@ -66,14 +66,14 @@ public sealed class MemoryEndpointsTests(MateOsApiFixture fixture) : IClassFixtu
         HttpResponseMessage searchResp = await userClient.GetAsync(
             $"/memory/search?q={Uri.EscapeDataString("AES-256-GCM")}&project_id={projectId}");
         await EnsureSuccessAsync(searchResp);
-        var hits = (await searchResp.Content.ReadFromJsonAsync<List<MemoryItemSummary>>())!;
+        var hits = (await searchResp.Content.ReadWireAsync<List<MemoryItemSummary>>())!;
         Assert.Single(hits);
         Assert.Contains("AES-256-GCM", hits[0].Content);
 
         // list items 应包含这条
         HttpResponseMessage listResp = await userClient.GetAsync($"/memory/items?project_id={projectId}");
         await EnsureSuccessAsync(listResp);
-        var items = (await listResp.Content.ReadFromJsonAsync<List<MemoryItemSummary>>())!;
+        var items = (await listResp.Content.ReadWireAsync<List<MemoryItemSummary>>())!;
         Assert.Single(items);
     }
 
@@ -98,15 +98,15 @@ public sealed class MemoryEndpointsTests(MateOsApiFixture fixture) : IClassFixtu
             SourceMessageId: null,
             ProposedByAgentId: null,
             IdempotencyKey: "personal-1");
-        HttpResponseMessage resp = await userClient.PostAsJsonAsync("/memory/proposals", proposeReq);
+        HttpResponseMessage resp = await userClient.PostJsonAsync("/memory/proposals", proposeReq);
         await EnsureSuccessAsync(resp);
-        var proposed = (await resp.Content.ReadFromJsonAsync<MemoryProposalSummary>())!;
+        var proposed = (await resp.Content.ReadWireAsync<MemoryProposalSummary>())!;
 
         Assert.Equal("PERSONAL", proposed.Type);
         Assert.Null(proposed.ProjectId);
 
         // approve（PERSONAL 申请人本人批准）
-        HttpResponseMessage approveResp = await userClient.PostAsJsonAsync(
+        HttpResponseMessage approveResp = await userClient.PostJsonAsync(
             $"/memory/proposals/{proposed.Id}/approve", new ApproveMemoryRequest(null));
         await EnsureSuccessAsync(approveResp);
 
@@ -114,7 +114,7 @@ public sealed class MemoryEndpointsTests(MateOsApiFixture fixture) : IClassFixtu
         HttpResponseMessage searchResp = await userClient.GetAsync(
             $"/memory/search?q={Uri.EscapeDataString("下午")}");
         await EnsureSuccessAsync(searchResp);
-        var hits = (await searchResp.Content.ReadFromJsonAsync<List<MemoryItemSummary>>())!;
+        var hits = (await searchResp.Content.ReadWireAsync<List<MemoryItemSummary>>())!;
         Assert.Single(hits);
     }
 
@@ -141,16 +141,16 @@ public sealed class MemoryEndpointsTests(MateOsApiFixture fixture) : IClassFixtu
             SourceMessageId: Guid.NewGuid(),
             ProposedByAgentId: null,
             IdempotencyKey: "reject-1");
-        HttpResponseMessage proposeResp = await userClient.PostAsJsonAsync("/memory/proposals", proposeReq);
+        HttpResponseMessage proposeResp = await userClient.PostJsonAsync("/memory/proposals", proposeReq);
         await EnsureSuccessAsync(proposeResp);
-        var proposed = (await proposeResp.Content.ReadFromJsonAsync<MemoryProposalSummary>())!;
+        var proposed = (await proposeResp.Content.ReadWireAsync<MemoryProposalSummary>())!;
 
         // reject
-        HttpResponseMessage rejectResp = await userClient.PostAsJsonAsync(
+        HttpResponseMessage rejectResp = await userClient.PostJsonAsync(
             $"/memory/proposals/{proposed.Id}/reject",
             new RejectMemoryRequest("内容不准"));
         await EnsureSuccessAsync(rejectResp);
-        var rejected = (await rejectResp.Content.ReadFromJsonAsync<MemoryProposalSummary>())!;
+        var rejected = (await rejectResp.Content.ReadWireAsync<MemoryProposalSummary>())!;
         Assert.Equal("REJECTED", rejected.Status);
         Assert.Equal("内容不准", rejected.RejectReason);
 
@@ -158,7 +158,7 @@ public sealed class MemoryEndpointsTests(MateOsApiFixture fixture) : IClassFixtu
         HttpResponseMessage searchResp = await userClient.GetAsync(
             $"/memory/search?q={Uri.EscapeDataString("被拒绝")}&project_id={projectId}");
         await EnsureSuccessAsync(searchResp);
-        var hits = (await searchResp.Content.ReadFromJsonAsync<List<MemoryItemSummary>>())!;
+        var hits = (await searchResp.Content.ReadWireAsync<List<MemoryItemSummary>>())!;
         Assert.Empty(hits);
     }
 
@@ -179,7 +179,7 @@ public sealed class MemoryEndpointsTests(MateOsApiFixture fixture) : IClassFixtu
         HttpClient bob = fixture.CreateClient();
         TokenResponse bobToken = await RegisterAsync(bob, "bob@example.com");
 
-        HttpResponseMessage addBob = await alice.PostAsJsonAsync(
+        HttpResponseMessage addBob = await alice.PostJsonAsync(
             $"/projects/{projectId}/members",
             new AddMemberRequest(bobToken.User.Email, "member"));
         await EnsureSuccessAsync(addBob);
@@ -191,12 +191,12 @@ public sealed class MemoryEndpointsTests(MateOsApiFixture fixture) : IClassFixtu
             Type: "PROJECT", Title: "test", Content: "x",
             SourceType: "CHANNEL_MESSAGE", SourceChannelId: channelId, SourceMessageSeq: 1L,
             SourceMessageId: Guid.NewGuid(), ProposedByAgentId: null, IdempotencyKey: "k1");
-        HttpResponseMessage propResp = await alice.PostAsJsonAsync("/memory/proposals", req);
+        HttpResponseMessage propResp = await alice.PostJsonAsync("/memory/proposals", req);
         await EnsureSuccessAsync(propResp);
-        var prop = (await propResp.Content.ReadFromJsonAsync<MemoryProposalSummary>())!;
+        var prop = (await propResp.Content.ReadWireAsync<MemoryProposalSummary>())!;
 
         // bob 试图 approve → 403
-        HttpResponseMessage approveResp = await bob.PostAsJsonAsync(
+        HttpResponseMessage approveResp = await bob.PostJsonAsync(
             $"/memory/proposals/{prop.Id}/approve", new ApproveMemoryRequest(null));
         Assert.Equal(HttpStatusCode.Forbidden, approveResp.StatusCode);
     }
@@ -219,13 +219,13 @@ public sealed class MemoryEndpointsTests(MateOsApiFixture fixture) : IClassFixtu
             SourceType: "CHANNEL_MESSAGE", SourceChannelId: channelId, SourceMessageSeq: 1L,
             SourceMessageId: Guid.NewGuid(), ProposedByAgentId: null, IdempotencyKey: "idem-2");
 
-        HttpResponseMessage r1 = await userClient.PostAsJsonAsync("/memory/proposals", req);
+        HttpResponseMessage r1 = await userClient.PostJsonAsync("/memory/proposals", req);
         await EnsureSuccessAsync(r1);
-        var p1 = (await r1.Content.ReadFromJsonAsync<MemoryProposalSummary>())!;
+        var p1 = (await r1.Content.ReadWireAsync<MemoryProposalSummary>())!;
 
-        HttpResponseMessage r2 = await userClient.PostAsJsonAsync("/memory/proposals", req);
+        HttpResponseMessage r2 = await userClient.PostJsonAsync("/memory/proposals", req);
         await EnsureSuccessAsync(r2);
-        var p2 = (await r2.Content.ReadFromJsonAsync<MemoryProposalSummary>())!;
+        var p2 = (await r2.Content.ReadWireAsync<MemoryProposalSummary>())!;
 
         Assert.Equal(p1.Id, p2.Id);
     }
@@ -249,38 +249,38 @@ public sealed class MemoryEndpointsTests(MateOsApiFixture fixture) : IClassFixtu
 
     private static async Task<TokenResponse> RegisterAsync(HttpClient client, string email)
     {
-        HttpResponseMessage resp = await client.PostAsJsonAsync(
+        HttpResponseMessage resp = await client.PostJsonAsync(
             "/auth/register", new RegisterRequest(email, Password, email.Split('@')[0]));
         await EnsureSuccessAsync(resp);
-        return (await resp.Content.ReadFromJsonAsync<TokenResponse>())!;
+        return (await resp.Content.ReadWireAsync<TokenResponse>())!;
     }
 
     private static async Task<Guid> CreateProjectAsync(HttpClient client, string name)
     {
-        HttpResponseMessage orgResp = await client.PostAsJsonAsync(
-            "/organizations", new CreateOrganizationRequest($"{name}-org"));
+        HttpResponseMessage orgResp = await client.PostJsonAsync(
+            "/orgs", new CreateOrganizationRequest($"{name}-org"));
         await EnsureSuccessAsync(orgResp);
-        OrganizationSummary org = (await orgResp.Content.ReadFromJsonAsync<OrganizationSummary>())!;
+        OrganizationSummary org = (await orgResp.Content.ReadWireAsync<OrganizationSummary>())!;
 
-        HttpResponseMessage teamResp = await client.PostAsJsonAsync(
-            $"/organizations/{org.Id}/teams", new CreateTeamRequest(org.Id, $"{name}-team"));
+        HttpResponseMessage teamResp = await client.PostJsonAsync(
+            "/teams", new CreateTeamRequest(org.Id, $"{name}-team"));
         await EnsureSuccessAsync(teamResp);
-        TeamSummary team = (await teamResp.Content.ReadFromJsonAsync<TeamSummary>())!;
+        TeamSummary team = (await teamResp.Content.ReadWireAsync<TeamSummary>())!;
 
-        HttpResponseMessage projResp = await client.PostAsJsonAsync(
-            $"/teams/{team.Id}/projects", new CreateProjectRequest(team.Id, name, null, null));
+        HttpResponseMessage projResp = await client.PostJsonAsync(
+            "/projects", new CreateProjectRequest(team.Id, name, null, null));
         await EnsureSuccessAsync(projResp);
-        ProjectSummary proj = (await projResp.Content.ReadFromJsonAsync<ProjectSummary>())!;
+        ProjectSummary proj = (await projResp.Content.ReadWireAsync<ProjectSummary>())!;
 
         return proj.Id;
     }
 
     private static async Task<Guid> CreateChannelAsync(HttpClient client, Guid projectId, string name)
     {
-        HttpResponseMessage resp = await client.PostAsJsonAsync(
+        HttpResponseMessage resp = await client.PostJsonAsync(
             $"/projects/{projectId}/channels", new CreateChannelRequest(name, null));
         await EnsureSuccessAsync(resp);
-        ChannelSummary channel = (await resp.Content.ReadFromJsonAsync<ChannelSummary>())!;
+        ChannelSummary channel = (await resp.Content.ReadWireAsync<ChannelSummary>())!;
         return channel.Id;
     }
 }

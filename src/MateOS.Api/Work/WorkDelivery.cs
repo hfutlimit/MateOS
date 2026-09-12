@@ -159,8 +159,12 @@ public static class WorkDelivery
             AnalysisContextScore = 100,
             AnalysisPermission = true,
             AcceptedExecutionId = executionId,
-            ActorType = AuditActorTypes.User,
-            ActorId = actorUserId,
+            // 决策主体必须是 AGENT：DDL 的 CHECK 只允许 ('AGENT','SYSTEM')，
+            // 因为这条记录表达的是「Agent 的判断」—— 这里是被人指派后直接接受。
+            // 「谁指派的」由 trigger.from_actor 表达，不在这里重复；
+            // 写 USER 会撞 decision_records_actor_type_check（23514），指派直接 500。
+            ActorType = AuditActorTypes.Agent,
+            ActorId = agent.Id,
             DecidedAt = now,
         };
 

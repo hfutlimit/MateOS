@@ -927,20 +927,8 @@ public static class ChannelEndpoints
     /// <summary>
     /// 事务内原子分配 seq（E3 §3 channel_seq_counters）。
     /// </summary>
-    private static async Task<long> AllocateSeqAsync(MateOSDbContext db, Guid channelId, CancellationToken ct)
-    {
-        // EnsureCreated for new channel 由 CreateChannelAsync 走 SaveChanges 提交
-        // 但 seq 分配必须 in-transaction：先 SELECT FOR UPDATE，再 UPDATE + INSERT message
-        long nextSeq = await db.Database
-            .SqlQuery<long>(
-                $@"UPDATE channel_seq_counters
-                   SET next_seq = next_seq + 1
-                   WHERE channel_id = {channelId}
-                   RETURNING next_seq - 1")
-            .SingleAsync(ct);
-
-        return nextSeq;
-    }
+    private static Task<long> AllocateSeqAsync(MateOSDbContext db, Guid channelId, CancellationToken ct) =>
+        ChannelSeqAllocator.AllocateAsync(db, channelId, ct);
 
     // ──────────────────────────── Attachments ────────────────────────────
 

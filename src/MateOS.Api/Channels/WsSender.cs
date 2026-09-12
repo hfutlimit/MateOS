@@ -21,6 +21,13 @@ public sealed class WsSender
         // 保持 wire 形态一致：snake_case（message.created / channel.archived）
         PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
         DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+
+        // 与 HTTP 响应取同一套转义策略。默认 Encoder 会把中文写成 \uXXXX，
+        // 而 ASP.NET Core 的 HTTP 侧用的是 UnsafeRelaxedJsonEscaping：
+        // 于是同一份 payload 在 WS 与 REST 两条通道上**字节不同**，
+        // 破坏「同一份事实、两条通道形状一致」这个被反复声明的硬约束。
+        // 注意这里必须设：即使是 JsonNode 形式的 payload，外层序列化也会重新转义一遍。
+        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
     };
 
     public WsSender(WsConnectionRegistry registry, ILogger<WsSender> log)

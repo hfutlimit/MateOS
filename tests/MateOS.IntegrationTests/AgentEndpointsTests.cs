@@ -30,9 +30,9 @@ public sealed class AgentEndpointsTests(MateOsApiFixture fixture) : IClassFixtur
 
         // 1. 创建 credential
         var createCred = new CreateCredentialRequest("openai", "prod", "sk-test-secret-1234", null);
-        HttpResponseMessage credResp = await client.PostAsJsonAsync("/credentials", createCred);
+        HttpResponseMessage credResp = await client.PostJsonAsync("/credentials", createCred);
         await EnsureSuccessAsync(credResp);
-        CredentialSummary credential = (await credResp.Content.ReadFromJsonAsync<CredentialSummary>())!;
+        CredentialSummary credential = (await credResp.Content.ReadWireAsync<CredentialSummary>())!;
 
         Assert.Equal("openai", credential.Provider);
         Assert.Equal("prod", credential.Label);
@@ -48,9 +48,9 @@ public sealed class AgentEndpointsTests(MateOsApiFixture fixture) : IClassFixtur
             MaxConcurrency: 2,
             DailyLimitUsd: 10.0m,
             MonthlyBudgetUsd: 200.0m);
-        HttpResponseMessage agentResp = await client.PostAsJsonAsync("/agents", createAgent);
+        HttpResponseMessage agentResp = await client.PostJsonAsync("/agents", createAgent);
         await EnsureSuccessAsync(agentResp);
-        AgentSummary agent = (await agentResp.Content.ReadFromJsonAsync<AgentSummary>())!;
+        AgentSummary agent = (await agentResp.Content.ReadWireAsync<AgentSummary>())!;
 
         Assert.Equal("alice-coder", agent.Name);
         Assert.Equal("ACTIVE", agent.Lifecycle);
@@ -61,13 +61,13 @@ public sealed class AgentEndpointsTests(MateOsApiFixture fixture) : IClassFixtur
         // 3. F2：GET credentials 永不返密文
         HttpResponseMessage listResp = await client.GetAsync("/credentials");
         await EnsureSuccessAsync(listResp);
-        var creds = (await listResp.Content.ReadFromJsonAsync<List<CredentialSummary>>())!;
+        var creds = (await listResp.Content.ReadWireAsync<List<CredentialSummary>>())!;
         Assert.Single(creds);
 
         // 4. GET agent 详情
         HttpResponseMessage getResp = await client.GetAsync($"/agents/{agent.Id}");
         await EnsureSuccessAsync(getResp);
-        AgentSummary fetched = (await getResp.Content.ReadFromJsonAsync<AgentSummary>())!;
+        AgentSummary fetched = (await getResp.Content.ReadWireAsync<AgentSummary>())!;
         Assert.Equal(agent.Id, fetched.Id);
     }
 
@@ -85,17 +85,17 @@ public sealed class AgentEndpointsTests(MateOsApiFixture fixture) : IClassFixtur
         AgentSummary agent = await CreateAgentAsync(client, credential.Id, "bob-coder");
 
         // 先上报 activity=AVAILABLE
-        HttpResponseMessage activityResp = await client.PostAsJsonAsync(
+        HttpResponseMessage activityResp = await client.PostJsonAsync(
             $"/agents/{agent.Id}/activity",
             new ReportActivityRequest("AVAILABLE", null));
         await EnsureSuccessAsync(activityResp);
-        AgentSummary afterActivity = (await activityResp.Content.ReadFromJsonAsync<AgentSummary>())!;
+        AgentSummary afterActivity = (await activityResp.Content.ReadWireAsync<AgentSummary>())!;
         Assert.Equal("AVAILABLE", afterActivity.Activity);
 
         // pause
         HttpResponseMessage pauseResp = await client.PostAsync($"/agents/{agent.Id}/pause", content: null);
         await EnsureSuccessAsync(pauseResp);
-        AgentSummary afterPause = (await pauseResp.Content.ReadFromJsonAsync<AgentSummary>())!;
+        AgentSummary afterPause = (await pauseResp.Content.ReadWireAsync<AgentSummary>())!;
         Assert.Equal("PAUSED", afterPause.Lifecycle);
         Assert.Equal("OFFLINE", afterPause.Activity);
         Assert.Equal("lifecycle_paused", afterPause.ActivityReason);
@@ -119,7 +119,7 @@ public sealed class AgentEndpointsTests(MateOsApiFixture fixture) : IClassFixtur
         await EnsureSuccessAsync(pauseResp);
 
         // 尝试上报 activity=WORKING，应被 409 拒
-        HttpResponseMessage activityResp = await client.PostAsJsonAsync(
+        HttpResponseMessage activityResp = await client.PostJsonAsync(
             $"/agents/{agent.Id}/activity",
             new ReportActivityRequest("WORKING", "should fail"));
         Assert.Equal(HttpStatusCode.Conflict, activityResp.StatusCode);
@@ -140,9 +140,9 @@ public sealed class AgentEndpointsTests(MateOsApiFixture fixture) : IClassFixtur
 
         // 签发
         var issueReq = new IssueTokenRequest("dev-stub", 7);
-        HttpResponseMessage issueResp = await client.PostAsJsonAsync($"/agents/{agent.Id}/tokens", issueReq);
+        HttpResponseMessage issueResp = await client.PostJsonAsync($"/agents/{agent.Id}/tokens", issueReq);
         await EnsureSuccessAsync(issueResp);
-        AgentTokenIssuanceResponse issued = (await issueResp.Content.ReadFromJsonAsync<AgentTokenIssuanceResponse>())!;
+        AgentTokenIssuanceResponse issued = (await issueResp.Content.ReadWireAsync<AgentTokenIssuanceResponse>())!;
 
         Assert.StartsWith("eyJ", issued.JwtToken);  // JWT prefix
         long expiresIn = issued.ExpiresAtMs - DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
@@ -152,7 +152,7 @@ public sealed class AgentEndpointsTests(MateOsApiFixture fixture) : IClassFixtur
         // 列表（永不返 matk_ / hash）
         HttpResponseMessage listResp = await client.GetAsync($"/agents/{agent.Id}/tokens");
         await EnsureSuccessAsync(listResp);
-        var tokens = (await listResp.Content.ReadFromJsonAsync<List<AgentTokenSummary>>())!;
+        var tokens = (await listResp.Content.ReadWireAsync<List<AgentTokenSummary>>())!;
         Assert.Single(tokens);
         Assert.Equal(issued.TokenId, tokens[0].Id);
 
@@ -183,7 +183,7 @@ public sealed class AgentEndpointsTests(MateOsApiFixture fixture) : IClassFixtur
             MaxConcurrency: null,
             DailyLimitUsd: null,
             MonthlyBudgetUsd: null);
-        HttpResponseMessage resp = await client.PostAsJsonAsync("/agents", req);
+        HttpResponseMessage resp = await client.PostJsonAsync("/agents", req);
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
     }
 
@@ -208,19 +208,19 @@ public sealed class AgentEndpointsTests(MateOsApiFixture fixture) : IClassFixtur
 
         // 邀请入项目
         var addReq = new AddAgentToProjectRequest(agent.Id, CanReadHistory: true);
-        HttpResponseMessage addResp = await client.PostAsJsonAsync(
+        HttpResponseMessage addResp = await client.PostJsonAsync(
             $"/projects/{project.Id}/agents", addReq);
         await EnsureSuccessAsync(addResp);
 
         // 列出 project agents
         HttpResponseMessage listResp = await client.GetAsync($"/projects/{project.Id}/agents");
         await EnsureSuccessAsync(listResp);
-        var projectAgents = (await listResp.Content.ReadFromJsonAsync<List<AgentSummary>>())!;
+        var projectAgents = (await listResp.Content.ReadWireAsync<List<AgentSummary>>())!;
         Assert.Single(projectAgents);
         Assert.Equal(agent.Id, projectAgents[0].Id);
 
         // 重复邀请应 409
-        HttpResponseMessage dupResp = await client.PostAsJsonAsync(
+        HttpResponseMessage dupResp = await client.PostJsonAsync(
             $"/projects/{project.Id}/agents", addReq);
         Assert.Equal(HttpStatusCode.Conflict, dupResp.StatusCode);
     }
@@ -244,18 +244,18 @@ public sealed class AgentEndpointsTests(MateOsApiFixture fixture) : IClassFixtur
 
     private static async Task<TokenResponse> RegisterAsync(HttpClient client, string email)
     {
-        HttpResponseMessage response = await client.PostAsJsonAsync(
+        HttpResponseMessage response = await client.PostJsonAsync(
             "/auth/register", new RegisterRequest(email, Password, email.Split('@')[0]));
         await EnsureSuccessAsync(response);
-        return (await response.Content.ReadFromJsonAsync<TokenResponse>())!;
+        return (await response.Content.ReadWireAsync<TokenResponse>())!;
     }
 
     private static async Task<CredentialSummary> CreateCredentialAsync(HttpClient client)
     {
         var req = new CreateCredentialRequest("openai", "test", $"sk-{Guid.NewGuid():N}", null);
-        HttpResponseMessage resp = await client.PostAsJsonAsync("/credentials", req);
+        HttpResponseMessage resp = await client.PostJsonAsync("/credentials", req);
         await EnsureSuccessAsync(resp);
-        return (await resp.Content.ReadFromJsonAsync<CredentialSummary>())!;
+        return (await resp.Content.ReadWireAsync<CredentialSummary>())!;
     }
 
     private static async Task<AgentSummary> CreateAgentAsync(
@@ -269,31 +269,31 @@ public sealed class AgentEndpointsTests(MateOsApiFixture fixture) : IClassFixtur
             MaxConcurrency: 1,
             DailyLimitUsd: null,
             MonthlyBudgetUsd: null);
-        HttpResponseMessage resp = await client.PostAsJsonAsync("/agents", req);
+        HttpResponseMessage resp = await client.PostJsonAsync("/agents", req);
         await EnsureSuccessAsync(resp);
-        return (await resp.Content.ReadFromJsonAsync<AgentSummary>())!;
+        return (await resp.Content.ReadWireAsync<AgentSummary>())!;
     }
 
     private static async Task<OrganizationSummary> CreateOrgAsync(HttpClient client, string name)
     {
-        HttpResponseMessage resp = await client.PostAsJsonAsync("/organizations", new CreateOrganizationRequest(name));
+        HttpResponseMessage resp = await client.PostJsonAsync("/orgs", new CreateOrganizationRequest(name));
         await EnsureSuccessAsync(resp);
-        return (await resp.Content.ReadFromJsonAsync<OrganizationSummary>())!;
+        return (await resp.Content.ReadWireAsync<OrganizationSummary>())!;
     }
 
     private static async Task<TeamSummary> CreateTeamAsync(HttpClient client, Guid orgId, string name)
     {
-        HttpResponseMessage resp = await client.PostAsJsonAsync(
-            $"/organizations/{orgId}/teams", new CreateTeamRequest(orgId, name));
+        HttpResponseMessage resp = await client.PostJsonAsync(
+            "/teams", new CreateTeamRequest(orgId, name));
         await EnsureSuccessAsync(resp);
-        return (await resp.Content.ReadFromJsonAsync<TeamSummary>())!;
+        return (await resp.Content.ReadWireAsync<TeamSummary>())!;
     }
 
     private static async Task<ProjectSummary> CreateProjectAsync(HttpClient client, Guid teamId, string name)
     {
-        HttpResponseMessage resp = await client.PostAsJsonAsync(
-            $"/teams/{teamId}/projects", new CreateProjectRequest(teamId, name, null, null));
+        HttpResponseMessage resp = await client.PostJsonAsync(
+            "/projects", new CreateProjectRequest(teamId, name, null, null));
         await EnsureSuccessAsync(resp);
-        return (await resp.Content.ReadFromJsonAsync<ProjectSummary>())!;
+        return (await resp.Content.ReadWireAsync<ProjectSummary>())!;
     }
 }

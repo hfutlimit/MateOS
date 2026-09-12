@@ -42,7 +42,7 @@ public sealed class WorkItemEndpointsTests(MateOsApiFixture fixture) : IClassFix
 
         ProjectSummary project = await CreateProjectForAsync(client, "Work");
 
-        HttpResponseMessage create = await client.PostAsJsonAsync(
+        HttpResponseMessage create = await client.PostJsonAsync(
             $"/projects/{project.Id}/work-items",
             new CreateWorkItemRequest("TASK", "实现登录接口", "需要 JWT + refresh", null, null, null));
 
@@ -120,7 +120,7 @@ public sealed class WorkItemEndpointsTests(MateOsApiFixture fixture) : IClassFix
         ProjectSummary project = await CreateProjectForAsync(client, "Patch");
         Guid itemId = await CreateWorkItemAsync(client, project.Id, "TASK", "原始标题", null);
 
-        await EnsureSuccessAsync(await client.PostAsJsonAsync(
+        await EnsureSuccessAsync(await client.PostJsonAsync(
             $"/work-items/{itemId}/transition", new TransitionWorkItemRequest("IN_PROGRESS")));
 
         HttpResponseMessage patch = await client.PatchAsJsonAsync(
@@ -150,15 +150,15 @@ public sealed class WorkItemEndpointsTests(MateOsApiFixture fixture) : IClassFix
         Guid itemId = await CreateWorkItemAsync(client, project.Id, "TASK", "状态机用例", null);
 
         // OPEN → DONE 跳过 IN_PROGRESS
-        HttpResponseMessage skip = await client.PostAsJsonAsync(
+        HttpResponseMessage skip = await client.PostJsonAsync(
             $"/work-items/{itemId}/transition", new TransitionWorkItemRequest("DONE"));
         Assert.Equal(HttpStatusCode.Conflict, skip.StatusCode);
 
         // OPEN → IN_PROGRESS → IN_REVIEW
-        await EnsureSuccessAsync(await client.PostAsJsonAsync(
+        await EnsureSuccessAsync(await client.PostJsonAsync(
             $"/work-items/{itemId}/transition", new TransitionWorkItemRequest("IN_PROGRESS")));
 
-        HttpResponseMessage review = await client.PostAsJsonAsync(
+        HttpResponseMessage review = await client.PostJsonAsync(
             $"/work-items/{itemId}/transition", new TransitionWorkItemRequest("IN_REVIEW"));
         await EnsureSuccessAsync(review);
 
@@ -168,9 +168,9 @@ public sealed class WorkItemEndpointsTests(MateOsApiFixture fixture) : IClassFix
         Assert.Equal("IN_PROGRESS", doc.RootElement.GetProperty("canonical_status_category").GetString());
 
         // DONE 之后仍可回到 IN_REVIEW（WorkItem 允许回退，与 Execution 的不可逆不同）
-        await EnsureSuccessAsync(await client.PostAsJsonAsync(
+        await EnsureSuccessAsync(await client.PostJsonAsync(
             $"/work-items/{itemId}/transition", new TransitionWorkItemRequest("DONE")));
-        await EnsureSuccessAsync(await client.PostAsJsonAsync(
+        await EnsureSuccessAsync(await client.PostJsonAsync(
             $"/work-items/{itemId}/transition", new TransitionWorkItemRequest("IN_REVIEW")));
     }
 
@@ -192,7 +192,7 @@ public sealed class WorkItemEndpointsTests(MateOsApiFixture fixture) : IClassFix
         Guid legacyItemId = await CreateWorkItemAsync(client, project.Id, "TASK", "历史卡片", null);
 
         // ② 切换 active binding 到 fake provider
-        HttpResponseMessage change = await client.PostAsJsonAsync(
+        HttpResponseMessage change = await client.PostJsonAsync(
             $"/projects/{project.Id}/work-management/bindings",
             new ChangeWorkProviderBindingRequest(FakeProviderKey, null, "PROJ", null));
         await EnsureSuccessAsync(change);
@@ -204,7 +204,7 @@ public sealed class WorkItemEndpointsTests(MateOsApiFixture fixture) : IClassFix
         }
 
         // ③ 新建的卡片走新 binding
-        HttpResponseMessage created = await client.PostAsJsonAsync(
+        HttpResponseMessage created = await client.PostJsonAsync(
             $"/projects/{project.Id}/work-items",
             new CreateWorkItemRequest("STORY", "新卡片", null, null, null, null));
         await EnsureSuccessAsync(created);
@@ -266,7 +266,7 @@ public sealed class WorkItemEndpointsTests(MateOsApiFixture fixture) : IClassFix
 
         ProjectSummary project = await CreateProjectForAsync(client, "Unknown");
 
-        HttpResponseMessage response = await client.PostAsJsonAsync(
+        HttpResponseMessage response = await client.PostJsonAsync(
             $"/projects/{project.Id}/work-management/bindings",
             new ChangeWorkProviderBindingRequest("no-such-provider", null, null, null));
 
@@ -290,7 +290,7 @@ public sealed class WorkItemEndpointsTests(MateOsApiFixture fixture) : IClassFix
         AgentSummary agent = await CreateAgentAsync(client, "backend-agent");
         Guid itemId = await CreateWorkItemAsync(client, project.Id, "TASK", "给 agent 的活", "把接口实现出来");
 
-        HttpResponseMessage assign = await client.PostAsJsonAsync(
+        HttpResponseMessage assign = await client.PostJsonAsync(
             $"/work-items/{itemId}/assign", new AssignWorkItemRequest(agent.Id, 300));
         await EnsureSuccessAsync(assign);
 
@@ -321,7 +321,7 @@ public sealed class WorkItemEndpointsTests(MateOsApiFixture fixture) : IClassFix
         Assert.Equal("backend-agent", only.GetProperty("agent_name").GetString());
 
         // 幂等：重复指派不产生第二个 Execution
-        HttpResponseMessage again = await client.PostAsJsonAsync(
+        HttpResponseMessage again = await client.PostJsonAsync(
             $"/work-items/{itemId}/assign", new AssignWorkItemRequest(agent.Id, 300));
         await EnsureSuccessAsync(again);
 
@@ -348,7 +348,7 @@ public sealed class WorkItemEndpointsTests(MateOsApiFixture fixture) : IClassFix
         ProjectSummary project = await CreateProjectForAsync(client, "Comments");
         Guid itemId = await CreateWorkItemAsync(client, project.Id, "TASK", "带评论的卡片", null);
 
-        HttpResponseMessage post = await client.PostAsJsonAsync(
+        HttpResponseMessage post = await client.PostJsonAsync(
             $"/work-items/{itemId}/comments", new AddWorkCommentRequest("这个优先级需要提高"));
 
         await EnsureSuccessAsync(post);
@@ -361,7 +361,7 @@ public sealed class WorkItemEndpointsTests(MateOsApiFixture fixture) : IClassFix
         Assert.Equal("这个优先级需要提高", comment.GetProperty("body").GetString());
 
         // 空 body 应被拒
-        HttpResponseMessage empty = await client.PostAsJsonAsync(
+        HttpResponseMessage empty = await client.PostJsonAsync(
             $"/work-items/{itemId}/comments", new AddWorkCommentRequest("   "));
         Assert.Equal(HttpStatusCode.BadRequest, empty.StatusCode);
     }
@@ -380,7 +380,7 @@ public sealed class WorkItemEndpointsTests(MateOsApiFixture fixture) : IClassFix
         Guid blocking = await CreateWorkItemAsync(client, project.Id, "TASK", "被阻塞的卡", null);
         Guid blocked = await CreateWorkItemAsync(client, project.Id, "TASK", "阻塞者", null);
 
-        HttpResponseMessage relation = await client.PostAsJsonAsync(
+        HttpResponseMessage relation = await client.PostJsonAsync(
             $"/work-items/{blocking}/relations",
             new CreateWorkRelationRequest(blocked, "BLOCKED_BY"));
         await EnsureSuccessAsync(relation);
@@ -392,7 +392,7 @@ public sealed class WorkItemEndpointsTests(MateOsApiFixture fixture) : IClassFix
         }
 
         // 幂等：重复建立同一条关联不新增行
-        HttpResponseMessage repeat = await client.PostAsJsonAsync(
+        HttpResponseMessage repeat = await client.PostJsonAsync(
             $"/work-items/{blocking}/relations",
             new CreateWorkRelationRequest(blocked, "BLOCKED_BY"));
         await EnsureSuccessAsync(repeat);
@@ -403,7 +403,7 @@ public sealed class WorkItemEndpointsTests(MateOsApiFixture fixture) : IClassFix
         }
 
         // 自关联应被拒
-        HttpResponseMessage self = await client.PostAsJsonAsync(
+        HttpResponseMessage self = await client.PostJsonAsync(
             $"/work-items/{blocking}/relations",
             new CreateWorkRelationRequest(blocking, "RELATES_TO"));
         Assert.Equal(HttpStatusCode.BadRequest, self.StatusCode);
@@ -412,7 +412,7 @@ public sealed class WorkItemEndpointsTests(MateOsApiFixture fixture) : IClassFix
         ProjectSummary other = await CreateProjectForAsync(client, "Other");
         Guid outsider = await CreateWorkItemAsync(client, other.Id, "TASK", "别家的卡", null);
 
-        HttpResponseMessage cross = await client.PostAsJsonAsync(
+        HttpResponseMessage cross = await client.PostJsonAsync(
             $"/work-items/{blocking}/relations",
             new CreateWorkRelationRequest(outsider, "RELATES_TO"));
         Assert.Equal(HttpStatusCode.BadRequest, cross.StatusCode);
@@ -441,7 +441,7 @@ public sealed class WorkItemEndpointsTests(MateOsApiFixture fixture) : IClassFix
             (await stranger.GetAsync($"/projects/{project.Id}/work-items")).StatusCode);
 
         // 非 owner 不能切 Provider
-        HttpResponseMessage bind = await stranger.PostAsJsonAsync(
+        HttpResponseMessage bind = await stranger.PostJsonAsync(
             $"/projects/{project.Id}/work-management/bindings",
             new ChangeWorkProviderBindingRequest("builtin", null, null, null));
         Assert.True(bind.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.NotFound);
@@ -500,7 +500,7 @@ public sealed class WorkItemEndpointsTests(MateOsApiFixture fixture) : IClassFix
     private static async Task<Guid> CreateWorkItemAsync(
         HttpClient client, Guid projectId, string type, string title, string? description)
     {
-        HttpResponseMessage response = await client.PostAsJsonAsync(
+        HttpResponseMessage response = await client.PostJsonAsync(
             $"/projects/{projectId}/work-items",
             new CreateWorkItemRequest(type, title, description, null, null, null));
 
@@ -541,12 +541,12 @@ public sealed class WorkItemEndpointsTests(MateOsApiFixture fixture) : IClassFix
 
     private static async Task<TokenResponse> RegisterAsync(HttpClient client, string email)
     {
-        HttpResponseMessage resp = await client.PostAsJsonAsync(
+        HttpResponseMessage resp = await client.PostJsonAsync(
             "/auth/register", new RegisterRequest(email, Password, email.Split('@')[0]));
 
         await EnsureSuccessAsync(resp);
 
-        return (await resp.Content.ReadFromJsonAsync<TokenResponse>())!;
+        return (await resp.Content.ReadWireAsync<TokenResponse>())!;
     }
 
     private static async Task<ProjectSummary> CreateProjectForAsync(HttpClient client, string name)
@@ -581,10 +581,10 @@ public sealed class WorkItemEndpointsTests(MateOsApiFixture fixture) : IClassFix
 
     private static async Task<T> PostAsync<T>(HttpClient client, string url, object body)
     {
-        HttpResponseMessage response = await client.PostAsJsonAsync(url, body);
+        HttpResponseMessage response = await client.PostJsonAsync(url, body);
 
         await EnsureSuccessAsync(response);
 
-        return (await response.Content.ReadFromJsonAsync<T>())!;
+        return (await response.Content.ReadWireAsync<T>())!;
     }
 }

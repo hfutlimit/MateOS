@@ -894,7 +894,19 @@ public static class AgentEndpoints
         HttpContext http,
         CancellationToken ct)
     {
-        Guid userId = http.RequireUserId();
+        // 两条合法主体：
+        //  ① Agent 自己上报（agent_token，sub = agent_id）—— activity 的真实来源，
+        //     Agent 进程自己最清楚「我在想 / 我在干 / 我空闲」；
+        //  ② owner 代报（access token）—— 保留给调试与人工置位。
+        // M3a 阶段只实现了 ②，于是 stub 一接上就会 403：它是 agent_token 主体，
+        // 而 owner 校验只认 user id。
+        Guid? tokenAgentId = http.GetAgentId();
+        Guid? userId = http.GetUserId();
+
+        if (tokenAgentId is null && userId is null)
+        {
+            return ApiErrors.Unauthorized(ApiErrors.InvalidToken, "需要 access_token 或 agent_token");
+        }
 
         if (!AgentActivityMap.TryParse(request.Activity, out AgentActivity activity))
         {
@@ -908,10 +920,16 @@ public static class AgentEndpoints
             return ApiErrors.NotFoundResult(ApiErrors.NotFound, "agent 不存在");
         }
 
-        // V1 简化：仅 owner 可代为上报（M3b 引入 agent_token 鉴权后由 stub 自己上报）
-        if (agent.OwnerUserId != userId)
+        if (tokenAgentId is { } selfAgentId)
         {
-            return ApiErrors.Forbidden(ApiErrors.NotOwner, "只有所有者可以代为上报 activity");
+            if (selfAgentId != id)
+            {
+                return ApiErrors.Forbidden(ApiErrors.NotOwner, "agent_token 与路径 agentId 不一致");
+            }
+        }
+        else if (agent.OwnerUserId != userId)
+        {
+            return ApiErrors.Forbidden(ApiErrors.NotOwner, "只有所有者或 agent 自己可以上报 activity");
         }
 
         if (!AgentLifecycleMap.TryParse(agent.Lifecycle, out AgentLifecycle lifecycle))
@@ -932,7 +950,9 @@ public static class AgentEndpoints
         agent.UpdatedAt = DateTimeOffset.UtcNow;
 
         audit.Record(http, new AuditEntry(
-            AuditActorTypes.User, userId, AuditActions.AgentActivityReported,
+            tokenAgentId is not null ? AuditActorTypes.Agent : AuditActorTypes.User,
+            tokenAgentId ?? userId!.Value,
+            AuditActions.AgentActivityReported,
             TargetType: "agent", TargetId: id,
             Detail: new { activity = agent.Activity, reason = request.Reason }));
 

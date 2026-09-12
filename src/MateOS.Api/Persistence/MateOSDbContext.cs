@@ -1,6 +1,7 @@
 using System.Text;
 using MateOS.Domain.Agent;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata;
 
 namespace MateOS.Api.Persistence;
 
@@ -201,6 +202,15 @@ public sealed class MateOSDbContext(DbContextOptions<MateOSDbContext> options) :
         modelBuilder.Entity<ExecutionEvent>()
             .HasOne<ExecutionAttempt>().WithMany().HasForeignKey(x => x.AttemptId);
 
+        // dispatch inbox 带 execution_id / agent_id 两个外键，两个都要配。
+        // EF 靠关系图决定同一次 SaveChanges 的 INSERT 顺序：漏配关系时顺序未定义，
+        // 实测会先插 inbox，撞 agent_dispatch_inbox_execution_id_fkey（23503），
+        // 表现为「创建 execution 直接 500」。
+        modelBuilder.Entity<AgentDispatchInbox>()
+            .HasOne<AgentExecution>().WithMany().HasForeignKey(x => x.ExecutionId);
+        modelBuilder.Entity<AgentDispatchInbox>()
+            .HasOne<Agent>().WithMany().HasForeignKey(x => x.AgentId);
+
         modelBuilder.Entity<AgentExecution>().Property(x => x.Input).HasColumnType("jsonb");
         modelBuilder.Entity<AgentExecution>().Property(x => x.ContextRefs).HasColumnType("jsonb");
         modelBuilder.Entity<AgentExecution>().Property(x => x.ResultOutput).HasColumnType("jsonb");
@@ -218,6 +228,24 @@ public sealed class MateOSDbContext(DbContextOptions<MateOSDbContext> options) :
         modelBuilder.Entity<CollaborationRequest>().Property(x => x.RequiredCapabilities).HasColumnType("jsonb");
         modelBuilder.Entity<CollaborationRequest>().Property(x => x.ContextRefs).HasColumnType("jsonb");
         modelBuilder.Entity<DecisionRecord>().Property(x => x.Needs).HasColumnType("jsonb");
+
+        // E5：memory_proposals / memory_items 关系 + JSONB
+        modelBuilder.Entity<MemoryProposal>()
+            .HasOne<Project>().WithMany().HasForeignKey(x => x.ProjectId);
+
+        // scope_type 在 DDL 里是 GENERATED ALWAYS AS (…) STORED —— 由 type 派生。
+        // EF 默认会把自己知道的所有属性都写进 INSERT/UPDATE，于是 PG 报
+        // 428C9「cannot insert a non-DEFAULT value into column "scope_type"」，
+        // 表现为创建 memory proposal 直接 500。
+        // 这里显式声明「插入与更新都不写它」，读回来仍走同一属性。
+        modelBuilder.Entity<MemoryProposal>().Property(x => x.ScopeType)
+            .Metadata.SetBeforeSaveBehavior(PropertySaveBehavior.Ignore);
+        modelBuilder.Entity<MemoryProposal>().Property(x => x.ScopeType)
+            .Metadata.SetAfterSaveBehavior(PropertySaveBehavior.Ignore);
+        modelBuilder.Entity<MemoryItem>().Property(x => x.ScopeType)
+            .Metadata.SetBeforeSaveBehavior(PropertySaveBehavior.Ignore);
+        modelBuilder.Entity<MemoryItem>().Property(x => x.ScopeType)
+            .Metadata.SetAfterSaveBehavior(PropertySaveBehavior.Ignore);
 
         // E8：Work Management 关系 + JSONB
         // 关系不只是装饰：EF 靠它们决定同一次 SaveChanges 的 INSERT 顺序。

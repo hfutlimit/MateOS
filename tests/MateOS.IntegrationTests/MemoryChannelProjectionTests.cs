@@ -35,15 +35,15 @@ public sealed class MemoryChannelProjectionTests(MateOsApiFixture fixture) : ICl
             Type: "PROJECT", Title: "需要审批的 memory", Content: "内容",
             SourceType: "CHANNEL_MESSAGE", SourceChannelId: channelId, SourceMessageSeq: 1L,
             SourceMessageId: Guid.NewGuid(), ProposedByAgentId: null, IdempotencyKey: "mrp-1");
-        HttpResponseMessage proposeResp = await userClient.PostAsJsonAsync("/memory/proposals", req);
+        HttpResponseMessage proposeResp = await userClient.PostJsonAsync("/memory/proposals", req);
         await EnsureSuccessAsync(proposeResp);
-        var proposal = (await proposeResp.Content.ReadFromJsonAsync<MemoryProposalSummary>())!;
+        var proposal = (await proposeResp.Content.ReadWireAsync<MemoryProposalSummary>())!;
 
         // GET channel messages 应包含 MEMORY_REQUEST 形态
         HttpResponseMessage listResp = await userClient.GetAsync(
             $"/channels/{channelId}/messages?since_seq=0");
         await EnsureSuccessAsync(listResp);
-        var page = (await listResp.Content.ReadFromJsonAsync<MessagesPage>())!;
+        var page = (await listResp.Content.ReadWireAsync<MessagesPage>())!;
 
         Assert.True(page.LastSeq >= 1);
         var memoryRequestMessage = page.Messages.Single(m => m.ContentType == "MEMORY_REQUEST");
@@ -75,12 +75,12 @@ public sealed class MemoryChannelProjectionTests(MateOsApiFixture fixture) : ICl
             Type: "PROJECT", Title: "t", Content: "c",
             SourceType: "CHANNEL_MESSAGE", SourceChannelId: channelId, SourceMessageSeq: 1L,
             SourceMessageId: Guid.NewGuid(), ProposedByAgentId: null, IdempotencyKey: "mrp-2");
-        HttpResponseMessage proposeResp = await userClient.PostAsJsonAsync("/memory/proposals", req);
+        HttpResponseMessage proposeResp = await userClient.PostJsonAsync("/memory/proposals", req);
         await EnsureSuccessAsync(proposeResp);
-        var proposal = (await proposeResp.Content.ReadFromJsonAsync<MemoryProposalSummary>())!;
+        var proposal = (await proposeResp.Content.ReadWireAsync<MemoryProposalSummary>())!;
 
         // approve
-        HttpResponseMessage approveResp = await userClient.PostAsJsonAsync(
+        HttpResponseMessage approveResp = await userClient.PostJsonAsync(
             $"/memory/proposals/{proposal.Id}/approve", new ApproveMemoryRequest(null));
         await EnsureSuccessAsync(approveResp);
 
@@ -88,7 +88,7 @@ public sealed class MemoryChannelProjectionTests(MateOsApiFixture fixture) : ICl
         HttpResponseMessage listResp = await userClient.GetAsync(
             $"/channels/{channelId}/messages?since_seq=0");
         await EnsureSuccessAsync(listResp);
-        var page = (await listResp.Content.ReadFromJsonAsync<MessagesPage>())!;
+        var page = (await listResp.Content.ReadWireAsync<MessagesPage>())!;
 
         Assert.Equal(2, page.Messages.Count);
         var sysMsg = page.Messages.Single(m => m.ContentType == "SYSTEM");
@@ -114,11 +114,11 @@ public sealed class MemoryChannelProjectionTests(MateOsApiFixture fixture) : ICl
             Type: "PROJECT", Title: "t", Content: "c",
             SourceType: "CHANNEL_MESSAGE", SourceChannelId: channelId, SourceMessageSeq: 1L,
             SourceMessageId: Guid.NewGuid(), ProposedByAgentId: null, IdempotencyKey: "mrp-3");
-        HttpResponseMessage proposeResp = await userClient.PostAsJsonAsync("/memory/proposals", req);
+        HttpResponseMessage proposeResp = await userClient.PostJsonAsync("/memory/proposals", req);
         await EnsureSuccessAsync(proposeResp);
-        var proposal = (await proposeResp.Content.ReadFromJsonAsync<MemoryProposalSummary>())!;
+        var proposal = (await proposeResp.Content.ReadWireAsync<MemoryProposalSummary>())!;
 
-        HttpResponseMessage rejectResp = await userClient.PostAsJsonAsync(
+        HttpResponseMessage rejectResp = await userClient.PostJsonAsync(
             $"/memory/proposals/{proposal.Id}/reject", new RejectMemoryRequest("不准"));
         await EnsureSuccessAsync(rejectResp);
 
@@ -126,7 +126,7 @@ public sealed class MemoryChannelProjectionTests(MateOsApiFixture fixture) : ICl
         HttpResponseMessage listResp = await userClient.GetAsync(
             $"/channels/{channelId}/messages?since_seq=0");
         await EnsureSuccessAsync(listResp);
-        var page = (await listResp.Content.ReadFromJsonAsync<MessagesPage>())!;
+        var page = (await listResp.Content.ReadWireAsync<MessagesPage>())!;
 
         var sysMsg = page.Messages.First(m => m.ContentType == "SYSTEM");
         Assert.Contains("已拒绝记忆申请", sysMsg.Content.GetProperty("text").GetString());
@@ -147,16 +147,16 @@ public sealed class MemoryChannelProjectionTests(MateOsApiFixture fixture) : ICl
             Type: "PERSONAL", Title: "personal", Content: "c",
             SourceType: "MANUAL", SourceChannelId: null, SourceMessageSeq: null,
             SourceMessageId: null, ProposedByAgentId: null, IdempotencyKey: "mrp-4");
-        HttpResponseMessage proposeResp = await userClient.PostAsJsonAsync("/memory/proposals", req);
+        HttpResponseMessage proposeResp = await userClient.PostJsonAsync("/memory/proposals", req);
         await EnsureSuccessAsync(proposeResp);
-        await EnsureSuccessAsync(await userClient.PostAsJsonAsync(
-            $"/memory/proposals/{(await proposeResp.Content.ReadFromJsonAsync<MemoryProposalSummary>())!.Id}/approve",
+        await EnsureSuccessAsync(await userClient.PostJsonAsync(
+            $"/memory/proposals/{(await proposeResp.Content.ReadWireAsync<MemoryProposalSummary>())!.Id}/approve",
             new ApproveMemoryRequest(null)));
 
         // 没有 channel 写消息，verify via list MEMORY_REQUEST 形态没有
         HttpResponseMessage listResp = await userClient.GetAsync("/memory/items");
         await EnsureSuccessAsync(listResp);
-        var items = (await listResp.Content.ReadFromJsonAsync<List<MemoryItemSummary>>())!;
+        var items = (await listResp.Content.ReadWireAsync<List<MemoryItemSummary>>())!;
         Assert.Single(items);  // PERSONAL memory item 写好了
     }
 
@@ -179,38 +179,38 @@ public sealed class MemoryChannelProjectionTests(MateOsApiFixture fixture) : ICl
 
     private static async Task<TokenResponse> RegisterAsync(HttpClient client, string email)
     {
-        HttpResponseMessage resp = await client.PostAsJsonAsync(
+        HttpResponseMessage resp = await client.PostJsonAsync(
             "/auth/register", new RegisterRequest(email, Password, email.Split('@')[0]));
         await EnsureSuccessAsync(resp);
-        return (await resp.Content.ReadFromJsonAsync<TokenResponse>())!;
+        return (await resp.Content.ReadWireAsync<TokenResponse>())!;
     }
 
     private static async Task<Guid> CreateProjectAsync(HttpClient client, string name)
     {
-        HttpResponseMessage orgResp = await client.PostAsJsonAsync(
-            "/organizations", new CreateOrganizationRequest($"{name}-org"));
+        HttpResponseMessage orgResp = await client.PostJsonAsync(
+            "/orgs", new CreateOrganizationRequest($"{name}-org"));
         await EnsureSuccessAsync(orgResp);
-        OrganizationSummary org = (await orgResp.Content.ReadFromJsonAsync<OrganizationSummary>())!;
+        OrganizationSummary org = (await orgResp.Content.ReadWireAsync<OrganizationSummary>())!;
 
-        HttpResponseMessage teamResp = await client.PostAsJsonAsync(
-            $"/organizations/{org.Id}/teams", new CreateTeamRequest(org.Id, $"{name}-team"));
+        HttpResponseMessage teamResp = await client.PostJsonAsync(
+            "/teams", new CreateTeamRequest(org.Id, $"{name}-team"));
         await EnsureSuccessAsync(teamResp);
-        TeamSummary team = (await teamResp.Content.ReadFromJsonAsync<TeamSummary>())!;
+        TeamSummary team = (await teamResp.Content.ReadWireAsync<TeamSummary>())!;
 
-        HttpResponseMessage projResp = await client.PostAsJsonAsync(
-            $"/teams/{team.Id}/projects", new CreateProjectRequest(team.Id, name, null, null));
+        HttpResponseMessage projResp = await client.PostJsonAsync(
+            "/projects", new CreateProjectRequest(team.Id, name, null, null));
         await EnsureSuccessAsync(projResp);
-        ProjectSummary proj = (await projResp.Content.ReadFromJsonAsync<ProjectSummary>())!;
+        ProjectSummary proj = (await projResp.Content.ReadWireAsync<ProjectSummary>())!;
 
         return proj.Id;
     }
 
     private static async Task<Guid> CreateChannelAsync(HttpClient client, Guid projectId, string name)
     {
-        HttpResponseMessage resp = await client.PostAsJsonAsync(
+        HttpResponseMessage resp = await client.PostJsonAsync(
             $"/projects/{projectId}/channels", new CreateChannelRequest(name, null));
         await EnsureSuccessAsync(resp);
-        ChannelSummary channel = (await resp.Content.ReadFromJsonAsync<ChannelSummary>())!;
+        ChannelSummary channel = (await resp.Content.ReadWireAsync<ChannelSummary>())!;
         return channel.Id;
     }
 }

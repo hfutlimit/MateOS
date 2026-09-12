@@ -54,7 +54,7 @@ public sealed class IdentityEndpointsTests(MateOsApiFixture fixture) : IClassFix
 
         await RegisterAsync(client, "dup@example.com");
 
-        HttpResponseMessage second = await client.PostAsJsonAsync(
+        HttpResponseMessage second = await client.PostJsonAsync(
             "/auth/register", new RegisterRequest("DUP@example.com", Password, "dup"));
 
         // 邮箱是 citext，大小写不同也视为同一个账号（E1 F8）
@@ -90,7 +90,7 @@ public sealed class IdentityEndpointsTests(MateOsApiFixture fixture) : IClassFix
         Assert.NotEqual(first.RefreshToken, rotated.RefreshToken);
 
         // 旧 refresh 已被消费（E1 F2）
-        HttpResponseMessage reuse = await client.PostAsJsonAsync(
+        HttpResponseMessage reuse = await client.PostJsonAsync(
             "/auth/refresh", new RefreshRequest(first.RefreshToken));
 
         Assert.Equal(HttpStatusCode.Unauthorized, reuse.StatusCode);
@@ -123,7 +123,7 @@ public sealed class IdentityEndpointsTests(MateOsApiFixture fixture) : IClassFix
         OrganizationSummary org = await CreateOrganizationAsync(alice, "Acme");
 
         // bob 加入 Org 但只是 member
-        HttpResponseMessage addBob = await alice.PostAsJsonAsync(
+        HttpResponseMessage addBob = await alice.PostJsonAsync(
             $"/orgs/{org.Id}/members", new AddMemberRequest("bob@example.com", "member"));
         Assert.Equal(HttpStatusCode.NoContent, addBob.StatusCode);
 
@@ -152,13 +152,13 @@ public sealed class IdentityEndpointsTests(MateOsApiFixture fixture) : IClassFix
 
         for (int attempt = 1; attempt <= 5; attempt++)
         {
-            HttpResponseMessage response = await client.PostAsJsonAsync(
+            HttpResponseMessage response = await client.PostJsonAsync(
                 "/auth/login", new LoginRequest("limited@example.com", "wrong-password"));
 
             Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
         }
 
-        HttpResponseMessage sixth = await client.PostAsJsonAsync(
+        HttpResponseMessage sixth = await client.PostJsonAsync(
             "/auth/login", new LoginRequest("limited@example.com", "wrong-password"));
 
         Assert.Equal(HttpStatusCode.TooManyRequests, sixth.StatusCode);
@@ -183,7 +183,7 @@ public sealed class IdentityEndpointsTests(MateOsApiFixture fixture) : IClassFix
 
         OrganizationSummary org = await CreateOrganizationAsync(alice, "Acme");
 
-        HttpResponseMessage added = await alice.PostAsJsonAsync(
+        HttpResponseMessage added = await alice.PostJsonAsync(
             $"/orgs/{org.Id}/members", new AddMemberRequest("bob@example.com", "member"));
         Assert.Equal(HttpStatusCode.NoContent, added.StatusCode);
 
@@ -280,51 +280,51 @@ public sealed class IdentityEndpointsTests(MateOsApiFixture fixture) : IClassFix
 
     private async Task<TokenResponse> RegisterAsync(HttpClient client, string email)
     {
-        HttpResponseMessage response = await client.PostAsJsonAsync(
+        HttpResponseMessage response = await client.PostJsonAsync(
             "/auth/register", new RegisterRequest(email, Password, email.Split('@')[0]));
 
         await EnsureSuccessAsync(response);
 
-        return (await response.Content.ReadFromJsonAsync<TokenResponse>())!;
+        return (await response.Content.ReadWireAsync<TokenResponse>())!;
     }
 
     private static async Task<TokenResponse> RotateAsync(HttpClient client, string refreshToken)
     {
-        HttpResponseMessage response = await client.PostAsJsonAsync(
+        HttpResponseMessage response = await client.PostJsonAsync(
             "/auth/refresh", new RefreshRequest(refreshToken));
 
         await EnsureSuccessAsync(response);
 
-        return (await response.Content.ReadFromJsonAsync<TokenResponse>())!;
+        return (await response.Content.ReadWireAsync<TokenResponse>())!;
     }
 
     private static async Task<OrganizationSummary> CreateOrganizationAsync(HttpClient client, string name)
     {
-        HttpResponseMessage response = await client.PostAsJsonAsync(
+        HttpResponseMessage response = await client.PostJsonAsync(
             "/orgs", new CreateOrganizationRequest(name));
 
         await EnsureSuccessAsync(response);
 
-        return (await response.Content.ReadFromJsonAsync<OrganizationSummary>())!;
+        return (await response.Content.ReadWireAsync<OrganizationSummary>())!;
     }
 
     private static async Task<TeamSummary> CreateTeamAsync(HttpClient client, Guid orgId, string name)
     {
-        HttpResponseMessage response = await client.PostAsJsonAsync(
+        HttpResponseMessage response = await client.PostJsonAsync(
             "/teams", new CreateTeamRequest(orgId, name));
 
         await EnsureSuccessAsync(response);
 
-        return (await response.Content.ReadFromJsonAsync<TeamSummary>())!;
+        return (await response.Content.ReadWireAsync<TeamSummary>())!;
     }
 
     private static async Task<ProjectSummary> CreateProjectAsync(HttpClient client, Guid teamId, string name)
     {
-        HttpResponseMessage response = await client.PostAsJsonAsync(
+        HttpResponseMessage response = await client.PostJsonAsync(
             "/projects", new CreateProjectRequest(teamId, name, Description: null, RepoUrl: null));
 
         await EnsureSuccessAsync(response);
 
-        return (await response.Content.ReadFromJsonAsync<ProjectSummary>())!;
+        return (await response.Content.ReadWireAsync<ProjectSummary>())!;
     }
 }

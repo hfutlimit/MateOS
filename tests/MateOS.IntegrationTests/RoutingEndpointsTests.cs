@@ -38,7 +38,7 @@ public sealed class RoutingEndpointsTests(MateOsApiFixture fixture) : IClassFixt
             DeadlineS: 60,
             IdempotencyKey: "idem-1");
 
-        HttpResponseMessage r1 = await userClient.PostAsJsonAsync("/internal/triggers", req);
+        HttpResponseMessage r1 = await userClient.PostJsonAsync("/internal/triggers", req);
         await EnsureSuccessAsync(r1);
         using JsonDocument d1 = await JsonDocument.ParseAsync(await r1.Content.ReadAsStreamAsync());
         Assert.False(d1.RootElement.GetProperty("idempotent").GetBoolean());
@@ -46,7 +46,7 @@ public sealed class RoutingEndpointsTests(MateOsApiFixture fixture) : IClassFixt
         Assert.Equal("PENDING", d1.RootElement.GetProperty("collaboration_request").GetProperty("status").GetString());
 
         // 同 idempotency_key 重发
-        HttpResponseMessage r2 = await userClient.PostAsJsonAsync("/internal/triggers", req);
+        HttpResponseMessage r2 = await userClient.PostJsonAsync("/internal/triggers", req);
         await EnsureSuccessAsync(r2);
         using JsonDocument d2 = await JsonDocument.ParseAsync(await r2.Content.ReadAsStreamAsync());
         Assert.True(d2.RootElement.GetProperty("idempotent").GetBoolean());
@@ -79,7 +79,7 @@ public sealed class RoutingEndpointsTests(MateOsApiFixture fixture) : IClassFixt
             ContextRefs: JsonDocument.Parse("""{"project_id":"00000000-0000-0000-0000-000000000000"}""").RootElement,
             DeadlineS: 60,
             IdempotencyKey: "accept-1");
-        HttpResponseMessage createResp = await userClient.PostAsJsonAsync("/internal/triggers", createReq);
+        HttpResponseMessage createResp = await userClient.PostJsonAsync("/internal/triggers", createReq);
         await EnsureSuccessAsync(createResp);
         using JsonDocument createDoc = await JsonDocument.ParseAsync(await createResp.Content.ReadAsStreamAsync());
         Guid crId = createDoc.RootElement.GetProperty("collaboration_request").GetProperty("id").GetGuid();
@@ -92,7 +92,7 @@ public sealed class RoutingEndpointsTests(MateOsApiFixture fixture) : IClassFixt
             AnalysisCapability: true,
             AnalysisContextScore: 88,
             AnalysisPermission: true);
-        HttpResponseMessage decisionResp = await userClient.PostAsJsonAsync(
+        HttpResponseMessage decisionResp = await userClient.PostJsonAsync(
             $"/internal/collaboration-requests/{crId}/decision", decisionReq);
         await EnsureSuccessAsync(decisionResp);
         using JsonDocument decisionDoc = await JsonDocument.ParseAsync(await decisionResp.Content.ReadAsStreamAsync());
@@ -125,7 +125,7 @@ public sealed class RoutingEndpointsTests(MateOsApiFixture fixture) : IClassFixt
             FromActorId: userToken.User.Id,
             RequestKind: null, TargetAgentId: null, RequiredCapabilities: null, ContextRefs: null,
             DeadlineS: null, IdempotencyKey: "reject-1");
-        HttpResponseMessage createResp = await userClient.PostAsJsonAsync("/internal/triggers", createReq);
+        HttpResponseMessage createResp = await userClient.PostJsonAsync("/internal/triggers", createReq);
         await EnsureSuccessAsync(createResp);
         using JsonDocument d = await JsonDocument.ParseAsync(await createResp.Content.ReadAsStreamAsync());
         Guid crId = d.RootElement.GetProperty("collaboration_request").GetProperty("id").GetGuid();
@@ -133,7 +133,7 @@ public sealed class RoutingEndpointsTests(MateOsApiFixture fixture) : IClassFixt
         var rejectReq = new CreateDecisionRequest(
             Decision: "REJECT", Reason: "out of scope", Needs: null,
             AnalysisCapability: null, AnalysisContextScore: 30, AnalysisPermission: false);
-        HttpResponseMessage rejectResp = await userClient.PostAsJsonAsync(
+        HttpResponseMessage rejectResp = await userClient.PostJsonAsync(
             $"/internal/collaboration-requests/{crId}/decision", rejectReq);
         await EnsureSuccessAsync(rejectResp);
         using JsonDocument rd = await JsonDocument.ParseAsync(await rejectResp.Content.ReadAsStreamAsync());
@@ -162,7 +162,7 @@ public sealed class RoutingEndpointsTests(MateOsApiFixture fixture) : IClassFixt
             RequestKind: "API_CALL", TargetAgentId: agent.Id,
             RequiredCapabilities: null, ContextRefs: null, DeadlineS: null,
             IdempotencyKey: "terminal-1");
-        HttpResponseMessage createResp = await userClient.PostAsJsonAsync("/internal/triggers", createReq);
+        HttpResponseMessage createResp = await userClient.PostJsonAsync("/internal/triggers", createReq);
         await EnsureSuccessAsync(createResp);
         using JsonDocument d = await JsonDocument.ParseAsync(await createResp.Content.ReadAsStreamAsync());
         Guid crId = d.RootElement.GetProperty("collaboration_request").GetProperty("id").GetGuid();
@@ -170,14 +170,14 @@ public sealed class RoutingEndpointsTests(MateOsApiFixture fixture) : IClassFixt
         var acceptReq = new CreateDecisionRequest(
             Decision: "ACCEPT", Reason: null, Needs: null,
             AnalysisCapability: true, AnalysisContextScore: 90, AnalysisPermission: true);
-        await EnsureSuccessAsync(await userClient.PostAsJsonAsync(
+        await EnsureSuccessAsync(await userClient.PostJsonAsync(
             $"/internal/collaboration-requests/{crId}/decision", acceptReq));
 
         // 重复决策
         var rejectReq = new CreateDecisionRequest(
             Decision: "REJECT", Reason: "should fail", Needs: null,
             AnalysisCapability: null, AnalysisContextScore: null, AnalysisPermission: null);
-        HttpResponseMessage second = await userClient.PostAsJsonAsync(
+        HttpResponseMessage second = await userClient.PostJsonAsync(
             $"/internal/collaboration-requests/{crId}/decision", rejectReq);
         Assert.Equal(HttpStatusCode.Conflict, second.StatusCode);
     }
@@ -201,18 +201,18 @@ public sealed class RoutingEndpointsTests(MateOsApiFixture fixture) : IClassFixt
 
     private static async Task<TokenResponse> RegisterAsync(HttpClient client, string email)
     {
-        HttpResponseMessage resp = await client.PostAsJsonAsync(
+        HttpResponseMessage resp = await client.PostJsonAsync(
             "/auth/register", new RegisterRequest(email, Password, email.Split('@')[0]));
         await EnsureSuccessAsync(resp);
-        return (await resp.Content.ReadFromJsonAsync<TokenResponse>())!;
+        return (await resp.Content.ReadWireAsync<TokenResponse>())!;
     }
 
     private static async Task<CredentialSummary> CreateCredentialAsync(HttpClient client)
     {
         var req = new CreateCredentialRequest("openai", "test", $"sk-{Guid.NewGuid():N}", null);
-        HttpResponseMessage resp = await client.PostAsJsonAsync("/credentials", req);
+        HttpResponseMessage resp = await client.PostJsonAsync("/credentials", req);
         await EnsureSuccessAsync(resp);
-        return (await resp.Content.ReadFromJsonAsync<CredentialSummary>())!;
+        return (await resp.Content.ReadWireAsync<CredentialSummary>())!;
     }
 
     private static async Task<AgentSummary> CreateAgentAsync(
@@ -223,8 +223,8 @@ public sealed class RoutingEndpointsTests(MateOsApiFixture fixture) : IClassFixt
             Capabilities: new[] { "coding" },
             CredentialId: credentialId,
             MaxConcurrency: 1, DailyLimitUsd: null, MonthlyBudgetUsd: null);
-        HttpResponseMessage resp = await client.PostAsJsonAsync("/agents", req);
+        HttpResponseMessage resp = await client.PostJsonAsync("/agents", req);
         await EnsureSuccessAsync(resp);
-        return (await resp.Content.ReadFromJsonAsync<AgentSummary>())!;
+        return (await resp.Content.ReadWireAsync<AgentSummary>())!;
     }
 }

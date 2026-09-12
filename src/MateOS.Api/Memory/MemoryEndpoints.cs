@@ -292,20 +292,24 @@ public static class MemoryEndpoints
     }
 
     /// <summary>
-    /// 事务内原子分配 channel seq（与 M2 Channel 投影保持同口径；F2 走 UPDATE ... RETURNING）。
+    /// 事务内原子分配 channel seq，并同步 <c>channels.last_seq</c>
+    /// （与 M2 的 <c>POST /channels/{id}/messages</c> 同口径）。
     /// </summary>
+    /// <remarks>
+    /// 两件事必须在同一处完成：只分配 seq 而不推 last_seq 的话，投影消息虽然进了
+    /// <c>messages</c> 表，channel 的 <c>last_seq</c> 却不动 —— 客户端按
+    /// <c>since_seq</c> 续传读不到它，<c>resume.ack.last_seq</c> 也偏小。
+    /// 用 <c>GREATEST</c> 而不是直接赋值，避免覆盖并发写入的更高 seq。
+    /// </remarks>
     private static async Task<long> AllocateChannelSeqAsync(
         MateOSDbContext db, Guid channelId, CancellationToken ct)
     {
-        long nextSeq = await db.Database
-            .SqlQuery<long>(
-                $@"UPDATE channel_seq_counters
-                   SET next_seq = next_seq + 1
-                   WHERE channel_id = {channelId}
-                   RETURNING next_seq - 1")
-            .SingleAsync(ct);
+        long seq = await ChannelSeqAllocator.AllocateAsync(db, channelId, ct);
 
-        return nextSeq;
+        await db.Database.ExecuteSqlInterpolatedAsync(
+            $@"UPDATE channels SET last_seq = GREATEST(last_seq, {seq}) WHERE id = {channelId}", ct);
+
+        return seq;
     }
 
     // ───────────────────────── List proposals ─────────────────────────

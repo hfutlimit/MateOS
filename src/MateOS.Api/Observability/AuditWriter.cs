@@ -67,6 +67,7 @@ public static class AuditActions
     public const string ExecutionDispatchAcked = "EXECUTION_DISPATCH_ACKED";
     public const string ExecutionResult = "EXECUTION_RESULT";
     public const string ExecutionEvent = "EXECUTION_EVENT";
+    public const string ExecutionResumeRequested = "EXECUTION_RESUME_REQUESTED";
 
     // ── E6 Authorization & Approval ──
     public const string PermissionCreated = "PERMISSION_CREATED";

@@ -46,7 +46,7 @@ public sealed class WsDispatchPushTests(MateOsApiFixture fixture) : IClassFixtur
         string agentToken = await IssueAgentTokenAsync(owner, agentId);
 
         // ① Agent 用 agent_token 建会话
-        await using WsTestClient ws = await WsTestClient.ConnectAsync(fixture.CreateClient(), agentToken);
+        await using WsTestClient ws = await WsTestClient.ConnectAsync(fixture, agentToken);
         await ws.HelloAsAgentAsync(agentToken);
 
         JsonElement? helloAck = await ws.ReceiveNextAsync(TimeSpan.FromSeconds(5));
@@ -58,7 +58,7 @@ public sealed class WsDispatchPushTests(MateOsApiFixture fixture) : IClassFixtur
         // ② 建卡 + 指派（hello_ack 收到即意味着连接已注册，无需额外等待）
         Guid itemId = await CreateWorkItemAsync(owner, project.Id, "TASK", "推送给 agent 的活", "实现接口");
 
-        HttpResponseMessage assign = await owner.PostAsJsonAsync(
+        HttpResponseMessage assign = await owner.PostJsonAsync(
             $"/work-items/{itemId}/assign", new AssignWorkItemRequest(agentId, 300));
         await EnsureSuccessAsync(assign);
 
@@ -136,7 +136,7 @@ public sealed class WsDispatchPushTests(MateOsApiFixture fixture) : IClassFixtur
         // 刻意不建 WS 会话
         Guid itemId = await CreateWorkItemAsync(owner, project.Id, "TASK", "离线 agent 的活", null);
 
-        HttpResponseMessage assign = await owner.PostAsJsonAsync(
+        HttpResponseMessage assign = await owner.PostJsonAsync(
             $"/work-items/{itemId}/assign", new AssignWorkItemRequest(agentId, 300));
 
         // 推送送不出去 ≠ 指派失败
@@ -173,7 +173,7 @@ public sealed class WsDispatchPushTests(MateOsApiFixture fixture) : IClassFixtur
         Guid agentId = await CreateAgentAsync(owner, "not-a-member");
         string agentToken = await IssueAgentTokenAsync(owner, agentId);
 
-        await using WsTestClient ws = await WsTestClient.ConnectAsync(fixture.CreateClient(), agentToken);
+        await using WsTestClient ws = await WsTestClient.ConnectAsync(fixture, agentToken);
         await ws.HelloAsAgentAsync(agentToken);
         Assert.NotNull(await ws.ReceiveNextAsync(TimeSpan.FromSeconds(5)));
 
@@ -187,7 +187,7 @@ public sealed class WsDispatchPushTests(MateOsApiFixture fixture) : IClassFixtur
         Assert.Equal("NOT_AUTHORIZED", frame.Value.GetProperty("payload").GetProperty("code").GetString());
 
         // 加入 project（agent_project_membership）之后才可见
-        HttpResponseMessage added = await owner.PostAsJsonAsync(
+        HttpResponseMessage added = await owner.PostJsonAsync(
             $"/projects/{project.Id}/agents", new AddAgentToProjectRequest(agentId, true));
         await EnsureSuccessAsync(added);
 
@@ -218,12 +218,12 @@ public sealed class WsDispatchPushTests(MateOsApiFixture fixture) : IClassFixtur
 
     private static async Task<TokenResponse> RegisterAsync(HttpClient client, string email)
     {
-        HttpResponseMessage resp = await client.PostAsJsonAsync(
+        HttpResponseMessage resp = await client.PostJsonAsync(
             "/auth/register", new RegisterRequest(email, Password, email.Split('@')[0]));
 
         await EnsureSuccessAsync(resp);
 
-        return (await resp.Content.ReadFromJsonAsync<TokenResponse>())!;
+        return (await resp.Content.ReadWireAsync<TokenResponse>())!;
     }
 
     private static async Task<ProjectSummary> CreateProjectForAsync(HttpClient client, string name)
@@ -263,7 +263,7 @@ public sealed class WsDispatchPushTests(MateOsApiFixture fixture) : IClassFixtur
 
     private static async Task<string> IssueAgentTokenAsync(HttpClient client, Guid agentId)
     {
-        HttpResponseMessage response = await client.PostAsJsonAsync(
+        HttpResponseMessage response = await client.PostJsonAsync(
             $"/agents/{agentId}/tokens", new IssueTokenRequest(Label: "test", LifetimeDays: 1));
 
         await EnsureSuccessAsync(response);
@@ -276,7 +276,7 @@ public sealed class WsDispatchPushTests(MateOsApiFixture fixture) : IClassFixtur
     private static async Task<Guid> CreateWorkItemAsync(
         HttpClient client, Guid projectId, string type, string title, string? description)
     {
-        HttpResponseMessage response = await client.PostAsJsonAsync(
+        HttpResponseMessage response = await client.PostJsonAsync(
             $"/projects/{projectId}/work-items",
             new CreateWorkItemRequest(type, title, description, null, null, null));
 
@@ -289,10 +289,10 @@ public sealed class WsDispatchPushTests(MateOsApiFixture fixture) : IClassFixtur
 
     private static async Task<T> PostAsync<T>(HttpClient client, string url, object body)
     {
-        HttpResponseMessage response = await client.PostAsJsonAsync(url, body);
+        HttpResponseMessage response = await client.PostJsonAsync(url, body);
 
         await EnsureSuccessAsync(response);
 
-        return (await response.Content.ReadFromJsonAsync<T>())!;
+        return (await response.Content.ReadWireAsync<T>())!;
     }
 }

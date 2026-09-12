@@ -200,6 +200,7 @@ app.MapAgentEndpoints();
 app.MapExecutionEndpoints();
 app.MapPermissionEndpoints();
 app.MapRoutingEndpoints();
+app.MapAgentCollaborationEndpoints();
 app.MapMemoryEndpoints();
 app.MapNeedsYouEndpoints();
 app.MapWorkItemEndpoints();

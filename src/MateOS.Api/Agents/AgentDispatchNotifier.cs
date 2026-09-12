@@ -1,3 +1,4 @@
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using MateOS.Api.Channels;
@@ -54,6 +55,12 @@ public sealed class AgentDispatchNotifier(
     private static readonly JsonSerializerOptions s_contractOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+
+        // 必须与 HTTP 侧（ASP.NET Core 默认 Encoder）取同一套转义策略。
+        // 默认 JavaScriptEncoder 会把中文写成 \uXXXX，于是同一份 dispatch
+        // 经 WS 推送与 HTTP 轮询拿到**字节不同**的 JSON —— 而这两条通道
+        // 形状逐字段一致是被反复声明的硬约束（SDK 只应有一份解析代码）。
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
     };
 
     /// <summary>

@@ -43,10 +43,10 @@ public sealed class ChannelEndpointsTests(MateOsApiFixture fixture) : IClassFixt
 
         // 创建 channel
         var createBody = new CreateChannelRequest("general", "默认频道");
-        HttpResponseMessage createResponse = await client.PostAsJsonAsync(
+        HttpResponseMessage createResponse = await client.PostJsonAsync(
             $"/projects/{project.Id}/channels", createBody);
         await EnsureSuccessAsync(createResponse);
-        ChannelSummary channel = (await createResponse.Content.ReadFromJsonAsync<ChannelSummary>())!;
+        ChannelSummary channel = (await createResponse.Content.ReadWireAsync<ChannelSummary>())!;
 
         Assert.Equal("general", channel.Name);
         Assert.Equal(0, channel.LastSeq);
@@ -58,10 +58,10 @@ public sealed class ChannelEndpointsTests(MateOsApiFixture fixture) : IClassFixt
             Content: JsonDocument.Parse("""{"text":"hello world"}""").RootElement,
             ClientMsgId: null,
             ParentSeq: null);
-        HttpResponseMessage postResponse = await client.PostAsJsonAsync(
+        HttpResponseMessage postResponse = await client.PostJsonAsync(
             $"/channels/{channel.Id}/messages", postBody);
         await EnsureSuccessAsync(postResponse);
-        MessageSummary first = (await postResponse.Content.ReadFromJsonAsync<MessageSummary>())!;
+        MessageSummary first = (await postResponse.Content.ReadWireAsync<MessageSummary>())!;
 
         Assert.Equal(1L, first.Seq);
         Assert.Equal("HUMAN", first.ContentType);
@@ -72,7 +72,7 @@ public sealed class ChannelEndpointsTests(MateOsApiFixture fixture) : IClassFixt
         HttpResponseMessage listResponse = await client.GetAsync(
             $"/channels/{channel.Id}/messages?since_seq=0");
         await EnsureSuccessAsync(listResponse);
-        MessagesPage page = (await listResponse.Content.ReadFromJsonAsync<MessagesPage>())!;
+        MessagesPage page = (await listResponse.Content.ReadWireAsync<MessagesPage>())!;
 
         Assert.Equal(1L, page.LastSeq);
         Assert.Single(page.Messages);
@@ -100,16 +100,16 @@ public sealed class ChannelEndpointsTests(MateOsApiFixture fixture) : IClassFixt
             ClientMsgId: clientMsgId,
             ParentSeq: null);
 
-        HttpResponseMessage first = await client.PostAsJsonAsync(
+        HttpResponseMessage first = await client.PostJsonAsync(
             $"/channels/{channel.Id}/messages", postBody);
         await EnsureSuccessAsync(first);
-        MessageSummary msg1 = (await first.Content.ReadFromJsonAsync<MessageSummary>())!;
+        MessageSummary msg1 = (await first.Content.ReadWireAsync<MessageSummary>())!;
 
         // 同 client_msg_id 重发
-        HttpResponseMessage second = await client.PostAsJsonAsync(
+        HttpResponseMessage second = await client.PostJsonAsync(
             $"/channels/{channel.Id}/messages", postBody);
         await EnsureSuccessAsync(second);
-        MessageSummary msg2 = (await second.Content.ReadFromJsonAsync<MessageSummary>())!;
+        MessageSummary msg2 = (await second.Content.ReadWireAsync<MessageSummary>())!;
 
         // 应返同一条（seq + id 一致），不分配新 seq
         Assert.Equal(msg1.Seq, msg2.Seq);
@@ -196,7 +196,7 @@ public sealed class ChannelEndpointsTests(MateOsApiFixture fixture) : IClassFixt
         bob.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", bobToken.AccessToken);
 
         // Bob 加入 project（不是 owner）
-        HttpResponseMessage addBob = await alice.PostAsJsonAsync(
+        HttpResponseMessage addBob = await alice.PostJsonAsync(
             $"/projects/{project.Id}/members",
             new AddMemberRequest(bobToken.User.Email, "member"));
         await EnsureSuccessAsync(addBob);
@@ -216,9 +216,9 @@ public sealed class ChannelEndpointsTests(MateOsApiFixture fixture) : IClassFixt
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token.AccessToken);
 
         var presignBody = new PresignAttachmentRequest("plan.md", "text/markdown", 1024);
-        HttpResponseMessage presign = await client.PostAsJsonAsync("/attachments/presign", presignBody);
+        HttpResponseMessage presign = await client.PostJsonAsync("/attachments/presign", presignBody);
         await EnsureSuccessAsync(presign);
-        PresignAttachmentResponse presignResp = (await presign.Content.ReadFromJsonAsync<PresignAttachmentResponse>())!;
+        PresignAttachmentResponse presignResp = (await presign.Content.ReadWireAsync<PresignAttachmentResponse>())!;
 
         Assert.NotEqual(Guid.Empty, presignResp.AttachmentId);
         Assert.StartsWith("attachments/", presignResp.S3Key);
@@ -227,7 +227,7 @@ public sealed class ChannelEndpointsTests(MateOsApiFixture fixture) : IClassFixt
         HttpResponseMessage confirm = await client.PostAsync(
             $"/attachments/{presignResp.AttachmentId}/confirm", content: null);
         await EnsureSuccessAsync(confirm);
-        AttachmentSummary confirmed = (await confirm.Content.ReadFromJsonAsync<AttachmentSummary>())!;
+        AttachmentSummary confirmed = (await confirm.Content.ReadWireAsync<AttachmentSummary>())!;
 
         Assert.Equal("UPLOADED", confirmed.Status);
     }
@@ -251,33 +251,33 @@ public sealed class ChannelEndpointsTests(MateOsApiFixture fixture) : IClassFixt
 
     private static async Task<TokenResponse> RegisterAsync(HttpClient client, string email)
     {
-        HttpResponseMessage response = await client.PostAsJsonAsync(
+        HttpResponseMessage response = await client.PostJsonAsync(
             "/auth/register", new RegisterRequest(email, Password, email.Split('@')[0]));
         await EnsureSuccessAsync(response);
-        return (await response.Content.ReadFromJsonAsync<TokenResponse>())!;
+        return (await response.Content.ReadWireAsync<TokenResponse>())!;
     }
 
     private static async Task<OrganizationSummary> CreateOrganizationAsync(HttpClient client, string name)
     {
-        HttpResponseMessage response = await client.PostAsJsonAsync("/organizations", new CreateOrganizationRequest(name));
+        HttpResponseMessage response = await client.PostJsonAsync("/orgs", new CreateOrganizationRequest(name));
         await EnsureSuccessAsync(response);
-        return (await response.Content.ReadFromJsonAsync<OrganizationSummary>())!;
+        return (await response.Content.ReadWireAsync<OrganizationSummary>())!;
     }
 
     private static async Task<TeamSummary> CreateTeamAsync(HttpClient client, Guid orgId, string name)
     {
-        HttpResponseMessage response = await client.PostAsJsonAsync(
-            $"/organizations/{orgId}/teams", new CreateTeamRequest(orgId, name));
+        HttpResponseMessage response = await client.PostJsonAsync(
+            "/teams", new CreateTeamRequest(orgId, name));
         await EnsureSuccessAsync(response);
-        return (await response.Content.ReadFromJsonAsync<TeamSummary>())!;
+        return (await response.Content.ReadWireAsync<TeamSummary>())!;
     }
 
     private static async Task<ProjectSummary> CreateProjectAsync(HttpClient client, Guid teamId, string name)
     {
-        HttpResponseMessage response = await client.PostAsJsonAsync(
-            $"/teams/{teamId}/projects", new CreateProjectRequest(teamId, name, null, null));
+        HttpResponseMessage response = await client.PostJsonAsync(
+            "/projects", new CreateProjectRequest(teamId, name, null, null));
         await EnsureSuccessAsync(response);
-        return (await response.Content.ReadFromJsonAsync<ProjectSummary>())!;
+        return (await response.Content.ReadWireAsync<ProjectSummary>())!;
     }
 
     private static async Task<ProjectSummary> CreateProjectForAsync(HttpClient client, TokenResponse token, string name)
@@ -289,10 +289,10 @@ public sealed class ChannelEndpointsTests(MateOsApiFixture fixture) : IClassFixt
 
     private static async Task<ChannelSummary> CreateChannelForAsync(HttpClient client, Guid projectId, string name)
     {
-        HttpResponseMessage response = await client.PostAsJsonAsync(
+        HttpResponseMessage response = await client.PostJsonAsync(
             $"/projects/{projectId}/channels", new CreateChannelRequest(name, null));
         await EnsureSuccessAsync(response);
-        return (await response.Content.ReadFromJsonAsync<ChannelSummary>())!;
+        return (await response.Content.ReadWireAsync<ChannelSummary>())!;
     }
 
     private static async Task<MessageSummary> PostHumanMessageAsync(HttpClient client, Guid channelId, string text)
@@ -302,10 +302,10 @@ public sealed class ChannelEndpointsTests(MateOsApiFixture fixture) : IClassFixt
             Content: JsonDocument.Parse($$"""{"text":"{{text}}"}""").RootElement,
             ClientMsgId: null,
             ParentSeq: null);
-        HttpResponseMessage response = await client.PostAsJsonAsync(
+        HttpResponseMessage response = await client.PostJsonAsync(
             $"/channels/{channelId}/messages", body);
         await EnsureSuccessAsync(response);
-        return (await response.Content.ReadFromJsonAsync<MessageSummary>())!;
+        return (await response.Content.ReadWireAsync<MessageSummary>())!;
     }
 
     private static async Task<MessagesPage> GetMessagesAsync(HttpClient client, Guid channelId, long sinceSeq)
@@ -313,6 +313,6 @@ public sealed class ChannelEndpointsTests(MateOsApiFixture fixture) : IClassFixt
         HttpResponseMessage response = await client.GetAsync(
             $"/channels/{channelId}/messages?since_seq={sinceSeq}");
         await EnsureSuccessAsync(response);
-        return (await response.Content.ReadFromJsonAsync<MessagesPage>())!;
+        return (await response.Content.ReadWireAsync<MessagesPage>())!;
     }
 }

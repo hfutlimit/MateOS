@@ -40,9 +40,9 @@ public sealed class PermissionEndpointsTests(MateOsApiFixture fixture) : IClassF
         var req = new CheckPermissionRequest(
             SubjectType: "USER", SubjectId: aliceToken.User.Id,
             PermKey: "read_message", ChannelId: channelId);
-        HttpResponseMessage resp = await alice.PostAsJsonAsync("/permissions/check", req);
+        HttpResponseMessage resp = await alice.PostJsonAsync("/permissions/check", req);
         await EnsureSuccessAsync(resp);
-        var result = (await resp.Content.ReadFromJsonAsync<CheckPermissionResponse>())!;
+        var result = (await resp.Content.ReadWireAsync<CheckPermissionResponse>())!;
 
         Assert.Equal("ALLOW", result.Effect);
         Assert.Equal("default", result.Source);
@@ -65,7 +65,7 @@ public sealed class PermissionEndpointsTests(MateOsApiFixture fixture) : IClassF
         var permReq = new CreatePermissionRequest(
             SubjectType: "USER", SubjectId: aliceToken.User.Id,
             PermKey: "write_memory", Effect: "DENY");
-        HttpResponseMessage permResp = await alice.PostAsJsonAsync(
+        HttpResponseMessage permResp = await alice.PostJsonAsync(
             $"/projects/{projectId}/permissions", permReq);
         await EnsureSuccessAsync(permResp);
 
@@ -73,9 +73,9 @@ public sealed class PermissionEndpointsTests(MateOsApiFixture fixture) : IClassF
         var checkReq = new CheckPermissionRequest(
             SubjectType: "USER", SubjectId: aliceToken.User.Id,
             PermKey: "write_memory", ChannelId: channelId);
-        HttpResponseMessage checkResp = await alice.PostAsJsonAsync("/permissions/check", checkReq);
+        HttpResponseMessage checkResp = await alice.PostJsonAsync("/permissions/check", checkReq);
         await EnsureSuccessAsync(checkResp);
-        var result = (await checkResp.Content.ReadFromJsonAsync<CheckPermissionResponse>())!;
+        var result = (await checkResp.Content.ReadWireAsync<CheckPermissionResponse>())!;
 
         Assert.Equal("DENY", result.Effect);
         Assert.Equal("project_override", result.Source);
@@ -98,23 +98,23 @@ public sealed class PermissionEndpointsTests(MateOsApiFixture fixture) : IClassF
         var projPerm = new CreatePermissionRequest(
             SubjectType: "USER", SubjectId: aliceToken.User.Id,
             PermKey: "write_message", Effect: "ALLOW");
-        await EnsureSuccessAsync(await alice.PostAsJsonAsync(
+        await EnsureSuccessAsync(await alice.PostJsonAsync(
             $"/projects/{projectId}/permissions", projPerm));
 
         // channel: DENY write_message
         var chanPerm = new CreatePermissionRequest(
             SubjectType: "USER", SubjectId: aliceToken.User.Id,
             PermKey: "write_message", Effect: "DENY");
-        await EnsureSuccessAsync(await alice.PostAsJsonAsync(
+        await EnsureSuccessAsync(await alice.PostJsonAsync(
             $"/channels/{channelId}/permissions", chanPerm));
 
         // /check 应 DENY（channel 优先）
         var checkReq = new CheckPermissionRequest(
             SubjectType: "USER", SubjectId: aliceToken.User.Id,
             PermKey: "write_message", ChannelId: channelId);
-        HttpResponseMessage checkResp = await alice.PostAsJsonAsync("/permissions/check", checkReq);
+        HttpResponseMessage checkResp = await alice.PostJsonAsync("/permissions/check", checkReq);
         await EnsureSuccessAsync(checkResp);
-        var result = (await checkResp.Content.ReadFromJsonAsync<CheckPermissionResponse>())!;
+        var result = (await checkResp.Content.ReadWireAsync<CheckPermissionResponse>())!;
 
         Assert.Equal("DENY", result.Effect);
         Assert.Equal("channel_override", result.Source);
@@ -136,9 +136,9 @@ public sealed class PermissionEndpointsTests(MateOsApiFixture fixture) : IClassF
         var checkReq = new CheckPermissionRequest(
             SubjectType: "USER", SubjectId: aliceToken.User.Id,
             PermKey: "write_memory", ChannelId: channelId);
-        HttpResponseMessage checkResp = await alice.PostAsJsonAsync("/permissions/check", checkReq);
+        HttpResponseMessage checkResp = await alice.PostJsonAsync("/permissions/check", checkReq);
         await EnsureSuccessAsync(checkResp);
-        var result = (await checkResp.Content.ReadFromJsonAsync<CheckPermissionResponse>())!;
+        var result = (await checkResp.Content.ReadWireAsync<CheckPermissionResponse>())!;
 
         // E6 §3.1：write_memory 默认 REQUIRE_APPROVAL（所有 role 都是）
         Assert.Equal("REQUIRE_APPROVAL", result.Effect);
@@ -160,7 +160,7 @@ public sealed class PermissionEndpointsTests(MateOsApiFixture fixture) : IClassF
         HttpClient bob = fixture.CreateClient();
         TokenResponse bobToken = await RegisterAsync(bob, "bob@example.com");
 
-        HttpResponseMessage addBob = await alice.PostAsJsonAsync(
+        HttpResponseMessage addBob = await alice.PostJsonAsync(
             $"/projects/{projectId}/members",
             new AddMemberRequest(bobToken.User.Email, "member"));
         await EnsureSuccessAsync(addBob);
@@ -170,7 +170,7 @@ public sealed class PermissionEndpointsTests(MateOsApiFixture fixture) : IClassF
         var req = new CreatePermissionRequest(
             SubjectType: "USER", SubjectId: aliceToken.User.Id,
             PermKey: "write_message", Effect: "DENY");
-        HttpResponseMessage resp = await bob.PostAsJsonAsync(
+        HttpResponseMessage resp = await bob.PostJsonAsync(
             $"/projects/{projectId}/permissions", req);
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
     }
@@ -192,17 +192,17 @@ public sealed class PermissionEndpointsTests(MateOsApiFixture fixture) : IClassF
         var createReq = new CreatePermissionRequest(
             SubjectType: "USER", SubjectId: aliceToken.User.Id,
             PermKey: "execute_code", Effect: "DENY");
-        HttpResponseMessage createResp = await alice.PostAsJsonAsync(
+        HttpResponseMessage createResp = await alice.PostJsonAsync(
             $"/projects/{projectId}/permissions", createReq);
         await EnsureSuccessAsync(createResp);
-        var created = (await createResp.Content.ReadFromJsonAsync<PermissionSummary>())!;
+        var created = (await createResp.Content.ReadWireAsync<PermissionSummary>())!;
 
         // 查：应 DENY
         var checkReq = new CheckPermissionRequest(
             SubjectType: "USER", SubjectId: aliceToken.User.Id,
             PermKey: "execute_code", ChannelId: channelId);
-        var r1 = (await (await alice.PostAsJsonAsync("/permissions/check", checkReq)).Content
-            .ReadFromJsonAsync<CheckPermissionResponse>())!;
+        var r1 = (await (await alice.PostJsonAsync("/permissions/check", checkReq)).Content
+            .ReadWireAsync<CheckPermissionResponse>())!;
         Assert.Equal("DENY", r1.Effect);
 
         // 删除 override
@@ -211,8 +211,8 @@ public sealed class PermissionEndpointsTests(MateOsApiFixture fixture) : IClassF
         Assert.Equal(HttpStatusCode.NoContent, delResp.StatusCode);
 
         // 再查：默认 execute_code = DENY（E6 §3.1）
-        var r2 = (await (await alice.PostAsJsonAsync("/permissions/check", checkReq)).Content
-            .ReadFromJsonAsync<CheckPermissionResponse>())!;
+        var r2 = (await (await alice.PostJsonAsync("/permissions/check", checkReq)).Content
+            .ReadWireAsync<CheckPermissionResponse>())!;
         Assert.Equal("DENY", r2.Effect);
         Assert.Equal("default", r2.Source);
     }
@@ -236,38 +236,38 @@ public sealed class PermissionEndpointsTests(MateOsApiFixture fixture) : IClassF
 
     private static async Task<TokenResponse> RegisterAsync(HttpClient client, string email)
     {
-        HttpResponseMessage resp = await client.PostAsJsonAsync(
+        HttpResponseMessage resp = await client.PostJsonAsync(
             "/auth/register", new RegisterRequest(email, Password, email.Split('@')[0]));
         await EnsureSuccessAsync(resp);
-        return (await resp.Content.ReadFromJsonAsync<TokenResponse>())!;
+        return (await resp.Content.ReadWireAsync<TokenResponse>())!;
     }
 
     private static async Task<Guid> CreateProjectAsync(HttpClient client, string name)
     {
-        HttpResponseMessage orgResp = await client.PostAsJsonAsync(
-            "/organizations", new CreateOrganizationRequest($"{name}-org"));
+        HttpResponseMessage orgResp = await client.PostJsonAsync(
+            "/orgs", new CreateOrganizationRequest($"{name}-org"));
         await EnsureSuccessAsync(orgResp);
-        OrganizationSummary org = (await orgResp.Content.ReadFromJsonAsync<OrganizationSummary>())!;
+        OrganizationSummary org = (await orgResp.Content.ReadWireAsync<OrganizationSummary>())!;
 
-        HttpResponseMessage teamResp = await client.PostAsJsonAsync(
-            $"/organizations/{org.Id}/teams", new CreateTeamRequest(org.Id, $"{name}-team"));
+        HttpResponseMessage teamResp = await client.PostJsonAsync(
+            "/teams", new CreateTeamRequest(org.Id, $"{name}-team"));
         await EnsureSuccessAsync(teamResp);
-        TeamSummary team = (await teamResp.Content.ReadFromJsonAsync<TeamSummary>())!;
+        TeamSummary team = (await teamResp.Content.ReadWireAsync<TeamSummary>())!;
 
-        HttpResponseMessage projResp = await client.PostAsJsonAsync(
-            $"/teams/{team.Id}/projects", new CreateProjectRequest(team.Id, name, null, null));
+        HttpResponseMessage projResp = await client.PostJsonAsync(
+            "/projects", new CreateProjectRequest(team.Id, name, null, null));
         await EnsureSuccessAsync(projResp);
-        ProjectSummary proj = (await projResp.Content.ReadFromJsonAsync<ProjectSummary>())!;
+        ProjectSummary proj = (await projResp.Content.ReadWireAsync<ProjectSummary>())!;
 
         return proj.Id;
     }
 
     private static async Task<Guid> CreateChannelAsync(HttpClient client, Guid projectId, string name)
     {
-        HttpResponseMessage resp = await client.PostAsJsonAsync(
+        HttpResponseMessage resp = await client.PostJsonAsync(
             $"/projects/{projectId}/channels", new CreateChannelRequest(name, null));
         await EnsureSuccessAsync(resp);
-        ChannelSummary channel = (await resp.Content.ReadFromJsonAsync<ChannelSummary>())!;
+        ChannelSummary channel = (await resp.Content.ReadWireAsync<ChannelSummary>())!;
         return channel.Id;
     }
 }

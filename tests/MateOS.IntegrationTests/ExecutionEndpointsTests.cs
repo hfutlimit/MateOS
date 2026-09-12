@@ -54,19 +54,19 @@ public sealed class ExecutionEndpointsTests(MateOsApiFixture fixture) : IClassFi
             ContextRefs: null,
             IdempotencyKey: "idemp-001",
             DeadlineS: 600);
-        HttpResponseMessage createResp = await userClient.PostAsJsonAsync(
+        HttpResponseMessage createResp = await userClient.PostJsonAsync(
             "/internal/agent-executions", createReq);
         await EnsureSuccessAsync(createResp);
-        var created = (await createResp.Content.ReadFromJsonAsync<JsonElement>())!;
+        var created = (await createResp.Content.ReadWireAsync<JsonElement>())!;
         Guid executionId = created.GetProperty("execution").GetProperty("id").GetGuid();
         Assert.False(created.GetProperty("idempotent").GetBoolean());
         Assert.Equal("PENDING", created.GetProperty("execution").GetProperty("status").GetString());
 
         // 2. 同一 idempotency_key 重发应返 idempotent=true 且不创建新行
-        HttpResponseMessage dupResp = await userClient.PostAsJsonAsync(
+        HttpResponseMessage dupResp = await userClient.PostJsonAsync(
             "/internal/agent-executions", createReq);
         await EnsureSuccessAsync(dupResp);
-        var dup = (await dupResp.Content.ReadFromJsonAsync<JsonElement>())!;
+        var dup = (await dupResp.Content.ReadWireAsync<JsonElement>())!;
         Assert.True(dup.GetProperty("idempotent").GetBoolean());
         Assert.Equal(executionId, dup.GetProperty("execution").GetProperty("id").GetGuid());
 
@@ -81,7 +81,7 @@ public sealed class ExecutionEndpointsTests(MateOsApiFixture fixture) : IClassFi
         HttpResponseMessage inboxResp = await agentClient.GetAsync(
             $"/agents/{agent.Id}/executions/inbox");
         await EnsureSuccessAsync(inboxResp);
-        var inbox = (await inboxResp.Content.ReadFromJsonAsync<List<ExecutionDispatchPayload>>())!;
+        var inbox = (await inboxResp.Content.ReadWireAsync<List<ExecutionDispatchPayload>>())!;
         Assert.Single(inbox);
         Assert.Equal(executionId, inbox[0].ExecutionId);
         Assert.Equal("idemp-001", inbox[0].IdempotencyKey);
@@ -90,7 +90,7 @@ public sealed class ExecutionEndpointsTests(MateOsApiFixture fixture) : IClassFi
         HttpResponseMessage ackResp = await agentClient.PostAsync(
             $"/agents/{agent.Id}/executions/{executionId}/dispatch_ack", content: null);
         await EnsureSuccessAsync(ackResp);
-        var afterAck = (await ackResp.Content.ReadFromJsonAsync<ExecutionSummary>())!;
+        var afterAck = (await ackResp.Content.ReadWireAsync<ExecutionSummary>())!;
         Assert.Equal("RUNNING", afterAck.Status);
         Assert.NotNull(afterAck.DispatchAckedAtMs);
 
@@ -102,7 +102,7 @@ public sealed class ExecutionEndpointsTests(MateOsApiFixture fixture) : IClassFi
                 ProviderEventId: $"pe-{seq}",
                 Seq: seq,
                 Payload: JsonDocument.Parse($$"""{"content":"step {{seq}}"}""").RootElement);
-            HttpResponseMessage evResp = await agentClient.PostAsJsonAsync(
+            HttpResponseMessage evResp = await agentClient.PostJsonAsync(
                 $"/agents/{agent.Id}/executions/{executionId}/events", ev);
             await EnsureSuccessAsync(evResp);
         }
@@ -111,7 +111,7 @@ public sealed class ExecutionEndpointsTests(MateOsApiFixture fixture) : IClassFi
         var gapEv = new ReportExecutionEventRequest(
             EventType: "PROGRESS", ProviderEventId: "pe-gap", Seq: 5,
             Payload: JsonDocument.Parse("""{"content":"gap"}""").RootElement);
-        HttpResponseMessage gapResp = await agentClient.PostAsJsonAsync(
+        HttpResponseMessage gapResp = await agentClient.PostJsonAsync(
             $"/agents/{agent.Id}/executions/{executionId}/events", gapEv);
         Assert.Equal(HttpStatusCode.Conflict, gapResp.StatusCode);
 
@@ -119,7 +119,7 @@ public sealed class ExecutionEndpointsTests(MateOsApiFixture fixture) : IClassFi
         var dupEv = new ReportExecutionEventRequest(
             EventType: "PROGRESS", ProviderEventId: "pe-1-dup", Seq: 1,
             Payload: JsonDocument.Parse("""{"content":"dup"}""").RootElement);
-        HttpResponseMessage dupEvResp = await agentClient.PostAsJsonAsync(
+        HttpResponseMessage dupEvResp = await agentClient.PostJsonAsync(
             $"/agents/{agent.Id}/executions/{executionId}/events", dupEv);
         await EnsureSuccessAsync(dupEvResp);
 
@@ -130,18 +130,18 @@ public sealed class ExecutionEndpointsTests(MateOsApiFixture fixture) : IClassFi
             EnvelopeId: envelopeId,
             Output: JsonDocument.Parse("""{"markdown":"done"}""").RootElement,
             Usage: JsonDocument.Parse("""{"tokens_in":10,"tokens_out":20}""").RootElement);
-        HttpResponseMessage resultResp = await agentClient.PostAsJsonAsync(
+        HttpResponseMessage resultResp = await agentClient.PostJsonAsync(
             $"/agents/{agent.Id}/executions/{executionId}/result", result);
         await EnsureSuccessAsync(resultResp);
-        var afterResult = (await resultResp.Content.ReadFromJsonAsync<ExecutionSummary>())!;
+        var afterResult = (await resultResp.Content.ReadWireAsync<ExecutionSummary>())!;
         Assert.Equal("SUCCEEDED", afterResult.Status);
         Assert.NotNull(afterResult.CompletedAtMs);
 
         // 10. 重复 result 同 envelopeId 应被静默忽略（v0.5 idempotency）
-        HttpResponseMessage dupResultResp = await agentClient.PostAsJsonAsync(
+        HttpResponseMessage dupResultResp = await agentClient.PostJsonAsync(
             $"/agents/{agent.Id}/executions/{executionId}/result", result);
         await EnsureSuccessAsync(dupResultResp);
-        var afterDup = (await dupResultResp.Content.ReadFromJsonAsync<ExecutionSummary>())!;
+        var afterDup = (await dupResultResp.Content.ReadWireAsync<ExecutionSummary>())!;
         Assert.Equal("SUCCEEDED", afterDup.Status);
     }
 
@@ -168,9 +168,9 @@ public sealed class ExecutionEndpointsTests(MateOsApiFixture fixture) : IClassFi
             IdempotencyKey: "dup-key",
             DeadlineS: null);
 
-        HttpResponseMessage r1 = await userClient.PostAsJsonAsync("/internal/agent-executions", req);
+        HttpResponseMessage r1 = await userClient.PostJsonAsync("/internal/agent-executions", req);
         await EnsureSuccessAsync(r1);
-        HttpResponseMessage r2 = await userClient.PostAsJsonAsync("/internal/agent-executions", req);
+        HttpResponseMessage r2 = await userClient.PostJsonAsync("/internal/agent-executions", req);
         await EnsureSuccessAsync(r2);
 
         // 应返同一 execution_id + idempotent=true
@@ -210,7 +210,7 @@ public sealed class ExecutionEndpointsTests(MateOsApiFixture fixture) : IClassFi
             IdempotencyKey: "k",
             DeadlineS: null);
 
-        HttpResponseMessage resp = await userClient.PostAsJsonAsync("/internal/agent-executions", req);
+        HttpResponseMessage resp = await userClient.PostJsonAsync("/internal/agent-executions", req);
         Assert.Equal(HttpStatusCode.Conflict, resp.StatusCode);
     }
 
@@ -237,9 +237,9 @@ public sealed class ExecutionEndpointsTests(MateOsApiFixture fixture) : IClassFi
             Input: JsonDocument.Parse("""{"prompt":"v2"}""").RootElement, ContextRefs: null,
             IdempotencyKey: "k2", DeadlineS: null);
 
-        HttpResponseMessage r1 = await userClient.PostAsJsonAsync("/internal/agent-executions", req1);
+        HttpResponseMessage r1 = await userClient.PostJsonAsync("/internal/agent-executions", req1);
         await EnsureSuccessAsync(r1);
-        HttpResponseMessage r2 = await userClient.PostAsJsonAsync("/internal/agent-executions", req2);
+        HttpResponseMessage r2 = await userClient.PostJsonAsync("/internal/agent-executions", req2);
         await EnsureSuccessAsync(r2);
 
         using JsonDocument d1 = await JsonDocument.ParseAsync(await r1.Content.ReadAsStreamAsync());
@@ -271,18 +271,18 @@ public sealed class ExecutionEndpointsTests(MateOsApiFixture fixture) : IClassFi
 
     private static async Task<TokenResponse> RegisterAsync(HttpClient client, string email)
     {
-        HttpResponseMessage response = await client.PostAsJsonAsync(
+        HttpResponseMessage response = await client.PostJsonAsync(
             "/auth/register", new RegisterRequest(email, Password, email.Split('@')[0]));
         await EnsureSuccessAsync(response);
-        return (await response.Content.ReadFromJsonAsync<TokenResponse>())!;
+        return (await response.Content.ReadWireAsync<TokenResponse>())!;
     }
 
     private static async Task<CredentialSummary> CreateCredentialAsync(HttpClient client)
     {
         var req = new CreateCredentialRequest("openai", "test", $"sk-{Guid.NewGuid():N}", null);
-        HttpResponseMessage resp = await client.PostAsJsonAsync("/credentials", req);
+        HttpResponseMessage resp = await client.PostJsonAsync("/credentials", req);
         await EnsureSuccessAsync(resp);
-        return (await resp.Content.ReadFromJsonAsync<CredentialSummary>())!;
+        return (await resp.Content.ReadWireAsync<CredentialSummary>())!;
     }
 
     private static async Task<AgentSummary> CreateAgentAsync(
@@ -293,17 +293,17 @@ public sealed class ExecutionEndpointsTests(MateOsApiFixture fixture) : IClassFi
             Capabilities: new[] { "coding" },
             CredentialId: credentialId,
             MaxConcurrency: 1, DailyLimitUsd: null, MonthlyBudgetUsd: null);
-        HttpResponseMessage resp = await client.PostAsJsonAsync("/agents", req);
+        HttpResponseMessage resp = await client.PostJsonAsync("/agents", req);
         await EnsureSuccessAsync(resp);
-        return (await resp.Content.ReadFromJsonAsync<AgentSummary>())!;
+        return (await resp.Content.ReadWireAsync<AgentSummary>())!;
     }
 
     private static async Task<AgentTokenIssuanceResponse> IssueAgentTokenAsync(HttpClient client, Guid agentId)
     {
         var req = new IssueTokenRequest("dev-stub", 1);
-        HttpResponseMessage resp = await client.PostAsJsonAsync($"/agents/{agentId}/tokens", req);
+        HttpResponseMessage resp = await client.PostJsonAsync($"/agents/{agentId}/tokens", req);
         await EnsureSuccessAsync(resp);
-        return (await resp.Content.ReadFromJsonAsync<AgentTokenIssuanceResponse>())!;
+        return (await resp.Content.ReadWireAsync<AgentTokenIssuanceResponse>())!;
     }
 
     /// <summary>

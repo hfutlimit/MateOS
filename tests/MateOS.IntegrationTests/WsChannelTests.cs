@@ -42,10 +42,20 @@ public sealed class WsChannelTests(MateOsApiFixture fixture) : IClassFixture<Mat
         ChannelSummary channel = await CreateChannelForAsync(client, project.Id, "general");
 
         // 用 alice 的 token 连 WS，订阅 channel
-        await using WsTestClient ws = await WsTestClient.ConnectAsync(
-            fixture.CreateClient(), token.AccessToken);
+        await using WsTestClient ws = await WsTestClient.ConnectAsync(fixture, token.AccessToken);
+
         await ws.HelloAsync();
+
+        // hello 之后服务端会先回一帧 hello_ack，必须消费掉：
+        // 否则下面的 ReceiveNextAsync 读到的是它，而不是期待的广播帧。
+        JsonElement? helloAck = await ws.ReceiveNextAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal("hello_ack", helloAck!.Value.GetProperty("type").GetString());
+
         await ws.SubscribeAsync(channel.Id);
+
+        // subscribe 同样会回一帧 subscribe.ack，消费掉它之后才是期望的广播帧。
+        JsonElement? subscribeAck = await ws.ReceiveNextAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal("subscribe.ack", subscribeAck!.Value.GetProperty("type").GetString());
 
         // 略等 100ms 让 subscribe 索引生效
         await Task.Delay(100);
@@ -59,7 +69,7 @@ public sealed class WsChannelTests(MateOsApiFixture fixture) : IClassFixture<Mat
             Content: JsonDocument.Parse("""{"text":"ws push test"}""").RootElement,
             ClientMsgId: null,
             ParentSeq: null);
-        HttpResponseMessage post = await poster.PostAsJsonAsync(
+        HttpResponseMessage post = await poster.PostJsonAsync(
             $"/channels/{channel.Id}/messages", postBody);
         Assert.Equal(System.Net.HttpStatusCode.Created, post.StatusCode);
 
@@ -89,9 +99,13 @@ public sealed class WsChannelTests(MateOsApiFixture fixture) : IClassFixture<Mat
         }
 
         // 客户端连 WS，用 resume 拉 since_seq=1（应得 seq 2, 3）
-        await using WsTestClient ws = await WsTestClient.ConnectAsync(
-            fixture.CreateClient(), token.AccessToken);
+        await using WsTestClient ws = await WsTestClient.ConnectAsync(fixture, token.AccessToken);
         await ws.HelloAsync();
+
+        // 先消费 hello_ack（同上），再发 resume。
+        JsonElement? helloAck = await ws.ReceiveNextAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal("hello_ack", helloAck!.Value.GetProperty("type").GetString());
+
         await ws.ResumeAsync(channel.Id, sinceSeq: 1L);
 
         JsonElement? ack = await ws.ReceiveNextAsync(TimeSpan.FromSeconds(2));
@@ -105,33 +119,40 @@ public sealed class WsChannelTests(MateOsApiFixture fixture) : IClassFixture<Mat
 
     private static async Task<TokenResponse> RegisterAsync(HttpClient client, string email)
     {
-        HttpResponseMessage response = await client.PostAsJsonAsync(
+        HttpResponseMessage response = await client.PostJsonAsync(
             "/auth/register", new RegisterRequest(email, Password, email.Split('@')[0]));
         response.EnsureSuccessStatusCode();
-        return (await response.Content.ReadFromJsonAsync<TokenResponse>())!;
+
+        TokenResponse token = (await response.Content.ReadWireAsync<TokenResponse>())!;
+
+        // 注册后立刻把 token 挂上：本文件的 helper 复用同一个 client，
+        // 漏了这一步，后面所有请求（建模版、建 channel…）都会 401。
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token.AccessToken);
+
+        return token;
     }
 
     private static async Task<OrganizationSummary> CreateOrganizationAsync(HttpClient client, string name)
     {
-        HttpResponseMessage response = await client.PostAsJsonAsync("/organizations", new CreateOrganizationRequest(name));
+        HttpResponseMessage response = await client.PostJsonAsync("/orgs", new CreateOrganizationRequest(name));
         response.EnsureSuccessStatusCode();
-        return (await response.Content.ReadFromJsonAsync<OrganizationSummary>())!;
+        return (await response.Content.ReadWireAsync<OrganizationSummary>())!;
     }
 
     private static async Task<TeamSummary> CreateTeamAsync(HttpClient client, Guid orgId, string name)
     {
-        HttpResponseMessage response = await client.PostAsJsonAsync(
-            $"/organizations/{orgId}/teams", new CreateTeamRequest(orgId, name));
+        HttpResponseMessage response = await client.PostJsonAsync(
+            "/teams", new CreateTeamRequest(orgId, name));
         response.EnsureSuccessStatusCode();
-        return (await response.Content.ReadFromJsonAsync<TeamSummary>())!;
+        return (await response.Content.ReadWireAsync<TeamSummary>())!;
     }
 
     private static async Task<ProjectSummary> CreateProjectAsync(HttpClient client, Guid teamId, string name)
     {
-        HttpResponseMessage response = await client.PostAsJsonAsync(
-            $"/teams/{teamId}/projects", new CreateProjectRequest(teamId, name, null, null));
+        HttpResponseMessage response = await client.PostJsonAsync(
+            "/projects", new CreateProjectRequest(teamId, name, null, null));
         response.EnsureSuccessStatusCode();
-        return (await response.Content.ReadFromJsonAsync<ProjectSummary>())!;
+        return (await response.Content.ReadWireAsync<ProjectSummary>())!;
     }
 
     private static async Task<ProjectSummary> CreateProjectForAsync(HttpClient client, TokenResponse token, string name)
@@ -143,10 +164,10 @@ public sealed class WsChannelTests(MateOsApiFixture fixture) : IClassFixture<Mat
 
     private static async Task<ChannelSummary> CreateChannelForAsync(HttpClient client, Guid projectId, string name)
     {
-        HttpResponseMessage response = await client.PostAsJsonAsync(
+        HttpResponseMessage response = await client.PostJsonAsync(
             $"/projects/{projectId}/channels", new CreateChannelRequest(name, null));
         response.EnsureSuccessStatusCode();
-        return (await response.Content.ReadFromJsonAsync<ChannelSummary>())!;
+        return (await response.Content.ReadWireAsync<ChannelSummary>())!;
     }
 
     private static async Task PostHumanMessageAsync(HttpClient client, Guid channelId, string text)
@@ -156,7 +177,7 @@ public sealed class WsChannelTests(MateOsApiFixture fixture) : IClassFixture<Mat
             Content: JsonDocument.Parse($$"""{"text":"{{text}}"}""").RootElement,
             ClientMsgId: null,
             ParentSeq: null);
-        HttpResponseMessage response = await client.PostAsJsonAsync(
+        HttpResponseMessage response = await client.PostJsonAsync(
             $"/channels/{channelId}/messages", body);
         response.EnsureSuccessStatusCode();
     }
@@ -167,28 +188,34 @@ public sealed class WsChannelTests(MateOsApiFixture fixture) : IClassFixture<Mat
 /// </summary>
 internal sealed class WsTestClient : IAsyncDisposable
 {
-    private readonly ClientWebSocket _socket = new();
+    private readonly WebSocket _socket;
     private readonly string _accessToken;
     private static readonly JsonSerializerOptions s_jsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
     };
 
-    private WsTestClient(string accessToken)
+    private WsTestClient(WebSocket socket, string accessToken)
     {
+        _socket = socket;
         _accessToken = accessToken;
     }
 
-    public static async Task<WsTestClient> ConnectAsync(HttpClient httpClient, string accessToken)
+    /// <summary>
+    /// 连上被测宿主的 <c>/ws</c>。
+    /// </summary>
+    /// <remarks>
+    /// 必须用 TestServer 的 <c>WebSocketClient</c>，不能用 <c>ClientWebSocket</c>：
+    /// <c>WebApplicationFactory</c> 是 in-memory 宿主、没有真实监听端口，
+    /// <c>ClientWebSocket</c> 会去连 <c>localhost:80</c> 并报 Connection refused。
+    /// </remarks>
+    public static async Task<WsTestClient> ConnectAsync(MateOsApiFixture fixture, string accessToken)
     {
-        WsTestClient client = new(accessToken);
+        WebSocket socket = await fixture.Server
+            .CreateWebSocketClient()
+            .ConnectAsync(new Uri("ws://localhost/ws"), CancellationToken.None);
 
-        Uri httpBase = httpClient.BaseAddress ?? new Uri("http://localhost");
-        Uri wsUri = new UriBuilder(httpBase) { Scheme = httpBase.Scheme == "https" ? "wss" : "ws", Path = "/ws" }.Uri;
-
-        await client._socket.ConnectAsync(wsUri, CancellationToken.None);
-
-        return client;
+        return new WsTestClient(socket, accessToken);
     }
 
     public async Task HelloAsync()

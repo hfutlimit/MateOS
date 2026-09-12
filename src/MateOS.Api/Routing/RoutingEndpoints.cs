@@ -103,7 +103,6 @@ public static class RoutingEndpoints
     private static async Task<IResult> CreateTriggerAsync(
         CreateTriggerRequest request,
         MateOSDbContext db,
-        HttpClient httpClient,
         AuditWriter audit,
         HttpContext http,
         CancellationToken ct)
@@ -246,7 +245,6 @@ public static class RoutingEndpoints
         MateOSDbContext db,
         OutboxWriter outboxWriter,
         AgentDispatchNotifier notifier,
-        IHttpClientFactory httpClientFactory,
         AuditWriter audit,
         HttpContext http,
         CancellationToken ct)
@@ -273,199 +271,40 @@ public static class RoutingEndpoints
             return ApiErrors.NotFoundResult(ApiErrors.NotFound, "collaboration_request 不存在");
         }
 
-        if (!CrStatusMap.TryParse(cr.Status, out CrStatus current))
+        // 决策语义与人 / Agent 两条入口共用一份实现（DecisionApplier）。
+        // 这里是「人代 Agent 提交」的兼容入口：决策主体仍是 Agent，
+        // 故 actor_type 记 AGENT、actor_id 取 target_agent_id（未指定 agent 时退回提交人，
+        // 保证审计不丢主体，而不是留一个空 actor）。
+        DecisionApplyResult applied = await DecisionApplier.ApplyAsync(
+            cr,
+            new DecisionCommand(
+                Decision: decision,
+                Reason: request.Reason,
+                Needs: request.Needs,
+                AnalysisCapability: request.AnalysisCapability,
+                AnalysisContextScore: request.AnalysisContextScore,
+                AnalysisPermission: request.AnalysisPermission,
+                ActorType: AuditActorTypes.Agent,
+                ActorId: cr.TargetAgentId ?? userId),
+            db, outboxWriter, notifier, audit, http, ct);
+
+        if (applied.Failed)
         {
-            current = CrStatus.PENDING;
+            return applied.Error!;
         }
 
-        // v0.4.1 状态机：PENDING → 终态；其他拒
-        string? transitionError = CrStateMachine.WhyCannotTransition(current, decision switch
-        {
-            CrDecision.ACCEPT => CrStatus.ACCEPTED,
-            CrDecision.REJECT => CrStatus.REJECTED,
-            CrDecision.NEED_CONTEXT => CrStatus.NEED_CONTEXT,
-            CrDecision.CANCEL => CrStatus.CANCELLED,
-            _ => CrStatus.CANCELLED,
-        });
-        if (transitionError is not null)
-        {
-            return ApiErrors.ConflictResult(ApiErrors.Conflict, transitionError);
-        }
-
-        DateTimeOffset now = DateTimeOffset.UtcNow;
-        Guid decisionId = Guid.NewGuid();
-        Guid? acceptedExecutionId = null;
-
-        // v0.4.3 关键：ACCEPT 时 E4 同步调 E7 创建 Execution
-        if (decision is CrDecision.ACCEPT)
-        {
-            acceptedExecutionId = await DispatchExecutionAsync(cr, db, httpClientFactory, http, ct);
-
-            // M7 outbox：fallback 兜底事件（即使 E4 同步创建已成功，relay 也会 idempotency 去重）
-            if (acceptedExecutionId is { } execId)
-            {
-                outboxWriter.Append(
-                    db,
-                    aggregateType: "collaboration",
-                    aggregateId: cr.Id,
-                    eventType: Domain.Outbox.OutboxEventType.CollaborationAccepted,
-                    payload: new { cr_id = cr.Id, execution_id = execId, agent_id = cr.TargetAgentId },
-                    idempotencyKey: $"collab.accepted:{cr.Id}");
-            }
-        }
-
-        // CAS 终态守卫（避免 PENDING/RUNNING 状态被乱改）
-        string newStatus = decision switch
-        {
-            CrDecision.ACCEPT => CrStatusMap.AcceptedValue,
-            CrDecision.REJECT => CrStatusMap.RejectedValue,
-            CrDecision.NEED_CONTEXT => CrStatusMap.NeedContextValue,
-            CrDecision.CANCEL => CrStatusMap.CancelledValue,
-            _ => CrStatusMap.CancelledValue,
-        };
-
-        int rows = await db.Database.ExecuteSqlInterpolatedAsync(
-            $@"UPDATE collaboration_requests
-               SET status = {newStatus},
-                   resolved_at = {now},
-                   target_execution_id = {acceptedExecutionId}
-               WHERE id = {crId} AND status = {CrStatusMap.PendingValue}", ct);
-
-        if (rows == 0)
-        {
-            return ApiErrors.ConflictResult(ApiErrors.Conflict, "CR 状态已被其他决策覆盖");
-        }
-
-        // 写 decision_record
-        var record = new DbDecisionRecord
-        {
-            Id = decisionId,
-            CollaborationRequestId = crId,
-            Decision = decision.ToDbValue(),
-            Reason = request.Reason,
-            Needs = request.Needs?.GetRawText(),
-            AnalysisCapability = request.AnalysisCapability,
-            AnalysisContextScore = request.AnalysisContextScore,
-            AnalysisPermission = request.AnalysisPermission,
-            AcceptedExecutionId = acceptedExecutionId,
-            ActorType = AuditActorTypes.Agent,
-            ActorId = cr.TargetAgentId ?? userId,  // V1 简化：决策 actor 优先用 target_agent_id
-            DecidedAt = now,
-        };
-        db.DecisionRecords.Add(record);
-
-        audit.Record(http, new AuditEntry(
-            AuditActorTypes.Agent, record.ActorId, AuditActions.DecisionRecorded,
-            TargetType: "collaboration_request", TargetId: crId,
-            Detail: new
-            {
-                decision = decision.ToDbValue(),
-                execution_id = acceptedExecutionId,
-            }));
-
-        await db.SaveChangesAsync(ct);
-
-        // 放在 CR=ACCEPTED 提交之后：先推后提交的话，Agent 可能在 CR 仍是 PENDING
-        // （甚至被回滚）时就开始执行。
-        if (acceptedExecutionId is { } pushedExecutionId)
-        {
-            await notifier.PushDispatchAsync(pushedExecutionId, source: "e4-accept", ct);
-        }
-
-        await db.Entry(cr).ReloadAsync(ct);
         return Results.Ok(new
         {
             collaboration_request = ToCrSummary(cr),
-            decision = new
-            {
-                record.Id,
-                record.CollaborationRequestId,
-                record.Decision,
-                record.Reason,
-                record.AcceptedExecutionId,
-                record.ActorType,
-                record.ActorId,
-                record.DecidedAt,
-            },
+            decision = ToDecisionSummary(applied.Outcome!.Record),
         });
     }
 
-    /// <summary>
-    /// v0.4.3 D9 口径：E4 同步直调 E7 创建 Execution（详细设计 01 §1 T+13）。
-    /// </summary>
-    private static async Task<Guid?> DispatchExecutionAsync(
-        DbCollaborationRequest cr,
-        MateOSDbContext db,
-        IHttpClientFactory httpClientFactory,
-        HttpContext http,
-        CancellationToken ct)
-    {
-        if (cr.TargetAgentId is null)
-        {
-            return null; // 没指定 agent（理论上 Resolver 选了 agent 才会接受）
-        }
-
-        // V1 简化：直接走 E7 internal API（同一进程内调用）
-        // 用 HttpClient 走本机 loopback；详细设计 01 §1 T+13 outbox 兜底
-        // 注：M4a+ 可改为 process-internal 直调避免 HTTP 开销
-        try
-        {
-            using IServiceScope scope = http.RequestServices.CreateScope();
-
-            // V1 直接 DB insert：避免 HTTP 自调用 + 配置 E7 端点的 idempotency_key
-            // 这是 M4b 简化：M4a+ 时让 E4 → E7 走 HTTP（详细设计 01 D9）
-            Guid executionId = Guid.NewGuid();
-            Guid attemptId = Guid.NewGuid();
-            string idempotencyKey = $"cr-{cr.Id}";
-
-            var execution = new AgentExecution
-            {
-                Id = executionId,
-                CollaborationRequestId = cr.Id,
-                AgentId = cr.TargetAgentId.Value,
-                WorkItemRef = null,
-                Status = ExecutionStatusMap.PendingDbValue,
-                LastPersistedSeq = 0,
-                ActiveAttemptNo = 1,
-                AttemptCount = 1,
-                Input = cr.TriggerRef,
-                ContextRefs = cr.ContextRefs,
-                CreatedAt = DateTimeOffset.UtcNow,
-                DispatchSentAt = DateTimeOffset.UtcNow,
-            };
-            var attempt = new ExecutionAttempt
-            {
-                Id = attemptId,
-                ExecutionId = executionId,
-                AttemptNo = 1,
-                Status = AttemptStatusMap.DispatchedDbValue,
-                DispatchSentAt = DateTimeOffset.UtcNow,
-                LastPersistedSeq = 0,
-                CreatedAt = DateTimeOffset.UtcNow,
-            };
-            var inbox = new AgentDispatchInbox
-            {
-                Id = Guid.NewGuid(),
-                IdempotencyKey = idempotencyKey,
-                AgentId = cr.TargetAgentId.Value,
-                ExecutionId = executionId,
-                AttemptNo = 1,
-                DispatchedAt = DateTimeOffset.UtcNow,
-            };
-
-            db.AgentExecutions.Add(execution);
-            db.ExecutionAttempts.Add(attempt);
-            db.AgentDispatchInbox.Add(inbox);
-
-            await db.SaveChangesAsync(ct);
-            return executionId;
-        }
-        catch
-        {
-            // v0.4.3 §1 T+14b outbox 兜底：失败时返 null，由 M7 outbox relay 重试
-            return null;
-        }
-    }
+    private static DecisionSummary ToDecisionSummary(DbDecisionRecord r) => new(
+        r.Id, r.CollaborationRequestId, r.Decision, r.Reason,
+        r.AnalysisCapability, r.AnalysisContextScore, r.AnalysisPermission,
+        r.AcceptedExecutionId, r.ActorType, r.ActorId,
+        r.DecidedAt.ToUnixTimeMilliseconds());
 
     private static TriggerSummary ToTriggerSummary(DbTrigger t) => new(
         t.Id, t.TriggerType, t.FromActorType, t.FromActorId,
