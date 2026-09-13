@@ -61,7 +61,8 @@ CREATE TABLE permissions (
   subject_id   UUID NOT NULL,
   perm_key     TEXT NOT NULL CHECK (perm_key IN (
                 'read_message','write_message','write_memory',
-                'execute_code','create_pr','approve_memory','manage_channel')),
+                'execute_code','create_pr','approve_memory','manage_channel',
+                'propose_memory')),  -- v0.4.5: 8 键(从 write_memory 拆出 propose_memory,申请与写入解耦)
   effect       TEXT NOT NULL CHECK (effect IN ('ALLOW','DENY','REQUIRE_APPROVAL')),  -- v0.4 改
   created_at   TIMESTAMPTZ DEFAULT now(),
   UNIQUE (scope_type, scope_id, subject_type, subject_id, perm_key)
@@ -112,7 +113,7 @@ CREATE INDEX idx_perm_subject ON permissions(subject_type, subject_id);
 
 ```ts
 // packages/contracts（v0.4 改）
-type PermKey = 'read_message' | 'write_message' | 'write_memory' | 'execute_code' | 'create_pr' | 'approve_memory' | 'manage_channel';
+type PermKey = 'read_message' | 'write_message' | 'write_memory' | 'execute_code' | 'create_pr' | 'approve_memory' | 'manage_channel' | 'propose_memory';  // v0.4.5: 8 键
 type PermEffect = 'ALLOW' | 'DENY' | 'REQUIRE_APPROVAL';  // v0.4 改三态
 
 function check(

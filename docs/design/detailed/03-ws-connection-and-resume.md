@@ -295,7 +295,7 @@ T12 Runtime: CAS terminal
 ```sql
 ALTER TABLE execution_attempts
   ADD COLUMN dispatch_sent_at TIMESTAMPTZ,
-  ADD COLUMN dispatch_acked_at  TIMESTAMPTZ;  -- Agent 收到 dispatch 后推 status=WORKING 时回填
+  ADD COLUMN dispatch_acked_at  TIMESTAMPTZ;  -- Agent 收到 dispatch 后推 execution.dispatch_ack 时回填(v0.7)
 ```
 
 ```python
@@ -473,7 +473,7 @@ async def on_agent_status(agent_id, status, reason=None, since=None):
 | 场景 | 现象 | 处理 |
 | --- | --- | --- |
 | 正常收到 `execution.dispatch_ack` | 回填 `dispatch_acked_at` | §7 主路径 |
-| 一直没收到 ACK（`accepted` 也没有） | `dispatch_acked_at IS NULL` | 记 `execution.dispatch_ack.timeout` 并告警；**不猜 attempt** |
+| 一直没收到 ACK（`received` 也没有） | `dispatch_acked_at IS NULL` | 记 `execution.dispatch_ack.timeout` 并告警；**不猜 attempt** |
 | Agent 已启动，ACK 在网络 / Runtime 重启中丢失 | execution=`RUNNING` 但 `dispatch_acked_at IS NULL` | 重启后先发 `execution.resume_request`，等 `resume_ack` 或 `execution.event`；`ack_wait_s`（默认 15s）内无响应才重派**同一 attempt_no** |
 | 重派同一 attempt | Agent 收到重复 dispatch | 客户端**必须按 `(execution_id, attempt_no)` 去重**：已有该 attempt 上下文时改走 resume，不重新起跑 |
 

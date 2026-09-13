@@ -86,7 +86,7 @@ T+15  E7:
         c) COMMIT
         d) dispatch 给 Agent WS
 T+16  Agent 收到 execution.dispatch:
-        - 立即回 execution.dispatch_ack { execution_id, attempt_no, accepted: true }  # v0.5：ACK 是独立协议消息
+        - 立即回 execution.dispatch_ack { execution_id, attempt_no, received: true, protocol_error?: 'UNKNOWN_EXECUTION'|'STALE_ATTEMPT' }  # v0.7: ACK = transport receipt(收据,非业务 acceptance)
         - 推 status envelope: activity=WORKING                                # activity 仅供 UI，不承载 ACK
         - 写 execution_attempts.status='RUNNING', started_at=now()             # STARTED → RUNNING 只在收到 dispatch 后
         - renewExecutionLease(execution_id)  # v0.4.3: lease 类型升级为 execution，定期续期
