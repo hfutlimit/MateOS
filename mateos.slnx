@@ -4,7 +4,11 @@
     <Project Path="src/MateOS.Contracts/MateOS.Contracts.csproj" />
     <Project Path="src/MateOS.Domain/MateOS.Domain.csproj" />
   </Folder>
+  <Folder Name="/services/">
+    <Project Path="services/agent-stub/MateOS.AgentStub.csproj" />
+  </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/MateOS.E2ETests/MateOS.E2ETests.csproj" />
     <Project Path="tests/MateOS.IntegrationTests/MateOS.IntegrationTests.csproj" />
     <Project Path="tests/MateOS.UnitTests/MateOS.UnitTests.csproj" />
   </Folder>

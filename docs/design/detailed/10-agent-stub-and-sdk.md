@@ -1,6 +1,7 @@
 # Detailed Design · 10 · Agent Stub 与 SDK
 
-> **状态**：v0.6（2026-09-10）已转正 —— S1 的 Agent 端固定用 stub。
+> **状态**：v0.7（2026-09-13）已转正 —— S1 的 Agent 端固定用 stub。
+> **当前实现**：`services/agent-stub/`（`MateOS.AgentStub` 库：AgentStubClient 走 WS 收 dispatch + HttpStubResponder 走 HTTP 上报 ack/event/result + B1HappyPathBehavior 行为策略 + IStubTransport 传输抽象）+ `tests/MateOS.E2ETests/`（`B1_HappyPathTests.B1_001_指派WorkItem后stub收到dispatch并完成SUCCEEDED闭环` 1/15 e2e 通过，8s 跑通）。B2-B8 行为矩阵 + 剩余 14 条 e2e 留待下一轮。
 > **配套**：[01-single-agent-task-lifecycle.md](./01-single-agent-task-lifecycle.md) / [03-ws-connection-and-resume.md](./03-ws-connection-and-resume.md) / [09-implementation-checklist.md](./09-implementation-checklist.md) §1 §2.1 / SYSTEM_DESIGN v0.5 §5.2 §6.5 / E7 epic
 > **前置结论**：「真 Agent 由谁提供（fork 上游 / 用户自部署 / 商业 API）」是**独立开放项**，不因 S1 用 stub 而被决定。
 

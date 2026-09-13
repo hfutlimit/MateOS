@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>MateOS.AgentStub</RootNamespace>
+    <AssemblyName>MateOS.AgentStub</AssemblyName>
+    <!--
+      agent-stub 是一个 class library（不 Web）：
+      - e2e 测试直接 instantiate AgentStubClient（in-process），不再起子进程
+      - 真实部署可由可选 shim 包（services/agent-stub-runner/）拿这个库跑独立进程
+      这样 e2e 速度快 10x 且稳定，又不挡生产部署走独立进程。
+    -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\MateOS.Contracts\MateOS.Contracts.csproj" />
+  </ItemGroup>
+
+</Project>

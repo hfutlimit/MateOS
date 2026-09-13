@@ -17,7 +17,11 @@ MateOS 是一个面向软件开发团队的 AI 原生团队协作平台（V1 = A
 | Cache / Presence | Redis 7 |
 | Execution | MateOS Agent Runtime（自研，永久自洽） |
 | Implementation | **S1 → S2 → S3 vertical slices** |
-| Stage | **S1+S2+S3 后端主链路已落地 + M3b Phase 2/3 + 协议 SSOT**（M1+M2+M2-WS+M3a+M3b+M4a+M4b+M7+E5+E6 + Needs You + Memory 写链路 + E8 Work Delivery + E7 dispatch 实时推送 + Agent 侧 CR 收单 / 决策 / resume 续传 + `contracts/` schema 校验）：最近一笔 `10fb1d5`，**643 测试全过（572 单元 + 71 集成）**；User Promise「@Agent → 工作 → 记忆 → 审批」+「WorkItem → Agent 推进 → 产出回流」双闭环。**S1 DoD（`detailed/09` §7）剩余硬缺口：`services/agent-stub` + `tests/e2e`** |
+| Stage | **S1+S2+S3 后端主链路已落地 + M3b Phase 2/3 + 协议 SSOT + agent-stub 骨架 + e2e 起步**（M1+M2+M2-WS+M3a+M3b+M4a+M4b+M7+E5+E6 + Needs You + Memory 写链路 + E8 Work Delivery + E7 dispatch 实时推送 + Agent 侧 CR 收单 / 决策 / resume 续传 + `contracts/` schema 校验 + `services/agent-stub` + `tests/MateOS.E2ETests` B1 闭环 1/15）：最近一笔 `TBD`（本次 commit），**baseline 643 测试全过（572 单元 + 71 集成）**；B1 e2e 单独跑过（8s）；User Promise「@Agent → 工作 → 记忆 → 审批」+「WorkItem → Agent 推进 → 产出回流」双闭环。**S1 DoD（`detailed/09` §7）剩余：e2e 主链路 14 条（详设 §2.1 B2-B8 行为矩阵）** |
+
+> **测试运行**：
+> - 默认（baseline）：`dotnet test` —— 跑 Unit + Integration，跨 assembly 并行安全，643 测试全过。
+> - 跑 e2e：`dotnet test --filter "Category=E2E"` —— e2e 跟 IntegrationTests 共享同一 PG 实例，必须单独跑（不然并行会撞 schema reset）。
 
 > 本表是唯一需要维护的「技术基线」。**不要在此堆叠文档版本号**：PRD / SYSTEM_DESIGN / UI DS 的版本只在各自文件头与更新记录里维护；detailed / epic / 原型不单独发行版本号，用日期 + commit 追溯。避免出现「文件头 v0.5、changelog v0.7、commit v0.8」这类交叉版本噪音。
 
