@@ -17,7 +17,7 @@
 | 现状 | `detailed/01-single-agent-task-lifecycle.md:85` 写 `execution.dispatch_ack { execution_id, attempt_no, accepted: true }`(v0.5 字段名);`detailed/03-ws-connection-and-resume.md:111-115` 已 v0.7 改 `received: true` + 可选 `protocol_error?`;`detailed/10-agent-stub-and-sdk.md:27` 与 03 一致;`SYSTEM_DESIGN` v0.7 changelog 明确 "去掉 `accepted=false`..."(行 1080) |
 | 影响 | SDK 解析两份不同字段名,推送 / 轮询两条投递通道会出现 "推送能收、轮询不能收" 这类极难排查的隐性 bug |
 | 建议 | 改 01:85 字段名为 `received: true` + 可选 `protocol_error?: "UNKNOWN_EXECUTION" \| "STALE_ATTEMPT"`,与 03/10/schema 对齐 |
-| 状态 | **未决**(已加 comment blockquote 在 `detailed/01-single-agent-task-lifecycle.md`) |
+| 状态 | ✅ **已修 (commit `37a9ea7`)** — `detailed/01:89` `accepted: true` → `received: true` + `protocol_error?`;`detailed/03:298` / `:476` 同步 |
 
 ---
 
@@ -39,7 +39,7 @@
 | 现状 | `SYSTEM_DESIGN §3.1:171` 写 "8 键 + 3 态";`SYSTEM_DESIGN v0.4.5 变更摘要` 确认新增 `propose_memory`;`PRD FR-9:363` 8 键;`E6-authorization-approval.md:23,86,207` 文档自述 8 键;但 `E6:51-53` SQL CHECK、`E6:104` TypeScript 联合类型、`PRD:464` MVP 表都**只列 7 键** |
 | 影响 | 实施层 DDL/TS 会拒收 `propose_memory` 写入,数据库反向成为协议最大者,与文档层口径冲突 |
 | 建议 | (a) 改 E6:51-53 SQL CHECK 加 `'propose_memory'`;(b) 改 E6:104 TypeScript union 加 `'propose_memory'`;(c) 改 PRD:464 MVP 表 E6 行 "7 键" → "8 键" |
-| 状态 | **未决**(已加 comment blockquote 在 E6 + PRD) |
+| 状态 | ✅ **已修 (commit `37a9ea7`)** — `E6:62-64` SQL CHECK / `E6:115` TS union / `PRD:464` MVP 表三处加 `propose_memory` |
 
 ---
 
@@ -61,7 +61,7 @@
 | 现状 | `detailed/03-ws-connection-and-resume.md:296` 注释 "Agent 收到 dispatch 后推 status=WORKING 时回填";`detailed/03:449-461` 实现 `on_agent_dispatch_ack()` 显式由 `execution.dispatch_ack` 触发;`detailed/03:474` 仍用 v0.5 旧字段名 `accepted` |
 | 影响 | 同一文档内 schema 注释与 §7 实现层不对齐,SDK 实现时按 296 注释推 WORKING 也会触发回填,与 449-461 二次回填会冲突 |
 | 建议 | (a) 改 03:296 注释为 "Agent 收到 dispatch 后推 `execution.dispatch_ack` 时回填";(b) 改 03:474 字段名 `accepted` 为 `received`,与 P1-1 一致 |
-| 状态 | **未决**(已加 comment blockquote 在 detailed/03) |
+| 状态 | ✅ **已修 (commit `37a9ea7`)** — `detailed/03:298` 注释 / `:476` 表格字段名同步 v0.7(同 P1-1) |
 
 ---
 
@@ -111,3 +111,19 @@
 > **minimax m3** · 2026-09-12
 > 评审方式:子代理 explore 只读事实收集 + 人工交叉对照
 > 评审范围:30 个 design 文档(主架构 2 + detailed 10 + requirement 11 + spec + UI DS)
+
+---
+
+## 修复记录
+
+| Commit | 范围 | 改动 |
+| --- | --- | --- |
+| `7c2482f` | 评审登记 | 6 篇相关 design 文档加 review comment blockquote + 本 review 报告 anchor |
+| `37a9ea7` | P1-1 / P1-3 / P1-5 修复 | dispatch_ack 字段名 3 处同步(01:89, 03:298, 03:476)+ permission 8 键 3 处同步(E6:62-64, E6:115, PRD:464) |
+
+## 剩余未决(待 owner 拍板)
+
+- **P1-2** `execution_attempt` 状态机:三选一(删 STARTED / 保留 + 补迁移 / SD §6.3 加节点)
+- **P1-6** `memory_proposals.status` 枚举:二选一(SD §4.3 补 WITHDRAWN / 删 05 WITHDRAWN)
+- **P2-1 ~ P2-9** 9 项(详见上文 P2 摘要)
+- **P3-1 ~ P3-5** 5 项(版本号/同义异名词典)
