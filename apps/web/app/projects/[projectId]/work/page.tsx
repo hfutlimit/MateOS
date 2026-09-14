@@ -75,7 +75,7 @@ export default function WorkPage({ params }: WorkPageProps) {
           border: "1px solid var(--border)",
           borderRadius: "var(--radius-box)",
         }}
-        bodyStyle={{ padding: 16 }}
+        styles={{ body: { padding: 16 } }}
       >
         <Space
           direction="vertical"

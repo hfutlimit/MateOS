@@ -50,6 +50,11 @@ export async function listWorkItems(
   return items.slice(0, limit);
 }
 
+export async function getWorkItem(_id: string): Promise<WorkItemSummary | null> {
+  // Phase M0: 同步返回 mock 中匹配 id 的一条；切真实 API 后改 fetch。
+  return MOCK_WORK_ITEMS.find((w) => w.id === _id) ?? null;
+}
+
 export async function listProviders(): Promise<WorkItemProviderInfo[]> {
   return MOCK_PROVIDERS;
 }
