@@ -1,0 +1,123 @@
+import type {
+  WorkItemProviderInfo,
+  WorkItemSummary,
+} from "@/lib/types/work";
+
+// Mock data for Phase M0 — 后续切到真实 API（lib/api/work.ts）时删除。
+// 注意：provider_key = "builtin" 与后端 BuiltInWorkManagementProvider 注册时一致。
+// 时间戳用相对值（now - N hours），渲染时再 toLocaleString，避免 mock 数据
+// 随时间漂移失去意义。
+
+const now = Date.now();
+const HOUR = 60 * 60 * 1000;
+
+export const MOCK_PROVIDERS: WorkItemProviderInfo[] = [
+  {
+    key: "builtin",
+    display_name: "Built-in",
+    description: "MateOS 内置 WorkItem 管理；不依赖外部系统。",
+    builtin: true,
+  },
+  {
+    key: "jira",
+    display_name: "Jira",
+    description: "V1+ 可选：双向同步 Jira Issue。",
+    builtin: false,
+  },
+];
+
+export const MOCK_WORK_ITEMS: WorkItemSummary[] = [
+  {
+    id: "11111111-1111-1111-1111-111111111111",
+    project_id: "00000000-0000-0000-0000-000000000001",
+    type: "EPIC",
+    title: "收口 S3 主链路（Work Delivery）",
+    description: "WorkItem → Agent 指派 → 产出回流 → 状态推进。",
+    status: "IN_PROGRESS",
+    canonical_status_category: "IN_PROGRESS",
+    assignee_type: "AGENT",
+    assignee_id: "22222222-2222-2222-2222-222222222222",
+    due_at_ms: now + 24 * HOUR,
+    created_by_type: "USER",
+    created_by_id: "00000000-0000-0000-0000-0000000000aa",
+    binding_id: "33333333-3333-3333-3333-333333333333",
+    provider_key: "builtin",
+    external_ref: null,
+    external_url: null,
+    provider_status: null,
+    provider_updated_at_ms: null,
+    created_at_ms: now - 6 * HOUR,
+    updated_at_ms: now - 30 * 60 * 1000,
+    allowed_transitions: ["DONE", "BLOCKED"],
+  },
+  {
+    id: "44444444-4444-4444-4444-444444444444",
+    project_id: "00000000-0000-0000-0000-000000000001",
+    type: "TASK",
+    title: "补 contracts/schemas/memory/ 三件套",
+    description: null,
+    status: "OPEN",
+    canonical_status_category: "OPEN",
+    assignee_type: null,
+    assignee_id: null,
+    due_at_ms: null,
+    created_by_type: "USER",
+    created_by_id: "00000000-0000-0000-0000-0000000000aa",
+    binding_id: "33333333-3333-3333-3333-333333333333",
+    provider_key: "builtin",
+    external_ref: null,
+    external_url: null,
+    provider_status: null,
+    provider_updated_at_ms: null,
+    created_at_ms: now - 2 * HOUR,
+    updated_at_ms: now - 2 * HOUR,
+    allowed_transitions: ["IN_PROGRESS", "CANCELLED"],
+  },
+  {
+    id: "55555555-5555-5555-5555-555555555555",
+    project_id: "00000000-0000-0000-0000-000000000001",
+    type: "BUG",
+    title: "/ws resume 未校验 channel membership",
+    description:
+      "v0.4.3 修复：任何已认证主体都能拉任意 channel 历史消息。详细见 contracts/README §5 与 SYSTEM_DESIGN §6.5。",
+    status: "IN_REVIEW",
+    canonical_status_category: "IN_REVIEW",
+    assignee_type: "HUMAN",
+    assignee_id: "00000000-0000-0000-0000-0000000000aa",
+    due_at_ms: now + 12 * HOUR,
+    created_by_type: "USER",
+    created_by_id: "00000000-0000-0000-0000-0000000000aa",
+    binding_id: "33333333-3333-3333-3333-333333333333",
+    provider_key: "builtin",
+    external_ref: null,
+    external_url: null,
+    provider_status: null,
+    provider_updated_at_ms: null,
+    created_at_ms: now - 30 * HOUR,
+    updated_at_ms: now - 1 * HOUR,
+    allowed_transitions: ["IN_PROGRESS", "DONE"],
+  },
+  {
+    id: "66666666-6666-6666-6666-666666666666",
+    project_id: "00000000-0000-0000-0000-000000000001",
+    type: "STORY",
+    title: "用户可在 Work 页面切换 Provider（V1+ Jira 之后）",
+    description: "DS §5.5 描述：顶部 Provider 切换器；Built-in 不可切，Jira 时显示映射配置入口。",
+    status: "BLOCKED",
+    canonical_status_category: "OPEN",
+    assignee_type: "AGENT",
+    assignee_id: "22222222-2222-2222-2222-222222222222",
+    due_at_ms: null,
+    created_by_type: "USER",
+    created_by_id: "00000000-0000-0000-0000-0000000000aa",
+    binding_id: "33333333-3333-3333-3333-333333333333",
+    provider_key: "builtin",
+    external_ref: null,
+    external_url: null,
+    provider_status: null,
+    provider_updated_at_ms: null,
+    created_at_ms: now - 72 * HOUR,
+    updated_at_ms: now - 12 * HOUR,
+    allowed_transitions: ["OPEN", "CANCELLED"],
+  },
+];

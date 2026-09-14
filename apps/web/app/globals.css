@@ -1,0 +1,45 @@
+@import "../styles/tokens.css";
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+a {
+  color: var(--primary);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+code,
+pre {
+  font-family: var(--mono);
+  color: var(--code-text);
+}
+
+/* 与 antd Table 的边框色对齐：DS v0.7 §3 边框 #E5E3E0 */
+.ant-table-thead > tr > th {
+  background: var(--surface) !important;
+  border-bottom: 1px solid var(--border) !important;
+  color: var(--text-2) !important;
+  font-weight: 500 !important;
+}
+
+.ant-table-tbody > tr > td {
+  border-bottom: 1px solid var(--border) !important;
+}
