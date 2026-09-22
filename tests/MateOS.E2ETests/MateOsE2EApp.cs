@@ -1,4 +1,5 @@
 using System.Net;
+using MateOS.Api.Execution;
 using MateOS.Api.Persistence;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -53,6 +54,13 @@ public sealed class MateOsE2EApp : WebApplicationFactory<Program>
         builder.UseSetting("Jwt:Audience", "mateos-api");
         builder.UseSetting("Agent:CryptoKey", TestCryptoKeyBase64);
         builder.UseSetting("Database:AutoMigrate", "true");
+
+        // e2e：把 dispatch_ack watchdog 调快，让 B2 重派能在测试时间内触发。
+        // 默认 15s × 3 次 = 45s 不现实；e2e 走 2s × 2 次 = ~6s 就放弃。
+        // B1 happy path 不受影响（stub 立刻 ack，watchdog 不会介入）。
+        builder.UseSetting("DispatchAckWatchdog:AckWaitSeconds", "2");
+        builder.UseSetting("DispatchAckWatchdog:MaxRedispatch", "2");
+        builder.UseSetting("DispatchAckWatchdog:PollIntervalSeconds", "1");
     }
 
     /// <summary>把 fixture 转成 <see cref="IServiceProvider"/>，e2e 测试用它直接拿 DbContext 断言。</summary>

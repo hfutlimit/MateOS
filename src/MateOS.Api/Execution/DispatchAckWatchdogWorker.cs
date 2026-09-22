@@ -16,6 +16,46 @@ namespace MateOS.Api.Execution;
 /// <summary>
 
 /// <summary>
+/// watchdog worker 配置（detailed/10 §2 B2 的 ack_wait / max_redispatch）。
+/// </summary>
+/// <remarks>
+/// <para>
+/// 字段用秒数（<c>double</c>）+ <see cref="TimeSpan"/> 派生属性，
+/// 是为了 .NET Configuration binder 直接从 <c>"2"</c> 转 <c>double</c>
+/// 不需要 <c>"00:00:02"</c> 字符串形式。生产用秒数调 ack_wait 比 TimeSpan 字符串
+/// 直观得多（<c>MATEOS__DispatchAckWatchdog__AckWaitSeconds=2</c>）。
+/// </para>
+/// <list type="number">
+///   <item>DI 注册的 <see cref="IOptions{T}"/></item>
+///   <item>环境变量 <c>MATEOS__DispatchAckWatchdog__AckWaitSeconds</c> /
+///       <c>MATEOS__DispatchAckWatchdog__MaxRedispatch</c></item>
+///   <item>领域默认值（15s / 3 次）</item>
+/// </list>
+/// e2e 测试通过 <c>WebApplicationFactory.UseSetting("DispatchAckWatchdog:AckWaitSeconds", "2")</c>
+/// 注入更短的 ack_wait 让 B2 重派在测试时间内触发（默认 15s × 3 = 45s 不现实）。
+/// </remarks>
+public sealed class DispatchAckWatchdogOptions
+{
+    /// <summary>等 ACK 的秒数；过期未收到 → 重派。默认 15s。</summary>
+    public double AckWaitSeconds { get; set; } = DispatchAckWatchdogRunner.DefaultAckWait.TotalSeconds;
+
+    /// <summary>同一 attempt 最多重派次数。默认 3。</summary>
+    public int MaxRedispatch { get; set; } = DispatchAckWatchdogRunner.DefaultMaxRedispatch;
+
+    /// <summary>scan poll 间隔秒数。默认 2s。</summary>
+    public double PollIntervalSeconds { get; set; } = 2;
+
+    /// <summary>单批 scan 的最大 candidate 数（防独占）。默认 32。</summary>
+    public int BatchSize { get; set; } = 32;
+
+    /// <summary>派生 <see cref="TimeSpan"/>。</summary>
+    public TimeSpan AckWait => TimeSpan.FromSeconds(Math.Max(1, AckWaitSeconds));
+
+    /// <summary>派生 <see cref="TimeSpan"/>。</summary>
+    public TimeSpan PollInterval => TimeSpan.FromSeconds(Math.Max(0.1, PollIntervalSeconds));
+}
+
+/// <summary>
 /// B2 dispatch_ack watchdog worker：周期性扫描未收到 ACK 的 attempt，按
 /// <see cref="DispatchAckWatchdogRunner.PlanForCandidate"/> 决定重派 / 放弃。
 /// </summary>
@@ -43,22 +83,30 @@ public sealed class DispatchAckWatchdogWorker : BackgroundService
 {
     private readonly IServiceProvider _services;
     private readonly ILogger<DispatchAckWatchdogWorker> _log;
-    private static readonly TimeSpan s_pollInterval = TimeSpan.FromSeconds(2);
-    private static readonly TimeSpan s_ackWait = DispatchAckWatchdogRunner.DefaultAckWait;
-    private const int s_maxRedispatch = DispatchAckWatchdogRunner.DefaultMaxRedispatch;
-    private const int s_batchSize = 32;
+    private readonly TimeSpan _ackWait;
+    private readonly int _maxRedispatch;
+    private readonly TimeSpan _pollInterval;
+    private readonly int _batchSize;
 
-    public DispatchAckWatchdogWorker(IServiceProvider services, ILogger<DispatchAckWatchdogWorker> log)
+    public DispatchAckWatchdogWorker(
+        IServiceProvider services,
+        ILogger<DispatchAckWatchdogWorker> log,
+        Microsoft.Extensions.Options.IOptions<DispatchAckWatchdogOptions> options)
     {
         _services = services;
         _log = log;
+        DispatchAckWatchdogOptions opt = options.Value;
+        _ackWait = opt.AckWait;
+        _maxRedispatch = opt.MaxRedispatch;
+        _pollInterval = opt.PollInterval;
+        _batchSize = opt.BatchSize;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _log.LogInformation(
             "DispatchAckWatchdogWorker 启动，poll {Interval}s / ack_wait {Wait}s / max_redispatch {Max}",
-            s_pollInterval.TotalSeconds, s_ackWait.TotalSeconds, s_maxRedispatch);
+            _pollInterval.TotalSeconds, _ackWait.TotalSeconds, _maxRedispatch);
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -81,7 +129,7 @@ public sealed class DispatchAckWatchdogWorker : BackgroundService
 
             try
             {
-                await Task.Delay(s_pollInterval, stoppingToken);
+                await Task.Delay(_pollInterval, stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -98,7 +146,7 @@ public sealed class DispatchAckWatchdogWorker : BackgroundService
         OutboxWriter outboxWriter = scope.ServiceProvider.GetRequiredService<OutboxWriter>();
 
         DateTimeOffset now = DateTimeOffset.UtcNow;
-        DateTimeOffset cutoff = now - s_ackWait;
+        DateTimeOffset cutoff = now - _ackWait;
 
         // 候选条件：attempt DISPATCHED 还没 ACK；execution 仍处于活跃态。
         // SKIP LOCKED 保证多副本不会抢同一行。
@@ -115,7 +163,7 @@ public sealed class DispatchAckWatchdogWorker : BackgroundService
                       AND a.dispatch_sent_at < {cutoff}
                       AND e.status IN ('PENDING','RUNNING')
                     ORDER BY a.dispatch_sent_at ASC
-                    LIMIT {s_batchSize}
+                    LIMIT {_batchSize}
                     FOR UPDATE SKIP LOCKED")
             .ToListAsync(ct);
 
@@ -139,7 +187,7 @@ public sealed class DispatchAckWatchdogWorker : BackgroundService
         foreach (DispatchAckCandidate candidate in candidates)
         {
             DispatchAckWatchdogPlan plan = DispatchAckWatchdogRunner.PlanForCandidate(
-                candidate, now, s_ackWait, s_maxRedispatch);
+                candidate, now, _ackWait, _maxRedispatch);
 
             switch (plan.Action)
             {

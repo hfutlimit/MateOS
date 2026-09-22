@@ -122,6 +122,78 @@ internal static class E2ESetup
         return doc.RootElement.GetProperty("execution_id").GetGuid();
     }
 
+    /// <summary>
+    /// 通过 <c>POST /internal/triggers</c> 触发一条 MENTION CR，绕过 channel
+    /// message 的 @mention 解析（详细行为矩阵 B3/B4/B5 入口）。
+    /// </summary>
+    /// <returns>collaboration_request id。</returns>
+    public static async Task<Guid> CreateMentionTriggerAsync(
+        HttpClient owner,
+        Guid agentId,
+        int deadlineS = 300,
+        string? idempotencyKey = null,
+        IReadOnlyList<string>? capabilities = null)
+    {
+        string key = idempotencyKey ?? $"e2e-mention-{Guid.NewGuid():N}";
+
+        HttpResponseMessage resp = await owner.PostJsonAsync(
+            "/internal/triggers",
+            new
+            {
+                trigger_type = "MENTION",
+                trigger_ref = JsonDocument.Parse($$"""
+                  {
+                    "channel_id": "{{Guid.NewGuid()}}",
+                    "message_seq": 1,
+                    "summary": "e2e mention trigger"
+                  }
+                  """).RootElement,
+                from_actor_type = "USER",
+                from_actor_id = Guid.NewGuid(),
+                target_agent_id = agentId,
+                required_capabilities = capabilities ?? new[] { "coding" },
+                context_refs = JsonDocument.Parse("{}").RootElement,
+                deadline_s = deadlineS,
+                idempotency_key = key,
+            });
+
+        resp.EnsureSuccessStatusCode();
+        using JsonDocument doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
+        return doc.RootElement.GetProperty("collaboration_request").GetProperty("id").GetGuid();
+    }
+
+    /// <summary>轮询 collaboration_request 直到 status 进入指定集合之一。</summary>
+    public static async Task<string> WaitForCrStatusAsync(
+        IServiceProvider services,
+        Guid crId,
+        IReadOnlySet<string> targets,
+        TimeSpan timeout)
+    {
+        DateTimeOffset deadline = DateTimeOffset.UtcNow + timeout;
+        string? last = null;
+
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            await using var scope = services.CreateAsyncScope();
+            MateOSDbContext db = scope.ServiceProvider.GetRequiredService<MateOSDbContext>();
+            last = await db.CollaborationRequests
+                .AsNoTracking()
+                .Where(cr => cr.Id == crId)
+                .Select(cr => cr.Status)
+                .FirstOrDefaultAsync();
+
+            if (last is not null && targets.Contains(last))
+            {
+                return last;
+            }
+
+            await Task.Delay(100);
+        }
+
+        throw new TimeoutException(
+            $"CR {crId} 在 {timeout.TotalSeconds}s 内未进入 {string.Join("/", targets)}，last={last ?? "(null)"}");
+    }
+
     public static HttpClient Authorize(this HttpClient client, string token)
     {
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);

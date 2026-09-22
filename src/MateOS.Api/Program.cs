@@ -104,6 +104,7 @@ builder.Services.AddSingleton(_ => new AesGcmCredentialCipher(credentialKey));
 builder.Services.AddScoped<AgentDispatchNotifier>();
 
 // ── E7 dispatch_ack watchdog（S1 DoD B2：送达失败恢复）──
+builder.Services.Configure<DispatchAckWatchdogOptions>(builder.Configuration.GetSection("DispatchAckWatchdog"));
 builder.Services.AddHostedService<DispatchAckWatchdogWorker>();
 
 // ─────────────────────────── HTTP JSON 契约 ───────────────────────────
