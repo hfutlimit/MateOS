@@ -302,6 +302,22 @@ public sealed class AgentExecution
     public DateTimeOffset? StartedAt { get; set; }
     public DateTimeOffset? CompletedAt { get; set; }
     public DateTimeOffset? DeadlineAt { get; set; }
+
+    /// <summary>
+    /// B2 watchdog worker 已对同一 attempt 重派的次数（detailed/10 §2 B2）。
+    /// </summary>
+    /// <remarks>
+    /// 阈值耗尽时 worker 走 <c>GiveUpAndFail</c> 把 Execution 转 FAILED。
+    /// 计数是 Runtime 端的"送达失败恢复次数"，<b>不是</b> attempt 序号；
+    /// 重派始终是同一 <c>(execution_id, attempt_no)</c>。
+    /// </remarks>
+    public int DispatchRedispatchCount { get; set; }
+
+    /// <summary>上一次 watchdog 重派 dispatch 的时刻（审计用）。</summary>
+    public DateTimeOffset? LastRedispatchedAt { get; set; }
+
+    /// <summary>上一次 watchdog 主动推 resume_request 探测的时刻（V2 字段，V1 留 NULL）。</summary>
+    public DateTimeOffset? LastResumeProbeAt { get; set; }
 }
 
 /// <summary>Execution Attempt（一次执行可有多次 attempt；V1 简化为单 attempt）。</summary>

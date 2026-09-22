@@ -31,6 +31,21 @@ public interface IStubBehavior
     /// — 同一 session 里 responder 是固定的（同一个 agent_token + baseUrl）。
     /// </remarks>
     Task HandleDispatchAsync(JsonElement dispatch, CancellationToken ct);
+
+    /// <summary>
+    /// 收到 hello_ack（session 就绪）后调一次的钩子 —— 让行为策略启动后台 task。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 默认实现 no-op。B3 / B4 / B5（CR 决策层）实现这个钩子启动 inbox polling；
+    /// B1 / B2 / B6 / B7 / B8 不需要（它们只对 dispatch 帧做反应）。
+    /// </para>
+    /// <para>
+    /// 钩子在 <see cref="AgentStubClient.AttachAsync"/> 期间同步启动，**不等完成**；
+    /// 实现里要自己起 <c>Task.Run</c>，否则 hello_ack→挂第一条 dispatch 之间会卡住。
+    /// </para>
+    /// </remarks>
+    Task OnSessionReadyAsync(CancellationToken ct) => Task.CompletedTask;
 }
 
 /// <summary>
@@ -61,4 +76,23 @@ public abstract class StubResponder
 
     /// <summary>上报 execution 终态（HTTP 端点：<c>POST .../result</c>）。</summary>
     public abstract Task ReportResultAsync(JsonElement dispatchPayload, string status, string envelopeId, JsonElement? output = null, JsonElement? usage = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// 拉 Agent 的协作请求 inbox（HTTP 端点：<c>GET /agents/{agentId}/collaboration-requests/inbox</c>）。
+    /// </summary>
+    /// <remarks>
+    /// V1 用轮询（detailed/05 §2 决策流）；B3 / B4 / B5 行为策略通过这个钩子
+    /// 主动拉 inbox + 回决策，绕过 WS 推送（避免引入 <c>collaboration.request</c> WS 帧）。
+    /// </remarks>
+    public abstract Task<IReadOnlyList<JsonElement>> ListCollaborationInboxAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// 提交协作请求决策（HTTP 端点：<c>POST /agents/{agentId}/collaboration-requests/{crId}/decision</c>）。
+    /// </summary>
+    public abstract Task SubmitCollaborationDecisionAsync(
+        Guid crId,
+        string decision,
+        string? reason = null,
+        IReadOnlyList<string>? needs = null,
+        CancellationToken ct = default);
 }

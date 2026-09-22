@@ -73,6 +73,19 @@ public sealed class AgentStubClient : IAsyncDisposable
 
         var client = new AgentStubClient(transport.Socket, agentToken, behavior);
         await client.HelloAsync(helloTimeout ?? TimeSpan.FromSeconds(5), ct);
+
+        // hello_ack 收到后触发 OnSessionReady 钩子，让 B3/B4/B5 这类 CR 决策层
+        // 行为启动 inbox polling；钩子不等完成（实现里要自己 Task.Run）。
+        try
+        {
+            await behavior.OnSessionReadyAsync(ct);
+        }
+        catch (Exception ex)
+        {
+            // 钩子启动失败不该连 hello 都失败 —— 让策略在主循环里自己处理
+            Console.Error.WriteLine($"[stub] OnSessionReadyAsync exception: {ex.GetType().Name}: {ex.Message}");
+        }
+
         return client;
     }
 

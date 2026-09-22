@@ -120,4 +120,63 @@ public sealed class HttpStubResponder : StubResponder
                 statusCode: resp.StatusCode);
         }
     }
+
+    public override async Task<IReadOnlyList<JsonElement>> ListCollaborationInboxAsync(CancellationToken ct = default)
+    {
+        HttpResponseMessage resp = await _http.GetAsync(
+            $"{_baseUrl}/agents/{_agentId}/collaboration-requests/inbox",
+            ct);
+
+        if (!resp.IsSuccessStatusCode)
+        {
+            string body = await resp.Content.ReadAsStringAsync(ct);
+            throw new HttpRequestException(
+                $"list_inbox HTTP {(int)resp.StatusCode} {resp.StatusCode}: {body}",
+                inner: null,
+                statusCode: resp.StatusCode);
+        }
+
+        JsonElement arr = JsonSerializer.Deserialize<JsonElement>(await resp.Content.ReadAsStringAsync(ct));
+        if (arr.ValueKind != JsonValueKind.Array)
+        {
+            return Array.Empty<JsonElement>();
+        }
+
+        List<JsonElement> list = [];
+        foreach (JsonElement item in arr.EnumerateArray())
+        {
+            list.Add(item.Clone());
+        }
+        return list;
+    }
+
+    public override async Task SubmitCollaborationDecisionAsync(
+        Guid crId,
+        string decision,
+        string? reason = null,
+        IReadOnlyList<string>? needs = null,
+        CancellationToken ct = default)
+    {
+        var body = new
+        {
+            decision = decision,
+            reason = reason,
+            needs = needs,
+        };
+
+        HttpResponseMessage resp = await _http.PostAsJsonAsync(
+            $"{_baseUrl}/agents/{_agentId}/collaboration-requests/{crId}/decision",
+            body,
+            s_json,
+            ct);
+
+        if (!resp.IsSuccessStatusCode)
+        {
+            string responseBody = await resp.Content.ReadAsStringAsync(ct);
+            throw new HttpRequestException(
+                $"submit_decision cr={crId} HTTP {(int)resp.StatusCode} {resp.StatusCode}: {responseBody}",
+                inner: null,
+                statusCode: resp.StatusCode);
+        }
+    }
 }

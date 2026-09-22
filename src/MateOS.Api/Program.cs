@@ -4,6 +4,7 @@ using System.Text.Json;
 using MateOS.Api.Agents;
 using MateOS.Api.Auth;
 using MateOS.Api.Channels;
+using MateOS.Api.Execution;
 using MateOS.Api.Memory;
 using MateOS.Api.NeedsYou;
 using MateOS.Api.Observability;
@@ -101,6 +102,9 @@ builder.Services.AddSingleton(_ => new AesGcmCredentialCipher(credentialKey));
 
 // ── E7 dispatch 实时推送（M3b Phase 2）──
 builder.Services.AddScoped<AgentDispatchNotifier>();
+
+// ── E7 dispatch_ack watchdog（S1 DoD B2：送达失败恢复）──
+builder.Services.AddHostedService<DispatchAckWatchdogWorker>();
 
 // ─────────────────────────── HTTP JSON 契约 ───────────────────────────
 
