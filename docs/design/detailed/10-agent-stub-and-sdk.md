@@ -56,15 +56,26 @@ V1 禁止 `execute_code`（PRD §8 Non Goals），但 S1 必须验证的是 **Ma
 
 ## 3. stub 的形态与运行方式
 
+> **修正（2026-10-14）**：本节原写「独立进程 + `Program.cs` / `Scenarios.cs` / `Fixtures/`」，
+> **与实现不符**。实际 `services/agent-stub/` 是 **class library（不 Web）** —— csproj 注释写明了理由：
+> e2e 直接 in-process instantiate，比起子进程快 10× 且更稳定；
+> 「生产独立进程」被有意留给**可选的 shim 包 `services/agent-stub-runner/`（尚未创建）**。
+> 两条路径共用同一个库，因此协议实现只有一份。
+
 ```
-services/agent-stub/            # 独立进程，不进 apps/api
-  Program.cs                    # 出站 WSS 客户端（ASP.NET Core）
-  Scenarios.cs                  # 上表 B1–B8 的场景枚举
-  Fixtures/                     # 假产出（markdown / diff / 故意超时）
+services/agent-stub/            # class library（不 Web），不进 apps/api
+  AgentStubClient.cs            # 出站 WS 客户端：/ws hello（agent_token）+ 收 execution.dispatch
+  HttpStubResponder.cs          # ack / event / result / collaboration inbox / decision 的 HTTP 上报
+  IStubTransport.cs             # 传输抽象：e2e 传 in-memory socket；独立进程传 ClientWebSocket
+  StubBehavior.cs               # 行为策略接口
+  Behaviors.cs                  # B1–B8 的具体策略（含 B6 的 drop / reconnect 两段）
 ```
 
-- 启动：`dotnet run --project services/agent-stub -- --agent <AGENT_ID> --token <TOKEN> --mode B1`
-- 每个 e2e case 起一个独立 stub 进程（或在一个进程内跑多 agent 命名空间），用完即杀；**不写入业务表**（只通过协议交互）。
+- **e2e**：不起子进程 —— 测试直接 instantiate `AgentStubClient`（见 `tests/MateOS.E2ETests`）。
+- **独立进程**（真实部署形态）：由 `services/agent-stub-runner/`（**尚未创建**）引用本库承载。
+  因此下方这条命令**当前不可用**，待该包落地：
+  `dotnet run --project services/agent-stub-runner -- --agent <AGENT_ID> --token <TOKEN> --mode B1`
+- stub 用完即杀；**不写入业务表**（只通过协议交互）。
 - 与真 Agent 的差别只体现在「谁造内容」：stub 用 fixture，真 Agent 调 LLM。**Runtime / Resolver / Execution 域代码不得出现任何 `stub` 分支**。
 
 ## 4. Agent SDK 契约（真 Agent 复用同一套）

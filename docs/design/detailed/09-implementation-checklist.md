@@ -175,35 +175,34 @@ contracts:
 
 ## 4. 仓库结构（v0.7 随 .NET 收口）
 
+> **修正（2026-10-14）**：原写 `apps/api` / `src/MateOS.Application` / `src/MateOS.Infrastructure` /
+> `tests/e2e/` / `web-tests/`，与实现不符。按实际仓库结构更正如下（`MateOS.Application` /
+> `MateOS.Infrastructure` 从未创建，相关职责目前落在 `MateOS.Api` 内）。
+
 ```
 mateos/
 ├── apps/
-│   ├── web/                  # Next.js 前端
-│   └── api/                  # ASP.NET Core 单体（v0.5）
-├── contracts/                # 协议 SSOT（v0.7：不再是 zod 实体）
-│   ├── openapi/              # OpenAPI 3.1（REST 契约）
-│   └── schemas/              # JSON Schema（Connector envelope / 领域 DTO）
-│       ├── collaboration/
-│       ├── execution/
-│       ├── memory/
-│       ├── work-item/
-│       └── permission/       # 8 键 + propose_memory
-├── src/                      # .NET solution
-│   ├── MateOS.Api/           # 宿主 + 模块 + WS 中间件
-│   ├── MateOS.Domain/        # 领域模型 / 不变量
-│   ├── MateOS.Application/   # 用例 / Resolver / Execution 编排
-│   ├── MateOS.Infrastructure/# EF Core + outbox relay + Redis + Provider
-│   └── MateOS.Contracts/     # 由 contracts/schemas 生成的 C# DTO（校验一致性）
+│   └── web/                  # Next.js 前端（M0：骨架 + Work List，mock data）
+├── contracts/                # 协议 SSOT（wire 层：只定义语义与字节形状）
+│   └── schemas/              # JSON Schema（draft 2020-12）
+│       ├── connector/        # 通用外层信封
+│       ├── collaboration/    # decision
+│       └── execution/        # dispatch / dispatch-ack / resume-ack
+├── src/                      # .NET solution（mateos.slnx）
+│   ├── MateOS.Api/           # 宿主 + 各域端点 + WS 中间件
+│   ├── MateOS.Domain/        # 领域模型 / 不变量 / 状态机
+│   └── MateOS.Contracts/     # Connector 契约记录 + Payload mapper（被 schema 对拍）
 ├── services/
-│   └── agent-stub/           # S1 的 stub Agent（v0.7，见 detailed/10）
+│   └── agent-stub/           # class library：协议客户端 + B1–B8 行为（见 detailed/10 §3）
 ├── tests/
-│   ├── MateOS.UnitTests/         # xUnit
-│   ├── MateOS.IntegrationTests/  # xUnit + Testcontainers（PG/Redis）
-│   └── e2e/                      # xUnit + WebApplicationFactory + Testcontainers
-├── web-tests/                # 前端：Vitest（unit）+ Playwright（e2e）
+│   ├── MateOS.UnitTests/         # xUnit（无外部依赖）
+│   ├── MateOS.IntegrationTests/  # xUnit（需真实 PG / Redis）
+│   └── MateOS.E2ETests/          # xUnit + WebApplicationFactory（需真实 PG / Redis）
+├── ops/
+│   └── postgres/migrations/  # 显式 SQL 迁移（不用 EF Migrations）
 ├── docs/
 │   ├── requirement/ / design/ / UI design/
-└── .github/workflows/ci.yml
+└── .github/workflows/ci.yml  # unit / integration / e2e 三 job（2026-10-14 落地）
 ```
 
 ## 5. 测试策略（v0.7 随 .NET 收口）
@@ -233,6 +232,14 @@ mateos/
 | 07 permission | 9 | 含 P1-8 propose_memory vs write_memory |
 | 08 error-retry | 10 | 含 P1-4 max_attempts、P1-5 health |
 | **总计** | **76** | |
+
+> **进度与口径修正（2026-10-14）**：本清单此前**只有总量，没有归属与落地状态** —— 这导致两个问题：
+>
+> 1. **看不出哪些已实现**。实测 `tests/MateOS.E2ETests` 当前有 **7 条**（B1–B5 / B7 / B8，按 `detailed/10` §2 的 B1–B8 行为矩阵组织）；**B6 缺用例**（其行为已在 `services/agent-stub/Behaviors.cs` 实现，只差 e2e 用例）。
+> 2. **看不出哪 15 条属 S1 主链路** —— 而 §1 / §7 的 S1 DoD 用的正是「主链路 e2e ≤ 15 条」。
+>    注意 **「15」是上限（cap），不是目标总数**：`detailed/10` §7 明确写 B1–B8 是「e2e ≤ 15 条主链路的**一部分**」。
+>    因此不能用 `15 − 已落条数` 计算缺口。**主链路清单需 owner 定义**（已登记为待拍板项），
+>    定义之后本表才有可勾选的行。
 
 ## 6. 能力域清单（编号为域标签）
 

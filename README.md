@@ -17,7 +17,7 @@ MateOS 是一个面向软件开发团队的 AI 原生团队协作平台（V1 = A
 | Cache / Presence | Redis 7 |
 | Execution | MateOS Agent Runtime（自研，永久自洽） |
 | Implementation | **S1 → S2 → S3 vertical slices** |
-| Stage | **S1+S2+S3 后端主链路已落地 + M3b Phase 2/3 + 协议 SSOT + agent-stub 骨架 + e2e 起步**（M1+M2+M2-WS+M3a+M3b+M4a+M4b+M7+E5+E6 + Needs You + Memory 写链路 + E8 Work Delivery + E7 dispatch 实时推送 + Agent 侧 CR 收单 / 决策 / resume 续传 + `contracts/` schema 校验 + `services/agent-stub` + `tests/MateOS.E2ETests` B1 闭环 1/15）：最近一笔 `TBD`（本次 commit），**baseline 643 测试全过（572 单元 + 71 集成）**；B1 e2e 单独跑过（8s）；User Promise「@Agent → 工作 → 记忆 → 审批」+「WorkItem → Agent 推进 → 产出回流」双闭环。**S1 DoD（`detailed/09` §7）剩余：e2e 主链路 14 条（详设 §2.1 B2-B8 行为矩阵）** |
+| Stage | **S1+S2+S3 后端主链路已落地 + M3b Phase 2/3 + 协议 SSOT + agent-stub 骨架 + e2e 起步**（M1+M2+M2-WS+M3a+M3b+M4a+M4b+M7+E5+E6 + Needs You + Memory 写链路 + E8 Work Delivery + E7 dispatch 实时推送 + Agent 侧 CR 收单 / 决策 / resume 续传 + `contracts/` schema 校验 + `services/agent-stub` + `tests/MateOS.E2ETests` 主链路 7 条（B1–B5 / B7 / B8））：最近一笔 `TBD`（本次 commit），**baseline 643 测试全过（572 单元 + 71 集成）**；B1 e2e 单独跑过（8s）；User Promise「@Agent → 工作 → 记忆 → 审批」+「WorkItem → Agent 推进 → 产出回流」双闭环。**S1 DoD（`detailed/09` §7）的「主链路 e2e ≤ 15 条」是上限口径、不是目标总数；**主链路构成清单尚未定义**（详设从未列出是哪 15 条）。当前 7 条已绿；B6 行为已在 stub 实现、仅缺用例** |
 
 > **测试运行**：
 > - 默认（baseline）：`dotnet test` —— 跑 Unit + Integration，跨 assembly 并行安全，643 测试全过。
@@ -189,7 +189,7 @@ Stub Agent 轮询 ──▶ dispatch_ack ──▶ RUNNING ──▶ events ─�
                                                                 └─▶ WS message.created（Channel 侧）
 ```
 
-**S3 已落地的 13 个端点**（全部 `RequireAuthorization`，project member 作用域）：
+**S3 已落地的 14 个路由**（全部 `RequireAuthorization`，project member 作用域。`WorkItemEndpoints.cs` 实测 `Map*` 调用 14 个；下表按「一行一主题」组织，故行数少于路由数 —— `GET / POST` 合并行各含两个路由）：
 
 | Method | Path | 说明 |
 | --- | --- | --- |
