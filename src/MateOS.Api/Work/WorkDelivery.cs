@@ -1,4 +1,5 @@
 using System.Text.Json;
+using MateOS.Api.Memory;
 using MateOS.Api.Observability;
 using MateOS.Api.Outbox;
 using MateOS.Api.Persistence;
@@ -179,7 +180,9 @@ public static class WorkDelivery
             ActiveAttemptNo = 1,
             AttemptCount = 1,
             Input = triggerRefJson,
-            ContextRefs = contextRefsJson,
+            // S2 注入（E5 → E7）：把已批准记忆的 id 写进「执行快照」，供 execution.dispatch 下发。
+            // 检索词用 WorkItem 标题 —— 与 dispatch.input.prompt 同源（WorkItem 指派时 prompt = 标题）。
+            ContextRefs = await MemoryRefInjector.InjectAsync(db, contextRefsJson, item.Title, actorUserId, ct),
             CreatedAt = now,
             DispatchSentAt = now,
             DeadlineAt = now.AddSeconds(deadlineS),

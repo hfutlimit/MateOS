@@ -1,9 +1,11 @@
 using System.Text.Json;
 using MateOS.Api.Agents;
 using MateOS.Api.Http;
+using MateOS.Api.Memory;
 using MateOS.Api.Observability;
 using MateOS.Api.Outbox;
 using MateOS.Api.Persistence;
+using MateOS.Contracts.Protocol;
 using MateOS.Domain.Agent;
 using MateOS.Domain.Routing;
 using Microsoft.EntityFrameworkCore;
@@ -204,7 +206,16 @@ public static class DecisionApplier
                 ActiveAttemptNo = 1,
                 AttemptCount = 1,
                 Input = cr.TriggerRef,
-                ContextRefs = cr.ContextRefs,
+                // S2 注入（E5 → E7）：与 Work 指派路径共用同一 helper，保证两条触发路径行为一致。
+                // 检索词取 trigger_ref 的 title/text；mention 触发的 trigger_ref 未必带正文，
+                // 此时 prompt 为 null，helper 退化为「按 scope 取最近 N 条」，不做关键词过滤。
+                // 触发者是人 → 注入其 PERSONAL 记忆；AGENT / SYSTEM 触发 → 只注入 PROJECT 记忆。
+                ContextRefs = await MemoryRefInjector.InjectAsync(
+                    db,
+                    cr.ContextRefs,
+                    ExecutionPayloadMapper.ToInput(cr.TriggerRef).Prompt,
+                    cr.FromActorType == TriggerActorTypeMap.UserValue ? cr.FromActorId : null,
+                    ct),
                 CreatedAt = now,
                 DispatchSentAt = now,
             });

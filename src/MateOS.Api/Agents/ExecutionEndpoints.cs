@@ -2,6 +2,7 @@ using System.Text.Json;
 using MateOS.Api.Auth;
 using MateOS.Api.Http;
 using MateOS.Contracts.Protocol;
+using MateOS.Api.Memory;
 using MateOS.Api.Observability;
 using MateOS.Api.Outbox;
 using MateOS.Api.Persistence;
@@ -197,7 +198,14 @@ public static class ExecutionEndpoints
             ActiveAttemptNo = 1,
             AttemptCount = 1,
             Input = request.Input.GetRawText(),
-            ContextRefs = request.ContextRefs?.GetRawText(),
+            // S2 注入（E5 → E7）：/internal 创建路径没有「触发者」概念（由 Agent / 系统侧发起），
+            // 因此只注入本 project 的 PROJECT 记忆，绝不注入任何人的 PERSONAL 记忆。
+            ContextRefs = await MemoryRefInjector.InjectAsync(
+                db,
+                request.ContextRefs?.GetRawText(),
+                ExecutionPayloadMapper.ToInput(request.Input.GetRawText()).Prompt,
+                actorUserId: null,
+                ct),
             CreatedAt = now,
             DeadlineAt = request.DeadlineS.HasValue ? now.AddSeconds(request.DeadlineS.Value) : null,
         };

@@ -75,6 +75,38 @@ public static class ExecutionPayloadMapper
             Refs: node);
     }
 
+    /// <summary>
+    /// 把已批准记忆的 id 合入 <c>context</c> 快照的 <c>memory_refs</c> 键
+    /// （E5 → E7 注入；见 <c>MemoryRefInjector</c>）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 只动 <c>memory_refs</c> 一个键，其余原样保留 —— 与 <see cref="ToContext"/> 的
+    /// 「不丢信息」原则一致。
+    /// </para>
+    /// <para>
+    /// 非法 JSON 视为空对象重建，而不是把原文塞进某个字符串键：<c>refs</c> 在契约里
+    /// 要求是 object（<c>dispatch.json</c> 是 <c>additionalProperties: false</c>），
+    /// 塞字符串会让下游形状非法。
+    /// </para>
+    /// </remarks>
+    public static string WithMemoryRefs(string? storedJson, IReadOnlyList<Guid> memoryRefs)
+    {
+        ArgumentNullException.ThrowIfNull(memoryRefs);
+
+        JsonObject obj = Parse(storedJson) as JsonObject ?? new JsonObject();
+        var array = new JsonArray();
+
+        foreach (Guid id in memoryRefs)
+        {
+            array.Add(id.ToString());
+        }
+
+        obj["memory_refs"] = array;
+
+        return obj.ToJsonString();
+    }
+
     private static JsonNode? Parse(string? json)
     {
         if (string.IsNullOrWhiteSpace(json))
