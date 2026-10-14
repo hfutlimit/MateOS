@@ -1,0 +1,111 @@
+# MateOS CI
+#
+# 依据：detailed/09 §4（`.github/workflows/ci.yml` 已规划但此前未创建）+ README「本地开发」。
+# 目标：把仓库本来就有的防漂移机制（`ConnectorContractTests` 的契约对拍）真正跑起来 ——
+#       在 CI 缺失时，那条「契约分叉 = 测试失败」只在本地有效。
+#
+# 三个 job 拆开是有原因的：
+#   - unit        无外部依赖，永远能跑（含契约对拍）
+#   - integration 需要 PG + Redis；每用例前 TRUNCATE
+#   - e2e         必须与 integration **分开**跑：两者共享同一 PG 实例，
+#                 并行会互相撞 schema reset（README「测试运行」明确）
+#
+# 未做的事（不在本次范围，避免把未经运行的步骤塞进 CI）：
+#   - 前端 apps/web 的 typecheck / build（前端仍是 M0，未接 API）
+#   - `docs/review/2026-09-08-*.md` 建议过的「禁用词扫描」（AgentBoard / can_execute 等），
+#     需要先决定扫描范围与白名单，否则会误伤 docs/ 里的历史评审记录
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_NOLOGO: "true"
+  DOTNET_CLI_TELEMETRY_OPTOUT: "true"
+
+jobs:
+  unit:
+    name: unit（含契约对拍）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: restore
+        run: dotnet restore mateos.slnx
+
+      - name: build
+        run: dotnet build mateos.slnx --no-restore -c Release
+
+      - name: unit tests
+        run: dotnet test tests/MateOS.UnitTests/MateOS.UnitTests.csproj --no-build -c Release
+
+  integration:
+    name: integration（PG 16 + pgvector / Redis 7）
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        # 与 docker-compose.yml 保持一致：pgvector 镜像（memory/search 依赖扩展）
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: mateos
+          POSTGRES_PASSWORD: mateos_dev_only
+          POSTGRES_DB: mateos
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U mateos -d mateos"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+
+    env:
+      MATEOS_TEST_POSTGRES: "Host=localhost;Port=5432;Database=mateos_test;Username=mateos;Password=mateos_dev_only"
+      MATEOS_TEST_REDIS: "localhost:6379"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: restore
+        run: dotnet restore mateos.slnx
+
+      - name: build
+        run: dotnet build mateos.slnx --no-restore -c Release
+
+      # 集成测试与 e2e 共用一个独立库；schema 由 ops/postgres/migrations/*.sql
+      # 在测试夹具启动时自动应用（README「本地开发」第 2 步）。
+      - name: create mateos_test
+        env:
+          PGPASSWORD: mateos_dev_only
+        run: psql -h localhost -U mateos -d mateos -c "CREATE DATABASE mateos_test"
+
+      - name: integration tests
+        run: dotnet test tests/MateOS.IntegrationTests/MateOS.IntegrationTests.csproj --no-build -c Release
+
+      - name: e2e tests（单独跑，不与 integration 并行）
+        run: dotnet test tests/MateOS.E2ETests/MateOS.E2ETests.csproj --no-build -c Release
